@@ -33,6 +33,7 @@ import type { DataResolver, LoykinResource, MutationResolver } from '@loykin/res
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
+import { scenarioExamples } from './scenarios'
 
 const customerRows = [
   { id: '1', name: 'Ada Lovelace', status: 'active', revenue: 140 },
@@ -85,6 +86,7 @@ const memoryDataResolver: DataResolver = async (rawBinding) => {
 
 const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => {
   const binding = rawBinding as Record<string, unknown>
+  if (binding.collection === 'settings') return { ...(typeof payload === 'object' && payload !== null ? payload : {}), version: String(Date.now()) }
   if (binding.collection !== 'users') throw new Error(`unknown collection: ${String(binding.collection)}`)
   const values = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
   const id = typeof binding.id === 'string' ? binding.id : undefined
@@ -101,7 +103,7 @@ const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => 
 
 const customerWorkspace: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitListDetail',
+  kind: 'ListDetail',
   metadata: { name: 'customers' },
   spec: {
     listWidth: 360,
@@ -117,14 +119,14 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Customers', eyebrow: 'resourcekit playground' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'BaseKitFilterInput',
+                  kind: 'FilterControl',
                   spec: {
                     valueRef: 'variables.status',
                     config: {
@@ -144,7 +146,7 @@ const customerWorkspace: LoykinResource = {
                 },
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitButton',
+                  kind: 'ActionButton',
                   spec: {
                     label: 'Select Grace',
                     value: '2',
@@ -166,7 +168,7 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             title: 'Customers',
             data: {
@@ -185,14 +187,14 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Customer detail', eyebrow: 'DesignKit Panel' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBody',
+                  kind: 'DataBody',
                   spec: {
                     title: 'Runtime state',
                     description: 'Resource document rendered with real kit adapters.',
@@ -202,20 +204,20 @@ const customerWorkspace: LoykinResource = {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitDataBodyGroup',
+                          kind: 'DataBodyGroup',
                           spec: { title: 'Selection', layout: 'inline', variant: 'bordered' },
                           slots: [
                             {
                               children: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DesignKitDataBodyField',
+                                  kind: 'DataBodyField',
                                   spec: { label: 'Customer', value: 'Selected through ResourceRenderer events' },
                                 },
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DesignKitDataBodyField',
-                                  spec: { label: 'Status filter', value: 'Bound through BaseKitFilterInput' },
+                                  kind: 'DataBodyField',
+                                  spec: { label: 'Status filter', value: 'Bound through FilterControl' },
                                 },
                               ],
                             },
@@ -223,7 +225,7 @@ const customerWorkspace: LoykinResource = {
                         },
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'ChartKitChart',
+                          kind: 'ChartView',
                           spec: {
                             chart: {
                               type: 'bar',
@@ -251,14 +253,14 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'No customer selected' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitText',
+                  kind: 'Text',
                   spec: { text: 'Select a row to inspect the renderer variable binding path.' },
                 },
               ],
@@ -272,7 +274,7 @@ const customerWorkspace: LoykinResource = {
 
 const metricsChart: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitPanel',
+  kind: 'Panel',
   metadata: { name: 'monthly-revenue' },
   spec: { title: 'Monthly revenue', eyebrow: 'ChartKit example' },
   slots: [
@@ -280,12 +282,12 @@ const metricsChart: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitText',
+          kind: 'Text',
           spec: { text: 'A smaller resource document that renders one chart leaf.' },
         },
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'ChartKitChart',
+          kind: 'ChartView',
           spec: {
             chart: {
               type: 'bar',
@@ -305,7 +307,7 @@ const metricsChart: LoykinResource = {
 
 const chartGallery: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitWorkbench',
+  kind: 'Workbench',
   metadata: { name: 'chart-gallery' },
   spec: { leftWidth: 360, rightWidth: 360 },
   slots: [
@@ -314,7 +316,7 @@ const chartGallery: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Chart gallery', eyebrow: 'ChartKit specs rendered from JSON' },
         },
       ],
@@ -324,14 +326,14 @@ const chartGallery: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Donut' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ChartKitChart',
+                  kind: 'ChartView',
                   spec: {
                     chart: {
                       type: 'pie',
@@ -360,14 +362,14 @@ const chartGallery: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Time series' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ChartKitChart',
+                  kind: 'ChartView',
                   spec: {
                     chart: {
                       type: 'timeseries',
@@ -398,14 +400,14 @@ const chartGallery: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Stat' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ChartKitChart',
+                  kind: 'ChartView',
                   spec: {
                     chart: {
                       type: 'stat',
@@ -425,7 +427,7 @@ const chartGallery: LoykinResource = {
                 },
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ChartKitChart',
+                  kind: 'ChartView',
                   spec: {
                     chart: {
                       type: 'gauge',
@@ -454,7 +456,7 @@ const chartGallery: LoykinResource = {
 
 const workbenchTemplate: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitWorkbench',
+  kind: 'Workbench',
   metadata: { name: 'operations-workbench' },
   spec: { leftWidth: 320, rightWidth: 340 },
   slots: [
@@ -463,8 +465,8 @@ const workbenchTemplate: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
-          spec: { title: 'Operations workbench', eyebrow: 'DesignKitWorkbench' },
+          kind: 'Panel',
+          spec: { title: 'Operations workbench', eyebrow: 'Workbench' },
         },
       ],
     },
@@ -473,26 +475,26 @@ const workbenchTemplate: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitDataBody',
+          kind: 'DataBody',
           spec: { title: 'Queue', description: 'Compact side content.' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyGroup',
+                  kind: 'DataBodyGroup',
                   spec: { title: 'Counts', variant: 'bordered' },
                   slots: [
                     {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitDataBodyField',
+                          kind: 'DataBodyField',
                           spec: { label: 'Open', value: '24' },
                         },
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitDataBodyField',
+                          kind: 'DataBodyField',
                           spec: { label: 'Blocked', value: '3' },
                         },
                       ],
@@ -510,7 +512,7 @@ const workbenchTemplate: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             title: 'Tasks',
             enableSorting: true,
@@ -531,14 +533,14 @@ const workbenchTemplate: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Throughput' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ChartKitChart',
+                  kind: 'ChartView',
                   spec: {
                     chart: {
                       type: 'bar',
@@ -559,7 +561,7 @@ const workbenchTemplate: LoykinResource = {
 
 const fromValueBinding: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitPanel',
+  kind: 'Panel',
   metadata: { name: 'from-value-binding' },
   spec: {
     title: 'from: value binding',
@@ -572,7 +574,7 @@ const fromValueBinding: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: {
             label: 'Set Growth',
             value: 'growth',
@@ -584,7 +586,7 @@ const fromValueBinding: LoykinResource = {
         },
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: {
             label: 'Set Enterprise',
             value: 'enterprise',
@@ -601,21 +603,21 @@ const fromValueBinding: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitDataBody',
+          kind: 'DataBody',
           spec: { title: 'Runtime variable' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyGroup',
+                  kind: 'DataBodyGroup',
                   spec: { title: 'Selected plan', layout: 'inline', variant: 'bordered' },
                   slots: [
                     {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitDataBodyField',
+                          kind: 'DataBodyField',
                           spec: {
                             label: 'variables.selectedPlan',
                             valueRef: 'variables.selectedPlan',
@@ -637,7 +639,7 @@ const fromValueBinding: LoykinResource = {
 
 const fromRowBinding: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitListDetail',
+  kind: 'ListDetail',
   metadata: { name: 'from-row-binding' },
   spec: {
     listWidth: 420,
@@ -650,7 +652,7 @@ const fromRowBinding: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             title: 'Incidents',
             data: {
@@ -669,18 +671,18 @@ const fromRowBinding: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Selected incident', eyebrow: 'from: row.id' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyField',
+                  kind: 'DataBodyField',
                   spec: {
                     label: 'variables.ticketId',
                     valueRef: 'variables.ticketId',
-                    description: 'Updated by GridKitTable rowSelect payload path from: "row.id".',
+                    description: 'Updated by TableView rowSelect payload path from: "row.id".',
                   },
                 },
               ],
@@ -694,7 +696,7 @@ const fromRowBinding: LoykinResource = {
 
 const restDataTable: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitDataBody',
+  kind: 'DataBody',
   metadata: { name: 'rest-data-table' },
   spec: { title: 'Users', description: 'Rows resolved through source: "rest" and rowsPath.' },
   slots: [
@@ -703,12 +705,12 @@ const restDataTable: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: { label: 'Export', size: 'sm', variant: 'outline' },
         },
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: { label: 'Add User', size: 'sm' },
         },
       ],
@@ -717,7 +719,7 @@ const restDataTable: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             title: 'Users from REST',
             enableSorting: true,
@@ -752,7 +754,7 @@ const restDataTable: LoykinResource = {
 
 const datasourceDataTable: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitDataBody',
+  kind: 'DataBody',
   metadata: { name: 'datasource-data-table' },
   spec: {
     title: 'CRM Customers',
@@ -768,12 +770,12 @@ const datasourceDataTable: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: { label: 'Sync', size: 'sm', variant: 'outline' },
         },
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: { label: 'Add Customer', size: 'sm' },
         },
       ],
@@ -783,7 +785,7 @@ const datasourceDataTable: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'BaseKitFilterInput',
+          kind: 'FilterControl',
           spec: {
             valueRef: 'variables.status',
             config: {
@@ -806,7 +808,7 @@ const datasourceDataTable: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             title: 'CRM customers',
             enableSorting: true,
@@ -844,7 +846,7 @@ const datasourceDataTable: LoykinResource = {
 
 const userManagement: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitDataBody',
+  kind: 'DataBody',
   metadata: { name: 'user-management' },
   spec: {
     title: 'Team members',
@@ -860,7 +862,7 @@ const userManagement: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
+          kind: 'ActionButton',
           spec: {
             label: 'Add member',
             size: 'sm',
@@ -876,7 +878,7 @@ const userManagement: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             enableSorting: true,
             globalSearch: true,
@@ -902,14 +904,14 @@ const userManagement: LoykinResource = {
         },
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitSheet',
+          kind: 'Sheet',
           spec: { openVariable: 'createOpen', title: 'Add member', width: 440 },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitForm',
+                  kind: 'ResourceForm',
                   spec: {
                     submit: {
                       action: 'users.create',
@@ -927,7 +929,7 @@ const userManagement: LoykinResource = {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitDataBodyGroup',
+                          kind: 'DataBodyGroup',
                           spec: {
                             title: 'Profile',
                             description: 'The member receives an invite email.',
@@ -939,14 +941,14 @@ const userManagement: LoykinResource = {
                               children: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DesignKitDataBodyRow',
+                                  kind: 'DataBodyRow',
                                   spec: { label: 'Name', required: true },
                                   slots: [
                                     {
                                       children: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
-                                          kind: 'DesignKitInput',
+                                          kind: 'InputControl',
                                           spec: { name: 'name', placeholder: 'Full name' },
                                         },
                                       ],
@@ -955,14 +957,14 @@ const userManagement: LoykinResource = {
                                 },
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DesignKitDataBodyRow',
+                                  kind: 'DataBodyRow',
                                   spec: { label: 'Email', required: true },
                                   slots: [
                                     {
                                       children: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
-                                          kind: 'DesignKitInput',
+                                          kind: 'InputControl',
                                           spec: { name: 'email', type: 'email', placeholder: 'name@acme.com' },
                                         },
                                       ],
@@ -971,14 +973,14 @@ const userManagement: LoykinResource = {
                                 },
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DesignKitDataBodyRow',
+                                  kind: 'DataBodyRow',
                                   spec: { label: 'Role' },
                                   slots: [
                                     {
                                       children: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
-                                          kind: 'DesignKitInput',
+                                          kind: 'InputControl',
                                           spec: { name: 'role', placeholder: 'Admin / Editor / Viewer' },
                                         },
                                       ],
@@ -1004,7 +1006,7 @@ const userManagement: LoykinResource = {
 
 const userEditor: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'DesignKitListDetail',
+  kind: 'ListDetail',
   metadata: { name: 'user-editor' },
   spec: {
     listWidth: 540,
@@ -1020,7 +1022,7 @@ const userEditor: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'GridKitTable',
+          kind: 'TableView',
           spec: {
             title: 'Users',
             enableSorting: true,
@@ -1051,14 +1053,14 @@ const userEditor: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'Edit user', eyebrow: 'record scope → form → mutation → refetch' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitRecord',
+                  kind: 'RecordScope',
                   spec: {
                     data: { source: 'memory', collection: 'users', id: '${userId}', v: '${usersVersion}' },
                   },
@@ -1067,7 +1069,7 @@ const userEditor: LoykinResource = {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitForm',
+                          kind: 'ResourceForm',
                           spec: {
                             submit: {
                               action: 'users.update',
@@ -1082,21 +1084,21 @@ const userEditor: LoykinResource = {
                               children: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DesignKitDataBodyGroup',
+                                  kind: 'DataBodyGroup',
                                   spec: { title: 'Profile', layout: 'horizontal', variant: 'bordered' },
                                   slots: [
                                     {
                                       children: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
-                                          kind: 'DesignKitDataBodyRow',
+                                          kind: 'DataBodyRow',
                                           spec: { label: 'Name', required: true },
                                           slots: [
                                             {
                                               children: [
                                                 {
                                                   apiVersion: 'loykin.dev/v1alpha1',
-                                                  kind: 'DesignKitInput',
+                                                  kind: 'InputControl',
                                                   spec: { name: 'name', fieldRef: 'name', placeholder: 'Full name' },
                                                 },
                                               ],
@@ -1105,14 +1107,14 @@ const userEditor: LoykinResource = {
                                         },
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
-                                          kind: 'DesignKitDataBodyRow',
+                                          kind: 'DataBodyRow',
                                           spec: { label: 'Email', required: true },
                                           slots: [
                                             {
                                               children: [
                                                 {
                                                   apiVersion: 'loykin.dev/v1alpha1',
-                                                  kind: 'DesignKitInput',
+                                                  kind: 'InputControl',
                                                   spec: { name: 'email', type: 'email', fieldRef: 'email', placeholder: 'user@acme.com' },
                                                 },
                                               ],
@@ -1121,14 +1123,14 @@ const userEditor: LoykinResource = {
                                         },
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
-                                          kind: 'DesignKitDataBodyRow',
+                                          kind: 'DataBodyRow',
                                           spec: { label: 'Role' },
                                           slots: [
                                             {
                                               children: [
                                                 {
                                                   apiVersion: 'loykin.dev/v1alpha1',
-                                                  kind: 'DesignKitInput',
+                                                  kind: 'InputControl',
                                                   spec: { name: 'role', fieldRef: 'role', placeholder: 'Admin / Editor / Viewer' },
                                                 },
                                               ],
@@ -1158,14 +1160,14 @@ const userEditor: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitPanel',
+          kind: 'Panel',
           spec: { title: 'No user selected' },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitText',
+                  kind: 'Text',
                   spec: { text: 'Select a row to load the record into the form.' },
                 },
               ],
@@ -1178,6 +1180,7 @@ const userEditor: LoykinResource = {
 }
 
 const examples = [
+  ...scenarioExamples,
   {
     id: 'user-editor',
     name: 'User editor (CRUD)',
@@ -1205,7 +1208,7 @@ const examples = [
   {
     id: 'workbench-template',
     name: 'Workbench template',
-    description: 'DesignKitWorkbench with side panes, table content, and a chart.',
+    description: 'Workbench with side panes, table content, and a chart.',
     resource: workbenchTemplate,
   },
   {

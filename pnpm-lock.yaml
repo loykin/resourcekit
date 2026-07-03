@@ -21,6 +21,18 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.6.0(jiti@2.7.0))
+      '@loykin/chartkit':
+        specifier: 0.0.1-dev.0
+        version: 0.0.1-dev.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(uplot@1.6.32)
+      '@loykin/designkit':
+        specifier: 0.0.1-dev.5
+        version: 0.0.1-dev.5(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
+      '@loykin/filter-input':
+        specifier: 0.0.1-dev.0
+        version: 0.0.1-dev.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@loykin/gridkit':
+        specifier: ^0.2.0
+        version: 0.2.0(@tanstack/react-table@8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@tanstack/react-virtual@3.14.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
       '@types/react':
         specifier: ^19.2.17
         version: 19.2.17

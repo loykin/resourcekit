@@ -1,0 +1,1 @@
+export { createBaseKitPlugin } from './plugin'

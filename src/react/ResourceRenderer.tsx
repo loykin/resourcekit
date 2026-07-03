@@ -86,9 +86,22 @@ function resolveThroughRuntime(
   const resolvedBinding = resolved.value as DataBinding
   const resolver = registry.getDataResolver(resolvedBinding.source)
   if (!resolver) return Promise.reject(new Error(`data resolver ${resolvedBinding.source} is not registered`))
-  const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() })
+  const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() }).then((rows) => applyValuePath(rows, resolvedBinding))
   runtime.dataCache.set(key, promise)
   return promise
+}
+
+function applyValuePath(rows: Record<string, unknown>[], binding: DataBinding): Record<string, unknown>[] {
+  const valuePath = typeof binding.valuePath === 'string' ? binding.valuePath : undefined
+  if (!valuePath) return rows
+  return rows.flatMap((row) => {
+    const value = getValueAtPath(row, valuePath)
+    if (Array.isArray(value)) {
+      return value.filter((item): item is Record<string, unknown> => isRecord(item))
+    }
+    if (isRecord(value)) return [value]
+    return [{ value }]
+  })
 }
 
 function eventPolicy(resource: LoykinResource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
@@ -149,8 +162,17 @@ function renderKindNode(
   try {
     const slots = resource.slots ?? []
     const slotNodes = new Map<string | undefined, ReactNode>()
+    const slotEntries = new Map<string | undefined, Array<{ resource: LoykinResource; node: ReactNode }>>()
     for (const [index, slot] of slots.entries()) {
-      slotNodes.set(slot.name, renderNodes(slot.children, props, `slot-${index}-${slot.name ?? 'default'}`))
+      const nodes = renderNodes(slot.children, props, `slot-${index}-${slot.name ?? 'default'}`)
+      slotNodes.set(slot.name, nodes)
+      slotEntries.set(
+        slot.name,
+        slot.children.map((child, childIndex) => ({
+          resource: child,
+          node: Array.isArray(nodes) ? nodes[childIndex] : null,
+        })),
+      )
     }
 
     const allowedActions = 'options' in registry ? registry.options.actions?.allow : undefined
@@ -165,6 +187,7 @@ function renderKindNode(
           return node
         },
         resources: (name: string) => slots.find((slot) => slot.name === name)?.children ?? [],
+        entries: (name?: string) => slotEntries.get(name) ?? [],
       },
       data: {
         resolve: (binding: DataBinding) => resolveThroughRuntime(registry, runtime, binding),

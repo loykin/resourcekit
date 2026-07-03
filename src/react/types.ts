@@ -47,4 +47,6 @@ export interface SlotAccessor {
   requiredOne(name: string): ReactNode
   /** Raw child resources of a named slot (for kinds that map slots to data props). */
   resources(name: string): LoykinResource[]
+  /** Child resources paired with their rendered node, preserving child boundaries. */
+  entries(name?: string): Array<{ resource: LoykinResource; node: ReactNode }>
 }

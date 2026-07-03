@@ -1,0 +1,126 @@
+{
+  "apiVersion": "loykin.dev/v1alpha1",
+  "kind": "ListDetail",
+  "metadata": { "name": "scenario-customer-crm" },
+  "spec": {
+    "listWidth": 340,
+    "selectionVariable": "customerId",
+    "variables": [
+      { "name": "customerId", "type": "string", "default": "1", "persist": "url" },
+      { "name": "status", "type": "string", "default": "active" }
+    ]
+  },
+  "slots": [
+    {
+      "name": "topBar",
+      "children": [
+        {
+          "apiVersion": "loykin.dev/v1alpha1",
+          "kind": "PageTopBar",
+          "spec": { "left": "Customers" },
+          "slots": [
+            {
+              "name": "right",
+              "children": [
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "FilterControl",
+                  "spec": {
+                    "valueRef": "variables.status",
+                    "config": {
+                      "key": "status",
+                      "type": "select",
+                      "label": "Status",
+                      "options": [
+                        { "label": "Active", "value": "active" },
+                        { "label": "Prospect", "value": "prospect" }
+                      ],
+                      "behavior": { "clearable": true }
+                    },
+                    "events": { "change": { "kind": "setVariable", "variable": "status", "from": "value" } }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "children": [
+        {
+          "apiVersion": "loykin.dev/v1alpha1",
+          "kind": "SelectableList",
+          "spec": {
+            "data": {
+              "source": "datasource",
+              "datasourceUid": "crm",
+              "query": { "status": "${status}" }
+            },
+            "idField": "id",
+            "selectedRef": "variables.customerId",
+            "primary": { "field": "name" },
+            "secondary": [
+              { "field": "status", "label": "Status" },
+              { "field": "revenue", "label": "Revenue" }
+            ],
+            "events": { "select": { "kind": "setVariable", "variable": "customerId", "from": "row.id" } }
+          }
+        }
+      ]
+    },
+    {
+      "name": "detail",
+      "children": [
+        {
+          "apiVersion": "loykin.dev/v1alpha1",
+          "kind": "DataBody",
+          "spec": { "title": "Customer detail", "description": "Scenario output using generic resource vocabulary." },
+          "slots": [
+            {
+              "children": [
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "DataBodySummary",
+                  "spec": {},
+                  "slots": [
+                    {
+                      "children": [
+                        {
+                          "apiVersion": "loykin.dev/v1alpha1",
+                          "kind": "DataBodyGroup",
+                          "spec": { "title": "Selected customer", "layout": "inline", "variant": "bordered" },
+                          "slots": [
+                            {
+                              "children": [
+                                { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Customer ID", "valueRef": "variables.customerId" } },
+                                { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Status filter", "valueRef": "variables.status" } }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "ChartView",
+                  "spec": {
+                    "chart": {
+                      "type": "bar",
+                      "height": 220,
+                      "categories": ["Active", "Prospect"],
+                      "series": [{ "label": "Revenue", "color": "#2563eb", "values": [140, 118] }]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

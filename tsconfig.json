@@ -12,8 +12,9 @@
     "esModuleInterop":    true,
     "skipLibCheck":       true,
     "isolatedModules":    true,
+    "resolveJsonModule":  true,
     "ignoreDeprecations": "6.0"
   },
-  "include":  ["src"],
+  "include":  ["src", "playground/scenarios"],
   "exclude":  ["node_modules", "dist"]
 }

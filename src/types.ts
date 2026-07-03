@@ -80,6 +80,8 @@ export interface DatasourceBinding<TQuery = unknown> {
   options?: Record<string, unknown>
   cacheTtlMs?: number
   staleWhileRevalidate?: boolean
+  /** Dot-path applied by the runtime after the resolver returns rows. */
+  valuePath?: string
 }
 
 export interface RestBinding {
@@ -90,11 +92,15 @@ export interface RestBinding {
   headers?: Record<string, string>
   /** JSON path to the rows array in the response, e.g. "data.items". */
   rowsPath?: string
+  /** Dot-path applied by the runtime after the resolver returns rows. */
+  valuePath?: string
 }
 
 export interface StaticBinding {
   source: 'static'
   rows: Record<string, unknown>[]
+  /** Dot-path applied by the runtime after the resolver returns rows. */
+  valuePath?: string
 }
 
 export type DataBinding =

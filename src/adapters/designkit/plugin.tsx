@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import {
   Badge,
@@ -6,6 +6,7 @@ import {
   DataBodyTemplate,
   Input,
   ListDetailBodyTemplate,
+  PageTopBar,
   PanelTemplate,
   Sheet,
   SheetContent,
@@ -13,12 +14,10 @@ import {
   SheetTitle,
   WorkbenchBodyTemplate,
 } from '@loykin/designkit'
-import { ChartRenderer } from '@loykin/chartkit'
-import { FilterInput } from '@loykin/filter-input'
-import { DataGrid, DataGridPaginationCompact, GlobalSearch, inferTablePayload } from '@loykin/gridkit'
-import { getValueAtPath } from '@loykin/resourcekit'
-import type { DataBinding, ResourceKitPlugin, SubmitSpec } from '@loykin/resourcekit'
-import type { KindRenderFn, RenderContext } from '@loykin/resourcekit/react'
+import { getValueAtPath } from '../../path'
+import type { ResourceKitPlugin, SubmitSpec } from '../../types'
+import type { KindRenderFn, RenderContext } from '../../react/types'
+import { variableName, withKindAliases } from '../internal/shared'
 
 interface ListDetailSpec {
   listWidth?: number
@@ -26,7 +25,22 @@ interface ListDetailSpec {
 }
 
 interface WorkbenchSpec {
+  leftPaneWidth?: number
+  rightPaneWidth?: number
+  bottomPaneHeight?: number
+  minLeftPaneWidth?: number
+  maxLeftPaneWidth?: number
+  minRightPaneWidth?: number
+  maxRightPaneWidth?: number
+  minBottomPaneHeight?: number
+  maxBottomPaneHeight?: number
+  resizable?: boolean
+  leftPaneCollapsed?: boolean
+  rightPaneCollapsed?: boolean
+  bottomPaneCollapsed?: boolean
+  /** @deprecated Use leftPaneWidth. */
   leftWidth?: number
+  /** @deprecated Use rightPaneWidth. */
   rightWidth?: number
 }
 
@@ -35,6 +49,33 @@ interface DataBodySpec {
   description?: string
   defaultTab?: string
   status?: ReactNode
+}
+
+interface PageTopBarSpec {
+  left?: string
+  variant?: 'ghost' | 'default'
+  height?: string
+  sidebarTrigger?: boolean
+}
+
+interface DataBodyBodySpec {
+  className?: string
+}
+
+interface DataBodyTabSpec {
+  id: string
+  label: string
+  count?: number
+}
+
+interface DataBodySectionSpec {
+  id: string
+  label: string
+  description?: string
+}
+
+interface DataBodySummarySpec {
+  className?: string
 }
 
 interface DataBodyGroupSpec {
@@ -104,52 +145,6 @@ interface SheetSpec {
   width?: number
 }
 
-/**
- * Declarative per-column presentation — the JSON-expressible replacement for
- * hand-written TanStack cell renderers.
- */
-interface ColumnHint {
-  label?: string
-  type?: 'text' | 'number' | 'date' | 'boolean'
-  align?: 'left' | 'center' | 'right'
-  flex?: number
-  /** 'strong' renders the value in medium weight. */
-  emphasis?: 'strong'
-  /** 'muted' renders the value in muted foreground color. */
-  tone?: 'muted'
-  /** 'badge' wraps the value in a designkit Badge. */
-  display?: 'badge'
-  /** Badge variant when display is 'badge'. Default: 'outline'. */
-  variant?: string
-  /** Per-value badge variant map, e.g. { Active: 'default', Pending: 'secondary' }. */
-  map?: Record<string, string>
-}
-
-interface GridTableSpec {
-  title?: string
-  data: DataBinding
-  columns?: Record<string, ColumnHint>
-  enableSorting?: boolean
-  enableColumnFilters?: boolean
-  filterDisplay?: 'row' | 'icon'
-  globalSearch?: boolean
-  searchPlaceholder?: string
-  searchableColumns?: string[]
-  tableHeight?: number | string
-  pagination?: { pageSize?: number }
-  inferOptions?: { hints?: Record<string, Partial<ColumnHint>> }
-}
-
-interface ChartSpecResource {
-  chart: unknown
-}
-
-interface FilterInputSpec {
-  config: unknown
-  valueRef?: string
-  value?: unknown
-}
-
 const KitBadge = Badge as ComponentType<Record<string, unknown>>
 const KitButton = Button as ComponentType<Record<string, unknown>>
 const KitDataBody = DataBodyTemplate as ComponentType<Record<string, unknown>>
@@ -158,56 +153,53 @@ const KitDataBodyRow = DataBodyTemplate.Row as unknown as ComponentType<Record<s
 const KitDataBodyField = DataBodyTemplate.Field as unknown as ComponentType<Record<string, unknown>>
 const KitInput = Input as ComponentType<Record<string, unknown>>
 const KitListDetail = ListDetailBodyTemplate as unknown as ComponentType<Record<string, unknown>>
+const KitPageTopBar = PageTopBar as ComponentType<Record<string, unknown>>
 const KitPanel = PanelTemplate as ComponentType<Record<string, unknown>>
 const KitWorkbench = WorkbenchBodyTemplate as ComponentType<Record<string, unknown>>
-const KitChart = ChartRenderer as unknown as ComponentType<Record<string, unknown>>
-const KitFilterInput = FilterInput as ComponentType<Record<string, unknown>>
-const KitDataGrid = DataGrid as unknown as ComponentType<Record<string, unknown>>
+const KitDataBodyBody = DataBodyTemplate.Body as ComponentType<Record<string, unknown>>
+const KitDataBodyTab = DataBodyTemplate.Tab as unknown as ComponentType<Record<string, unknown>>
+const KitDataBodySection = DataBodyTemplate.Section as unknown as ComponentType<Record<string, unknown>>
+const KitDataBodySummary = DataBodyTemplate.Summary as ComponentType<Record<string, unknown>>
 
-function variableName(ref: string | undefined): string | undefined {
-  return ref?.startsWith('variables.') ? ref.slice('variables.'.length) : undefined
-}
+function dataBodyChildren(ctx: RenderContext): ReactNode {
+  const entries = ctx.slots.entries()
+  if (entries.length === 0) return ctx.slots.children()
 
-function originalRow(row: unknown): unknown {
-  if (typeof row === 'object' && row !== null && 'original' in row) {
-    return (row as { original: unknown }).original
-  }
-  return row
-}
-
-type CellCtx = { getValue: () => unknown }
-
-function formatByType(value: unknown, type: string | undefined): ReactNode {
-  if (value == null) return null
-  if (type === 'number') return Number(value).toLocaleString()
-  if (type === 'date') {
-    const date = new Date(value as string | number)
-    return isNaN(date.getTime()) ? String(value) : date.toLocaleDateString()
-  }
-  if (type === 'boolean') return value ? 'Yes' : 'No'
-  return String(value)
-}
-
-function buildHintCell(type: string | undefined, hint: ColumnHint | undefined): ((cell: CellCtx) => ReactNode) | undefined {
-  if (!hint?.display && !hint?.emphasis && !hint?.tone && type !== 'number' && type !== 'date' && type !== 'boolean') {
-    return undefined
-  }
-  return ({ getValue }: CellCtx) => {
-    const value = getValue()
-    if (value == null) return null
-    if (hint?.display === 'badge') {
-      const variant = hint.map?.[String(value)] ?? hint.variant ?? 'outline'
+  return entries.map(({ resource, node }, index) => {
+    if (resource.kind === 'DataBodyBody' || resource.kind === 'DesignKitDataBodyBody') {
+      const spec = resource.spec as DataBodyBodySpec
       return (
-        <KitBadge variant={variant} className="text-xs font-normal">
-          {String(value)}
-        </KitBadge>
+        <KitDataBodyBody key={`${resource.kind}-${index}`} className={spec.className}>
+          {node}
+        </KitDataBodyBody>
       )
     }
-    const formatted = formatByType(value, type)
-    if (hint?.emphasis === 'strong') return <span className="font-medium">{formatted}</span>
-    if (hint?.tone === 'muted') return <span className="text-muted-foreground">{formatted}</span>
-    return formatted
-  }
+    if (resource.kind === 'DataBodyTab' || resource.kind === 'DesignKitDataBodyTab') {
+      const spec = resource.spec as DataBodyTabSpec
+      return (
+        <KitDataBodyTab key={`${resource.kind}-${index}`} id={spec.id} label={spec.label} count={spec.count}>
+          {node}
+        </KitDataBodyTab>
+      )
+    }
+    if (resource.kind === 'DataBodySection' || resource.kind === 'DesignKitDataBodySection') {
+      const spec = resource.spec as DataBodySectionSpec
+      return (
+        <KitDataBodySection key={`${resource.kind}-${index}`} id={spec.id} label={spec.label} description={spec.description}>
+          {node}
+        </KitDataBodySection>
+      )
+    }
+    if (resource.kind === 'DataBodySummary' || resource.kind === 'DesignKitDataBodySummary') {
+      const spec = resource.spec as DataBodySummarySpec
+      return (
+        <KitDataBodySummary key={`${resource.kind}-${index}`} className={spec.className}>
+          {node}
+        </KitDataBodySummary>
+      )
+    }
+    return node
+  })
 }
 
 /**
@@ -255,98 +247,73 @@ function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
  * then applies declarative ColumnHint presentation. Re-resolves when a
  * `${var}` referenced by the binding changes.
  */
-function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderContext }) {
-  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
-  const [error, setError] = useState<unknown>(null)
-
-  const bindingKey = JSON.stringify(spec.data)
-  const refNames = useMemo(
-    () => [...bindingKey.matchAll(/\$\{([^}]+)}/g)].map((match) => match[1]),
-    [bindingKey],
-  )
-  const refFingerprint = refNames.map((name) => JSON.stringify(ctx.variables.get(name) ?? null)).join('|')
-
-  useEffect(() => {
-    let cancelled = false
-    setError(null)
-    ctx.data
-      .resolve(spec.data)
-      .then((next) => {
-        if (!cancelled) setRows(next)
-      })
-      .catch((nextError: unknown) => {
-        if (!cancelled) setError(nextError)
-      })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bindingKey, refFingerprint])
-
-  const columns = useMemo(() => {
-    if (!rows) return []
-    const inferHints: Record<string, Partial<ColumnHint>> = { ...spec.inferOptions?.hints }
-    for (const [key, hint] of Object.entries(spec.columns ?? {})) {
-      inferHints[key] = { ...inferHints[key], ...hint }
-    }
-    const payload = inferTablePayload(rows, {
-      title: spec.title,
-      hints: Object.fromEntries(
-        Object.entries(inferHints).map(([key, hint]) => [
-          key,
-          {
-            ...(hint.label !== undefined ? { label: hint.label } : {}),
-            ...(hint.type !== undefined ? { type: hint.type } : {}),
-            ...(hint.align !== undefined ? { align: hint.align } : {}),
-            ...(hint.flex !== undefined ? { flex: hint.flex } : {}),
-          },
-        ]),
-      ),
-    })
-    return payload.columns.map((col) => {
-      const cell = buildHintCell(col.type, spec.columns?.[col.key])
-      return {
-        id: col.key,
-        accessorKey: col.key,
-        header: col.label,
-        ...(cell ? { cell } : {}),
-        meta: { align: col.align, flex: col.flex ?? 1 },
-      }
-    })
-  }, [rows, spec.columns, spec.inferOptions, spec.title])
-
-  if (error) {
-    return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load rows'}</div>
-  }
-  if (!rows) {
-    return <div className="resourcekit-state">Loading rows...</div>
-  }
-
-  return (
-    <KitDataGrid
-      data={rows}
-      columns={columns}
-      enableSorting={spec.enableSorting}
-      enableColumnFilters={spec.enableColumnFilters}
-      filterDisplay={spec.filterDisplay}
-      headerLeft={
-        spec.globalSearch
-          ? (table: unknown) => <GlobalSearch table={table as never} placeholder={spec.searchPlaceholder ?? 'Search...'} />
-          : undefined
-      }
-      headerRight={spec.pagination ? (table: unknown) => <DataGridPaginationCompact table={table as never} /> : undefined}
-      onRowClick={(row: unknown) => ctx.events.emit('rowSelect', { row: originalRow(row) })}
-      pagination={spec.pagination}
-      searchableColumns={spec.searchableColumns}
-      tableHeight={spec.tableHeight}
-    />
-  )
-}
-
-export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRenderFn> {
-  return {
-    name: 'playground-kit-adapters',
+export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
+  return withKindAliases(
+  {
+    name: 'designkit-adapter',
     kinds: [
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'PageTopBar',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            left: { type: 'string' },
+            variant: { enum: ['ghost', 'default'] },
+            height: { type: 'string' },
+            sidebarTrigger: { type: 'boolean' },
+          },
+        },
+        slotPolicy: {
+          slots: {
+            right: { min: 0, max: 1 },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as PageTopBarSpec
+          return (
+            <KitPageTopBar
+              left={spec.left}
+              right={ctx.slots.one('right')}
+              variant={spec.variant}
+              height={spec.height}
+              sidebarTrigger={spec.sidebarTrigger === false ? false : undefined}
+            />
+          )
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitPageTopBar',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            left: { type: 'string' },
+            variant: { enum: ['ghost', 'default'] },
+            height: { type: 'string' },
+            sidebarTrigger: { type: 'boolean' },
+          },
+        },
+        slotPolicy: {
+          slots: {
+            right: { min: 0, max: 1 },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as PageTopBarSpec
+          return (
+            <KitPageTopBar
+              left={spec.left}
+              right={ctx.slots.one('right')}
+              variant={spec.variant}
+              height={spec.height}
+              sidebarTrigger={spec.sidebarTrigger === false ? false : undefined}
+            />
+          )
+        },
+      },
       {
         apiVersion: 'loykin.dev/v1alpha1',
         kind: 'DesignKitListDetail',
@@ -391,8 +358,21 @@ export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRender
           type: 'object',
           additionalProperties: true,
           properties: {
-            leftWidth: { type: 'number' },
-            rightWidth: { type: 'number' },
+            leftPaneWidth: { type: 'number' },
+            rightPaneWidth: { type: 'number' },
+            bottomPaneHeight: { type: 'number' },
+            minLeftPaneWidth: { type: 'number' },
+            maxLeftPaneWidth: { type: 'number' },
+            minRightPaneWidth: { type: 'number' },
+            maxRightPaneWidth: { type: 'number' },
+            minBottomPaneHeight: { type: 'number' },
+            maxBottomPaneHeight: { type: 'number' },
+            resizable: { type: 'boolean' },
+            leftPaneCollapsed: { type: 'boolean' },
+            rightPaneCollapsed: { type: 'boolean' },
+            bottomPaneCollapsed: { type: 'boolean' },
+            leftWidth: { type: 'number', deprecated: true },
+            rightWidth: { type: 'number', deprecated: true },
           },
         },
         slotPolicy: {
@@ -417,8 +397,19 @@ export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRender
               mainPane={ctx.slots.requiredOne('mainPane')}
               rightPane={ctx.slots.one('rightPane')}
               bottomPane={ctx.slots.one('bottomPane')}
-              leftWidth={spec.leftWidth}
-              rightWidth={spec.rightWidth}
+              leftPaneWidth={spec.leftPaneWidth ?? spec.leftWidth}
+              rightPaneWidth={spec.rightPaneWidth ?? spec.rightWidth}
+              bottomPaneHeight={spec.bottomPaneHeight}
+              minLeftPaneWidth={spec.minLeftPaneWidth}
+              maxLeftPaneWidth={spec.maxLeftPaneWidth}
+              minRightPaneWidth={spec.minRightPaneWidth}
+              maxRightPaneWidth={spec.maxRightPaneWidth}
+              minBottomPaneHeight={spec.minBottomPaneHeight}
+              maxBottomPaneHeight={spec.maxBottomPaneHeight}
+              resizable={spec.resizable}
+              leftPaneCollapsed={spec.leftPaneCollapsed}
+              rightPaneCollapsed={spec.rightPaneCollapsed}
+              bottomPaneCollapsed={spec.bottomPaneCollapsed}
             />
           )
         },
@@ -458,9 +449,141 @@ export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRender
               toolbarLeft={ctx.slots.one('toolbarLeft')}
               toolbarRight={ctx.slots.one('toolbarRight')}
             >
-              {ctx.slots.children()}
+              {dataBodyChildren(ctx)}
             </KitDataBody>
           )
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DataBodyBody',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            className: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitDataBodyBody',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            className: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DataBodyTab',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'label'],
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            count: { type: 'number' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitDataBodyTab',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'label'],
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            count: { type: 'number' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DataBodySection',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'label'],
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            description: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitDataBodySection',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'label'],
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            description: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DataBodySummary',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            className: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitDataBodySummary',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            className: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          return <>{ctx.slots.children()}</>
         },
       },
       {
@@ -738,88 +861,23 @@ export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRender
         slotPolicy: { defaultSlot: { min: 0 } },
         render: (resource, ctx) => <ResourceForm spec={resource.spec as FormSpec} ctx={ctx} />,
       },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'GridKitTable',
-        specSchema: {
-          type: 'object',
-          additionalProperties: true,
-          required: ['data'],
-          properties: {
-            title: { type: 'string' },
-            data: { type: 'object' },
-            columns: {
-              type: 'object',
-              additionalProperties: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  label: { type: 'string' },
-                  type: { enum: ['text', 'number', 'date', 'boolean'] },
-                  align: { enum: ['left', 'center', 'right'] },
-                  flex: { type: 'number' },
-                  emphasis: { enum: ['strong'] },
-                  tone: { enum: ['muted'] },
-                  display: { enum: ['badge'] },
-                  variant: { type: 'string' },
-                  map: { type: 'object', additionalProperties: { type: 'string' } },
-                },
-              },
-            },
-            enableSorting: { type: 'boolean' },
-            enableColumnFilters: { type: 'boolean' },
-            filterDisplay: { type: 'string' },
-            globalSearch: { type: 'boolean' },
-            searchPlaceholder: { type: 'string' },
-            searchableColumns: { type: 'array', items: { type: 'string' } },
-            tableHeight: {},
-            pagination: { type: 'object' },
-            inferOptions: { type: 'object' },
-            events: { type: 'object' },
-          },
-        },
-        render: (resource, ctx) => {
-          const spec = resource.spec as GridTableSpec
-          return <ResourceDataGrid spec={spec} ctx={ctx} />
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'ChartKitChart',
-        specSchema: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['chart'],
-          properties: {
-            chart: { type: 'object', additionalProperties: true },
-          },
-        },
-        render: (resource) => {
-          const spec = resource.spec as ChartSpecResource
-          return <KitChart spec={spec.chart} />
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'BaseKitFilterInput',
-        specSchema: {
-          type: 'object',
-          additionalProperties: true,
-          required: ['config'],
-          properties: {
-            config: { type: 'object' },
-            valueRef: { type: 'string' },
-            value: {},
-            events: { type: 'object' },
-          },
-        },
-        render: (resource, ctx) => {
-          const spec = resource.spec as FilterInputSpec
-          const variable = variableName(spec.valueRef)
-          const value = variable ? ctx.variables.get(variable) : spec.value
-          return <KitFilterInput config={spec.config} value={value} onChange={(nextValue: unknown) => ctx.events.emit('change', { value: nextValue })} />
-        },
-      },
     ],
-  }
+  },
+  [
+    ['DesignKitListDetail', 'ListDetail'],
+    ['DesignKitWorkbench', 'Workbench'],
+    ['DesignKitDataBody', 'DataBody'],
+    ['DesignKitDataBodyGroup', 'DataBodyGroup'],
+    ['DesignKitDataBodyRow', 'DataBodyRow'],
+    ['DesignKitDataBodyField', 'DataBodyField'],
+    ['DesignKitPanel', 'Panel'],
+    ['DesignKitText', 'Text'],
+    ['DesignKitBadge', 'Badge'],
+    ['DesignKitButton', 'ActionButton'],
+    ['DesignKitInput', 'InputControl'],
+    ['DesignKitSheet', 'Sheet'],
+    ['DesignKitRecord', 'RecordScope'],
+    ['DesignKitForm', 'ResourceForm'],
+  ],
+  )
 }

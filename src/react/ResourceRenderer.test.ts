@@ -44,6 +44,42 @@ describe('ResourceRenderer', () => {
     )
   })
 
+  it('exposes slot entries with rendered child nodes', () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'loykin.dev/v1alpha1',
+          kind: 'List',
+          specSchema: { type: 'object' },
+          slotPolicy: { defaultSlot: { min: 0 } },
+          render: (_resource, ctx) =>
+            createElement(
+              'ul',
+              null,
+              ctx.slots.entries().map((entry) => createElement('li', { key: entry.resource.kind }, entry.node)),
+            ),
+        },
+        {
+          apiVersion: 'loykin.dev/v1alpha1',
+          kind: 'Text',
+          specSchema: { type: 'object' },
+          render: (resource) => createElement('span', null, (resource.spec as { text: string }).text),
+        },
+      ],
+    })
+
+    const resource: LoykinResource = {
+      apiVersion: 'loykin.dev/v1alpha1',
+      kind: 'List',
+      spec: {},
+      slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Entry' } }] }],
+    }
+
+    expect(renderToStaticMarkup(createElement(ResourceRenderer, { resource, registry }))).toBe('<ul><li><span>Entry</span></li></ul>')
+  })
+
   it('degrades unknown kinds to the fallback node only', () => {
     const registry = createRegistry<KindRenderFn>()
     const resource: LoykinResource = {
@@ -103,5 +139,32 @@ describe('ResourceRenderer', () => {
       { url: '/api/customers/c2' },
     ])
     expect(resolver).toHaveBeenCalledTimes(2)
+  })
+
+  it('applies data binding valuePath after resolver output', async () => {
+    let captured: RenderContext | undefined
+    const resolver: DataResolver = vi.fn(async () => [{ payload: { customer: { id: 'c1', name: 'Ada' } } }])
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      dataResolvers: { static: resolver },
+      kinds: [
+        {
+          apiVersion: 'loykin.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: { apiVersion: 'loykin.dev/v1alpha1', kind: 'Probe', spec: {} }, registry }))
+
+    await expect(captured?.data.resolve({ source: 'static', rows: [], valuePath: 'payload.customer' })).resolves.toEqual([
+      { id: 'c1', name: 'Ada' },
+    ])
   })
 })

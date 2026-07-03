@@ -16,6 +16,31 @@
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js",
       "require": "./dist/react.cjs"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js",
+      "require": "./dist/adapters/index.cjs"
+    },
+    "./adapters/designkit": {
+      "types": "./dist/adapters/designkit.d.ts",
+      "import": "./dist/adapters/designkit.js",
+      "require": "./dist/adapters/designkit.cjs"
+    },
+    "./adapters/gridkit": {
+      "types": "./dist/adapters/gridkit.d.ts",
+      "import": "./dist/adapters/gridkit.js",
+      "require": "./dist/adapters/gridkit.cjs"
+    },
+    "./adapters/chartkit": {
+      "types": "./dist/adapters/chartkit.d.ts",
+      "import": "./dist/adapters/chartkit.js",
+      "require": "./dist/adapters/chartkit.cjs"
+    },
+    "./adapters/basekit": {
+      "types": "./dist/adapters/basekit.d.ts",
+      "import": "./dist/adapters/basekit.js",
+      "require": "./dist/adapters/basekit.cjs"
     }
   },
   "files": [
@@ -29,14 +54,31 @@
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "test": "vitest run",
+    "scenario:eval": "vitest run playground/scenarios/scenarios.test.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
   "peerDependencies": {
+    "@loykin/chartkit": "*",
+    "@loykin/designkit": "*",
+    "@loykin/filter-input": "*",
+    "@loykin/gridkit": "*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "peerDependenciesMeta": {
+    "@loykin/chartkit": {
+      "optional": true
+    },
+    "@loykin/designkit": {
+      "optional": true
+    },
+    "@loykin/filter-input": {
+      "optional": true
+    },
+    "@loykin/gridkit": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },
@@ -46,6 +88,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@loykin/chartkit": "0.0.1-dev.0",
+    "@loykin/designkit": "0.0.1-dev.5",
+    "@loykin/filter-input": "0.0.1-dev.0",
+    "@loykin/gridkit": "^0.2.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.1.9",

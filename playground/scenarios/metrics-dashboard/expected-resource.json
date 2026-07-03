@@ -1,0 +1,82 @@
+{
+  "apiVersion": "loykin.dev/v1alpha1",
+  "kind": "DataBody",
+  "metadata": { "name": "scenario-metrics-dashboard" },
+  "spec": { "title": "Service metrics", "description": "Scenario dashboard with summary, table, and chart.", "defaultTab": "overview" },
+  "slots": [
+    {
+      "name": "topBar",
+      "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Metrics" } }]
+    },
+    {
+      "children": [
+        {
+          "apiVersion": "loykin.dev/v1alpha1",
+          "kind": "DataBodySummary",
+          "spec": {},
+          "slots": [
+            {
+              "children": [
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "DataBodyGroup",
+                  "spec": { "title": "Current status", "layout": "inline", "variant": "bordered" },
+                  "slots": [
+                    {
+                      "children": [
+                        { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Services", "value": "3" } },
+                        { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Errors", "value": "47" } }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "apiVersion": "loykin.dev/v1alpha1",
+          "kind": "DataBodyTab",
+          "spec": { "id": "overview", "label": "Overview", "count": 3 },
+          "slots": [
+            {
+              "children": [
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "TableView",
+                  "spec": {
+                    "data": {
+                      "source": "datasource",
+                      "datasourceUid": "metrics",
+                      "query": { "range": "${range}", "service": "${service}" }
+                    },
+                    "columns": {
+                      "service": { "label": "Service", "emphasis": "strong" },
+                      "status": { "label": "Status", "display": "badge" },
+                      "p95": { "label": "P95", "type": "number", "align": "right" },
+                      "errors": { "label": "Errors", "type": "number", "align": "right" }
+                    },
+                    "enableSorting": true,
+                    "pagination": { "pageSize": 5 }
+                  }
+                },
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "ChartView",
+                  "spec": {
+                    "chart": {
+                      "type": "bar",
+                      "height": 220,
+                      "categories": ["API", "Billing", "Search"],
+                      "series": [{ "label": "P95 latency", "color": "#7c3aed", "values": [181, 244, 132] }]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

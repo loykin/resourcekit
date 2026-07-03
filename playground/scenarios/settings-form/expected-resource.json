@@ -1,0 +1,54 @@
+{
+  "apiVersion": "loykin.dev/v1alpha1",
+  "kind": "DataBody",
+  "metadata": { "name": "scenario-settings-form" },
+  "spec": { "title": "Workspace settings", "description": "Form-local state with declarative submit." },
+  "slots": [
+    {
+      "name": "topBar",
+      "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Settings / Workspace" } }]
+    },
+    {
+      "children": [
+        {
+          "apiVersion": "loykin.dev/v1alpha1",
+          "kind": "ResourceForm",
+          "spec": {
+            "submitLabel": "Save settings",
+            "successMessage": "Settings saved",
+            "submit": { "action": "saveSettings", "mutation": { "target": "memory", "collection": "settings" } }
+          },
+          "slots": [
+            {
+              "children": [
+                {
+                  "apiVersion": "loykin.dev/v1alpha1",
+                  "kind": "DataBodySection",
+                  "spec": { "id": "general", "label": "General", "description": "Workspace identity" },
+                  "slots": [
+                    {
+                      "children": [
+                        {
+                          "apiVersion": "loykin.dev/v1alpha1",
+                          "kind": "DataBodyRow",
+                          "spec": { "label": "Name", "required": true },
+                          "slots": [{ "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "name", "value": "Acme Operations" } }] }]
+                        },
+                        {
+                          "apiVersion": "loykin.dev/v1alpha1",
+                          "kind": "DataBodyRow",
+                          "spec": { "label": "Slug" },
+                          "slots": [{ "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "slug", "value": "acme-ops" } }] }]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
