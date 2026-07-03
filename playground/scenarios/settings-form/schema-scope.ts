@@ -1,4 +1,4 @@
-import type { ScopeOptions } from '@loykin/resourcekit'
+import type { ScopeOptions } from '../../../src'
 
 export const scope: ScopeOptions = {
   apiVersions: ['loykin.dev/v1alpha1'],
