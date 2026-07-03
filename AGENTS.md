@@ -8,14 +8,20 @@
   with its own design system (designkit, gridkit, chartkit, basekit).
 - **Monorepo**: root (library), `playground/` (Vite dev server)
 
-## Single Source of Truth
+## Design Rules
 
-`docs/loykin-resource-runtime.md` is the specification. Read it before
-changing anything. It defines the resource envelope, ownership rules, slot
-model, data/mutation bindings, the variable engine, scoped capabilities,
-validation layers, the plugin model, and the phased Development Plan with
-exit criteria. When code and spec disagree, fix one of them explicitly —
-never let them drift silently.
+The runtime follows a Kubernetes-like resource model: `apiVersion`/`kind`
+identify a node, `spec` belongs to the kind, `slots` are parent-owned
+placement groups holding child resources. Ownership boundaries are strict —
+the runtime owns kind lookup, recursion, slot rendering, fallback,
+validation dispatch, variables, and binding dispatch; each kind owns its
+spec schema, slot policy, and prop mapping. Leaf kinds never know which
+parent slot they are in; parents never read child specs.
+
+A local working document (`docs/loykin-resource-runtime.md`, intentionally
+untracked) may exist with the full specification narrative. If present,
+treat it as design context; the committed source of truth is this file plus
+the types and tests in `src/`.
 
 ## Commands
 
@@ -38,9 +44,10 @@ Two package entries:
 - `src/react/index.ts` (`./react`) — the only place React types may appear.
   Recursive `ResourceRenderer`, `RenderContext`, unknown-kind fallback.
 
-Current state: types and registry are implemented; functions marked
-`TODO(phase-N)` throw `not implemented`. Work through the Development Plan
-phases in order — Phase 0 (core engine, pure unit tests) is next.
+Current state: the core engine (registry, validation, scoped schema
+generation, variable engine, resolvers) and the React renderer are
+implemented and unit-tested. Kind adapters live in `playground/` until they
+stabilize into per-kit `./resource` subpaths.
 
 ## Hard Rules
 
@@ -51,8 +58,8 @@ phases in order — Phase 0 (core engine, pure unit tests) is next.
   discriminator.
 - Kind adapters map resource specs onto existing kit public props. Existing
   kit APIs (designkit, gridkit, chartkit, basekit) must not change.
-- The variable engine stays flat (see "Scope boundary with dashboardkit" in
-  the spec). Chained variables, options queries, and dependency DAGs belong
+- The variable engine stays flat: one page scope, `string | string[]`
+  values. Chained variables, options queries, and dependency DAGs belong
   to dashboardkit — if you find yourself adding them here, stop.
 - MCP/AI must only ever receive a scoped schema (`registry.scope(...)`),
   never the full registry schema.

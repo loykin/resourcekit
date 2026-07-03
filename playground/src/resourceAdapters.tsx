@@ -7,12 +7,17 @@ import {
   Input,
   ListDetailBodyTemplate,
   PanelTemplate,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
   WorkbenchBodyTemplate,
 } from '@loykin/designkit'
 import { ChartRenderer } from '@loykin/chartkit'
 import { FilterInput } from '@loykin/filter-input'
 import { DataGrid, DataGridPaginationCompact, GlobalSearch, inferTablePayload } from '@loykin/gridkit'
-import type { DataBinding, ResourceKitPlugin } from '@loykin/resourcekit'
+import { getValueAtPath } from '@loykin/resourcekit'
+import type { DataBinding, ResourceKitPlugin, SubmitSpec } from '@loykin/resourcekit'
 import type { KindRenderFn, RenderContext } from '@loykin/resourcekit/react'
 
 interface ListDetailSpec {
@@ -50,6 +55,8 @@ interface DataBodyFieldSpec {
   description?: string
   value?: string
   valueRef?: string
+  /** Dot-path into the nearest record scope (ctx.record). */
+  fieldRef?: string
 }
 
 interface PanelSpec {
@@ -79,6 +86,22 @@ interface InputSpec {
   type?: string
   value?: string
   valueRef?: string
+  /** Dot-path into the nearest record scope — prefills the input. */
+  fieldRef?: string
+}
+
+interface FormSpec {
+  submit: SubmitSpec
+  submitLabel?: string
+  successMessage?: string
+}
+
+interface SheetSpec {
+  /** Truthy variable value opens the sheet; closing clears the variable. */
+  openVariable: string
+  title?: string
+  side?: 'left' | 'right' | 'top' | 'bottom'
+  width?: number
 }
 
 /**
@@ -185,6 +208,46 @@ function buildHintCell(type: string | undefined, hint: ColumnHint | undefined): 
     if (hint?.tone === 'muted') return <span className="text-muted-foreground">{formatted}</span>
     return formatted
   }
+}
+
+/**
+ * Native-form kind body: collects named inputs via FormData on submit and
+ * dispatches the declarative submit through the runtime. Form state stays
+ * inside the form — it never leaks into the page variable scope.
+ */
+function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string }>()
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries())
+        setBusy(true)
+        setMessage(undefined)
+        ctx.actions
+          .submit(spec.submit, payload)
+          .then(() => setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' }))
+          .catch((error: unknown) =>
+            setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Submit failed' }),
+          )
+          .finally(() => setBusy(false))
+      }}
+    >
+      {ctx.slots.children()}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <KitButton type="submit" size="sm" disabled={busy}>
+          {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
+        </KitButton>
+        {message && (
+          <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+            {message.text}
+          </span>
+        )}
+      </div>
+    </form>
+  )
 }
 
 /**
@@ -457,16 +520,18 @@ export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRender
             description: { type: 'string' },
             value: { type: 'string' },
             valueRef: { type: 'string' },
+            fieldRef: { type: 'string' },
           },
         },
         slotPolicy: { defaultSlot: { min: 0 } },
         render: (resource, ctx) => {
           const spec = resource.spec as DataBodyFieldSpec
           const variable = variableName(spec.valueRef)
-          const value = variable ? ctx.variables.get(variable) : spec.value
+          const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+          const value = fieldValue ?? (variable ? ctx.variables.get(variable) : spec.value)
           return (
             <KitDataBodyField label={spec.label} description={spec.description}>
-              {ctx.slots.children() ?? value}
+              {ctx.slots.children() ?? (value == null ? null : String(value))}
             </KitDataBodyField>
           )
         },
@@ -562,22 +627,116 @@ export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRender
             type: { type: 'string' },
             value: { type: 'string' },
             valueRef: { type: 'string' },
+            fieldRef: { type: 'string' },
           },
         },
         render: (resource, ctx) => {
           const spec = resource.spec as InputSpec
           const variable = variableName(spec.valueRef)
-          const value = variable ? ctx.variables.get(variable) : spec.value
+          const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+          const raw = fieldValue ?? (variable ? ctx.variables.get(variable) : spec.value)
+          const value = raw == null ? undefined : String(raw)
           return (
             <KitInput
+              key={`${spec.name ?? ''}:${value ?? ''}`}
               aria-label={spec.name ?? spec.placeholder}
-              defaultValue={typeof value === 'string' ? value : undefined}
+              defaultValue={value}
               name={spec.name}
               placeholder={spec.placeholder}
               type={spec.type ?? 'text'}
             />
           )
         },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitSheet',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['openVariable'],
+          properties: {
+            openVariable: { type: 'string' },
+            title: { type: 'string' },
+            side: { enum: ['left', 'right', 'top', 'bottom'] },
+            width: { type: 'number' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => {
+          const spec = resource.spec as SheetSpec
+          const open = Boolean(ctx.variables.get(spec.openVariable))
+          // Unmount entirely when closed — the variable is the single source
+          // of truth, so we skip the exit animation rather than track it.
+          if (!open) return null
+          return (
+            <Sheet open onOpenChange={(next) => !next && ctx.variables.set(spec.openVariable, undefined)}>
+              <SheetContent
+                side={spec.side ?? 'right'}
+                style={spec.width ? { width: spec.width, maxWidth: spec.width } : undefined}
+                className="flex flex-col gap-0 p-0"
+              >
+                <SheetHeader className="border-b px-4 py-3">
+                  <SheetTitle className="text-sm font-semibold">{spec.title}</SheetTitle>
+                </SheetHeader>
+                <div className="min-h-0 flex-1 overflow-y-auto">{ctx.slots.children()}</div>
+              </SheetContent>
+            </Sheet>
+          )
+        },
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitRecord',
+        recordScope: true,
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['data'],
+          properties: {
+            data: { type: 'object' },
+            variables: { type: 'array' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (_resource, ctx) => <>{ctx.slots.children()}</>,
+      },
+      {
+        apiVersion: 'loykin.dev/v1alpha1',
+        kind: 'DesignKitForm',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['submit'],
+          properties: {
+            submit: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['mutation'],
+              properties: {
+                action: { type: 'string' },
+                mutation: { type: 'object' },
+                onSuccess: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['kind', 'variable'],
+                    properties: {
+                      kind: { const: 'setVariable' },
+                      variable: { type: 'string' },
+                      from: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+            submitLabel: { type: 'string' },
+            successMessage: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0 } },
+        render: (resource, ctx) => <ResourceForm spec={resource.spec as FormSpec} ctx={ctx} />,
       },
       {
         apiVersion: 'loykin.dev/v1alpha1',

@@ -4,3 +4,4 @@ coverage/
 *.log
 .DS_Store
 .idea/
+docs/loykin-resource-runtime.md

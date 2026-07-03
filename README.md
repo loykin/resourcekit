@@ -26,12 +26,6 @@ resource document, the application renders it with its own design system.
   kind manifests; apps register only what they support, and the AI receives a
   scoped schema describing exactly that.
 
-## Specification
-
-The full spec lives at [docs/loykin-resource-runtime.md](docs/loykin-resource-runtime.md)
-— resource envelope, ownership rules, slot model, data bindings, variables,
-mutations, scoped capabilities, and the phased development plan.
-
 ## Development
 
 ```bash
@@ -43,8 +37,10 @@ pnpm build
 
 ## Status
 
-Early scaffold. Types, registry, and package wiring are in place; Phase 0
-(core engine) is in progress — see the Development Plan section of the spec.
+Early development. The headless core (registry, validation, scoped schema
+generation, variable engine, data resolvers) and the React renderer are
+implemented; kind adapters for the Loykin kits are demonstrated in the
+playground.
 
 ## License
 

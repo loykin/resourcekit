@@ -1,8 +1,7 @@
 import type { VariableDeclaration, VariableValue } from './types'
 
 /**
- * v1 variable engine — deliberately flat. See "Variables and Bindings" in
- * docs/loykin-resource-runtime.md.
+ * v1 variable engine — deliberately flat.
  *
  * In scope: one page scope, string | string[] values, setVariable writes,
  * ${var} interpolation, dependency scan, readiness, URL persist.

@@ -1,6 +1,6 @@
 /**
  * Core contract types for the Loykin resource runtime.
- * Spec: docs/loykin-resource-runtime.md — the single source of truth.
+ * The contract mirrors the resource runtime design (see AGENTS.md).
  * This module must stay framework-free (no React imports).
  */
 
@@ -140,6 +140,28 @@ export type MutationResolver = (
   ctx: DataResolveContext,
 ) => Promise<unknown>
 
+/**
+ * Effect applied after a successful mutation.
+ * setVariable: `value` sets a literal, `from` reads a dot-path from the
+ * result, neither clears the variable (useful for closing popups).
+ * emit: surfaces the mutation result to the host app (ResourceRenderer onEvent).
+ */
+export type SubmitEffect =
+  | { kind: 'setVariable'; variable: string; from?: string; value?: string | string[] }
+  | { kind: 'emit'; event: string }
+
+/**
+ * Declarative submit wiring for forms and editable cells:
+ * an action name (gated by the scoped action allowlist), the mutation
+ * binding to execute, and post-success effects. A variable touched by
+ * `onSuccess` re-triggers dependent data bindings through normal reactivity.
+ */
+export interface SubmitSpec {
+  action?: string
+  mutation: MutationBinding
+  onSuccess?: SubmitEffect[]
+}
+
 // ─── Kind manifest ────────────────────────────────────────────────────────────
 
 /**
@@ -153,6 +175,12 @@ export interface LoykinKindManifest<TSpec = unknown, TRender = unknown> {
   specSchema: JsonSchema
   slotPolicy?: SlotPolicy
   behaviorPolicy?: BehaviorPolicy
+  /**
+   * When true, the runtime resolves `spec.data` to a single record
+   * (first row) before rendering children, and publishes it to descendants
+   * as the nearest record scope (`ctx.record`, `fieldRef` reads).
+   */
+  recordScope?: boolean
   render?: TRender
   load?: () => Promise<TRender>
   /** Phantom member so TSpec participates in inference; never set at runtime. */

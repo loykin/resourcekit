@@ -1,10 +1,12 @@
 import { createElement, Fragment, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import type { DataBinding, EventPolicy, LoykinResource, VariableDeclaration, VariableValue } from '../types'
+import type { DataBinding, EventPolicy, LoykinKindManifest, LoykinResource, VariableDeclaration } from '../types'
 import type { ResourceRegistry, ScopedRegistry } from '../registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../variables'
 import type { VariableEngine } from '../variables'
-import type { KindRenderFn } from './types'
+import { coerceVariableValue, getValueAtPath } from '../path'
+import { runSubmit } from '../submit'
+import type { KindRenderFn, RenderContext } from './types'
 
 export interface ResourceRendererProps {
   resource: LoykinResource
@@ -13,6 +15,12 @@ export interface ResourceRendererProps {
   renderUnknownKind?: (resource: LoykinResource) => ReactNode
   renderLoading?: () => ReactNode
   renderError?: (error: unknown, resource: LoykinResource) => ReactNode
+  /**
+   * External hook: receives `emit` event policies and submit `emit` effects.
+   * This is how a document reaches app-owned behavior (toasts, navigation,
+   * analytics) without the document knowing the app.
+   */
+  onEvent?: (event: string, payload?: unknown) => void
 }
 
 interface Runtime {
@@ -25,6 +33,8 @@ interface Runtime {
 
 interface ResourceNodeProps extends ResourceRendererProps {
   runtime: Runtime
+  /** Nearest ancestor record scope, inherited by all descendants. */
+  record?: Record<string, unknown>
 }
 
 const emptyRows = Promise.resolve<Record<string, unknown>[]>([])
@@ -49,8 +59,7 @@ function collectVariables(resource: LoykinResource, declarations: VariableDeclar
 
 function renderNodes(
   resources: LoykinResource[],
-  props: ResourceRendererProps,
-  runtime: Runtime,
+  props: ResourceNodeProps,
   keyPrefix: string,
 ): ReactNode {
   return resources.map((resource, index) =>
@@ -58,24 +67,28 @@ function renderNodes(
       ...props,
       key: `${keyPrefix}-${index}-${resource.apiVersion}-${resource.kind}-${resource.metadata?.name ?? ''}`,
       resource,
-      runtime,
     }),
   )
 }
 
-function getPath(value: unknown, path: string | undefined): unknown {
-  if (!path) return value
-  return path.split('.').reduce<unknown>((current, part) => {
-    if (!isRecord(current)) return undefined
-    return current[part]
-  }, value)
-}
-
-function coerceVariableValue(value: unknown): VariableValue {
-  if (typeof value === 'string' || value === undefined) return value
-  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) return value
-  if (value === null) return undefined
-  return String(value)
+function resolveThroughRuntime(
+  registry: ResourceRendererProps['registry'],
+  runtime: Runtime,
+  binding: DataBinding,
+): Promise<Record<string, unknown>[]> {
+  const refs = scanVariableRefs(binding)
+  const key = JSON.stringify(binding)
+  runtime.bindingRefs.set(key, refs)
+  const resolved = interpolate(binding, runtime.engine.snapshot())
+  if (resolved.unresolved.size > 0) return emptyRows
+  const cached = runtime.dataCache.get(key)
+  if (cached) return cached
+  const resolvedBinding = resolved.value as DataBinding
+  const resolver = registry.getDataResolver(resolvedBinding.source)
+  if (!resolver) return Promise.reject(new Error(`data resolver ${resolvedBinding.source} is not registered`))
+  const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() })
+  runtime.dataCache.set(key, promise)
+  return promise
 }
 
 function eventPolicy(resource: LoykinResource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
@@ -89,7 +102,7 @@ function useRenderVersion(runtime: Runtime): void {
   useSyncExternalStore(runtime.subscribeVersion, runtime.getVersion, runtime.getVersion)
 }
 
-function useRegistryVersion(registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>): void {
+function useRegistryVersion(registry: ResourceRendererProps['registry']): void {
   const [, bump] = useReducer((value: number) => value + 1, 0)
   useEffect(() => registry.subscribe(bump), [registry])
 }
@@ -126,24 +139,23 @@ function useLoadedRender(manifestRender: KindRenderFn | undefined, load: (() => 
   return loaded
 }
 
-function ResourceNode(props: ResourceNodeProps): ReactNode {
-  const { resource, registry, runtime, renderUnknownKind, renderLoading, renderError } = props
-  useRenderVersion(runtime)
-  useRegistryVersion(registry)
-
-  const manifest = registry.getKind(resource.apiVersion, resource.kind)
-  const render = useLoadedRender(manifest?.render, manifest?.load)
-  if (!manifest) return renderUnknownKind?.(resource) ?? null
-  if (!render) return renderLoading?.() ?? null
+function renderKindNode(
+  props: ResourceNodeProps,
+  manifest: LoykinKindManifest<unknown, KindRenderFn>,
+  render: KindRenderFn,
+): ReactNode {
+  const { resource, registry, runtime, record } = props
 
   try {
     const slots = resource.slots ?? []
     const slotNodes = new Map<string | undefined, ReactNode>()
     for (const [index, slot] of slots.entries()) {
-      slotNodes.set(slot.name, renderNodes(slot.children, props, runtime, `slot-${index}-${slot.name ?? 'default'}`))
+      slotNodes.set(slot.name, renderNodes(slot.children, props, `slot-${index}-${slot.name ?? 'default'}`))
     }
 
-    const ctx = {
+    const allowedActions = 'options' in registry ? registry.options.actions?.allow : undefined
+
+    const ctx: RenderContext = {
       slots: {
         children: () => slotNodes.get(undefined) ?? null,
         one: (name: string) => slotNodes.get(name) ?? null,
@@ -155,27 +167,16 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
         resources: (name: string) => slots.find((slot) => slot.name === name)?.children ?? [],
       },
       data: {
-        resolve: (binding: DataBinding) => {
-          const refs = scanVariableRefs(binding)
-          const key = JSON.stringify(binding)
-          runtime.bindingRefs.set(key, refs)
-          const resolved = interpolate(binding, runtime.engine.snapshot())
-          if (resolved.unresolved.size > 0) return emptyRows
-          const cached = runtime.dataCache.get(key)
-          if (cached) return cached
-          const resolvedBinding = resolved.value as DataBinding
-          const resolver = registry.getDataResolver(resolvedBinding.source)
-          if (!resolver) return Promise.reject(new Error(`data resolver ${resolvedBinding.source} is not registered`))
-          const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() })
-          runtime.dataCache.set(key, promise)
-          return promise
-        },
+        resolve: (binding: DataBinding) => resolveThroughRuntime(registry, runtime, binding),
       },
       events: {
         emit: (event: string, payload?: unknown) => {
           const policy = eventPolicy(resource, manifest.behaviorPolicy?.events?.[event], event)
           if (policy?.kind === 'setVariable') {
-            runtime.engine.set(policy.variable, coerceVariableValue(getPath(payload, policy.from)))
+            runtime.engine.set(policy.variable, coerceVariableValue(getValueAtPath(payload, policy.from)))
+          }
+          if (policy?.kind === 'emit') {
+            props.onEvent?.(policy.event, payload)
           }
         },
       },
@@ -183,24 +184,106 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
         get: runtime.engine.get,
         set: runtime.engine.set,
       },
+      record,
+      actions: {
+        submit: (submit, payload) =>
+          runSubmit(
+            {
+              getMutationResolver: (target) => registry.getMutationResolver(target),
+              variables: {
+                snapshot: () => runtime.engine.snapshot(),
+                set: (name, value) => runtime.engine.set(name, value),
+              },
+              allowedActions,
+              emit: (event, result) => props.onEvent?.(event, result),
+            },
+            submit,
+            payload,
+          ),
+      },
     }
 
     return createElement(Fragment, null, render(resource, ctx))
   } catch (error) {
-    return renderError?.(error, resource) ?? null
+    return props.renderError?.(error, resource) ?? null
   }
+}
+
+interface RecordScopeNodeProps extends ResourceNodeProps {
+  manifest: LoykinKindManifest<unknown, KindRenderFn>
+  render: KindRenderFn
+}
+
+/**
+ * Resolves `spec.data` to a single record (first row) before rendering the
+ * kind, and publishes it to descendants as the nearest record scope.
+ * Re-resolves when a `${var}` referenced by the binding changes; while a
+ * required variable is unresolved, renders without a record (readiness).
+ */
+function RecordScopeNode(props: RecordScopeNodeProps): ReactNode {
+  const { resource, registry, runtime, manifest, render } = props
+  const spec = resource.spec
+  const binding = isRecord(spec) && isRecord(spec.data) ? (spec.data as DataBinding) : undefined
+
+  const bindingKey = JSON.stringify(binding ?? null)
+  const refs = useMemo(() => scanVariableRefs(binding), [bindingKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const fingerprint = [...refs].map((name) => JSON.stringify(runtime.engine.get(name) ?? null)).join('|')
+  const stateKey = `${bindingKey}::${fingerprint}`
+  const unresolved = binding ? interpolate(binding, runtime.engine.snapshot()).unresolved.size > 0 : false
+
+  const [state, setState] = useState<{ key: string; record: Record<string, unknown> | undefined } | null>(null)
+  const [error, setError] = useState<unknown>()
+
+  useEffect(() => {
+    if (!binding || unresolved) return
+    let cancelled = false
+    setError(undefined)
+    resolveThroughRuntime(registry, runtime, binding)
+      .then((rows) => {
+        if (cancelled) return
+        const record = rows[0] && isRecord(rows[0]) ? rows[0] : undefined
+        setState({ key: stateKey, record })
+      })
+      .catch((nextError: unknown) => {
+        if (!cancelled) setError(nextError)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stateKey, unresolved])
+
+  if (!binding || unresolved) return renderKindNode({ ...props, record: undefined }, manifest, render)
+  if (error) return props.renderError?.(error, resource) ?? null
+
+  // Stale-while-revalidate: after the first load, keep rendering the previous
+  // record while a refetch is in flight so children (e.g. forms) don't unmount.
+  if (!state) return props.renderLoading?.() ?? null
+
+  return renderKindNode({ ...props, record: state.record }, manifest, render)
+}
+
+function ResourceNode(props: ResourceNodeProps): ReactNode {
+  const { resource, registry } = props
+  useRenderVersion(props.runtime)
+  useRegistryVersion(registry)
+
+  const manifest = registry.getKind(resource.apiVersion, resource.kind)
+  const render = useLoadedRender(manifest?.render, manifest?.load)
+  if (!manifest) return props.renderUnknownKind?.(resource) ?? null
+  if (!render) return props.renderLoading?.() ?? null
+
+  if (manifest.recordScope) {
+    return createElement(RecordScopeNode, { ...props, manifest, render })
+  }
+
+  return renderKindNode(props, manifest, render)
 }
 
 /**
  * Recursive renderer — slots render before the kind renderer runs, so a kind
  * receives finished ReactNodes through ctx.slots and maps them onto its
  * component props.
- *
- * Responsibilities (phase 1, see Development Plan in the spec doc):
- * - kind lookup + unknown-kind fallback (degrade the node, not the document)
- * - lazy `load()` render support
- * - variable subscription → re-resolve only bindings that reference changed vars
- * - readiness: bindings with unresolved required variables do not execute
  */
 export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
   const runtime = useMemo<Runtime>(() => {

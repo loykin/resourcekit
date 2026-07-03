@@ -1,7 +1,7 @@
 /**
  * @loykin/resourcekit — headless core.
  * No React imports allowed anywhere under this entry.
- * Spec: docs/loykin-resource-runtime.md
+ * Design rules: AGENTS.md
  */
 
 export type {
@@ -24,6 +24,8 @@ export type {
   DataResolver,
   MutationBinding,
   MutationResolver,
+  SubmitSpec,
+  SubmitEffect,
   LoykinKindManifest,
   ResourceKitPlugin,
   ScopeOptions,
@@ -41,3 +43,7 @@ export { createVariableEngine, scanVariableRefs, interpolate } from './variables
 export type { VariableEngine } from './variables'
 
 export { restResolver, staticResolver } from './resolvers'
+
+export { getValueAtPath, coerceVariableValue } from './path'
+export { runSubmit } from './submit'
+export type { SubmitRuntime } from './submit'

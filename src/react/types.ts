@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { DataBinding, LoykinResource } from '../types'
+import type { DataBinding, LoykinResource, SubmitSpec } from '../types'
 
 /**
  * React narrowing of the manifest's generic `render` member.
@@ -24,6 +24,16 @@ export interface RenderContext {
   variables: {
     get: (name: string) => string | string[] | undefined
     set: (name: string, value: string | string[] | undefined) => void
+  }
+  /**
+   * Nearest record scope — the resolved single record of the closest
+   * ancestor kind with `recordScope: true`. Kinds read fields from it with
+   * dot-paths (`fieldRef`). Undefined outside any record scope.
+   */
+  record?: Record<string, unknown>
+  actions: {
+    /** Executes a declarative submit (mutation binding + onSuccess effects). */
+    submit: (submit: SubmitSpec, payload: unknown) => Promise<unknown>
   }
 }
 

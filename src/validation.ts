@@ -188,7 +188,7 @@ function validateDatasourceAndActions(resource: LoykinResource, registry: Resour
 }
 
 /**
- * Layered validation — see "Validation" in docs/loykin-resource-runtime.md:
+ * Layered validation. Layers:
  *
  * 1. Validate the common resource envelope.
  * 2. Look up `apiVersion` and `kind`.

@@ -29,7 +29,7 @@ import { useEffect, useMemo, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { Braces, LayoutDashboard, Sparkles } from 'lucide-react'
 import { buildDocumentSchema, createRegistry, restResolver, staticResolver, validateResource } from '@loykin/resourcekit'
-import type { DataResolver, LoykinResource } from '@loykin/resourcekit'
+import type { DataResolver, LoykinResource, MutationResolver } from '@loykin/resourcekit'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
@@ -69,6 +69,34 @@ const playgroundDatasourceResolver: DataResolver = async (binding) => {
   if (query.table !== 'customers') return []
   const status = typeof query.status === 'string' ? query.status : undefined
   return status ? customerRows.filter((row) => row.status === status) : customerRows
+}
+
+// In-memory CRUD backend — stands in for a real REST API or datasource so the
+// full read → edit → mutate → refetch loop can run inside the playground.
+const memoryUsers: Record<string, unknown>[] = userRows.map((row, index) => ({ id: String(index + 1), ...row }))
+
+const memoryDataResolver: DataResolver = async (rawBinding) => {
+  const binding = rawBinding as Record<string, unknown>
+  if (binding.collection !== 'users') return []
+  const id = typeof binding.id === 'string' ? binding.id : undefined
+  const rows = memoryUsers.map((row) => ({ ...row }))
+  return id ? rows.filter((row) => row.id === id) : rows
+}
+
+const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => {
+  const binding = rawBinding as Record<string, unknown>
+  if (binding.collection !== 'users') throw new Error(`unknown collection: ${String(binding.collection)}`)
+  const values = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
+  const id = typeof binding.id === 'string' ? binding.id : undefined
+  if (id) {
+    const row = memoryUsers.find((item) => item.id === id)
+    if (!row) throw new Error(`user ${id} not found`)
+    Object.assign(row, values)
+    return { ...row, version: String(Date.now()) }
+  }
+  const row = { id: String(memoryUsers.length + 1), status: 'Pending', joined: new Date().toISOString().slice(0, 10), ...values }
+  memoryUsers.push(row)
+  return { ...row, version: String(Date.now()) }
 }
 
 const customerWorkspace: LoykinResource = {
@@ -814,13 +842,17 @@ const datasourceDataTable: LoykinResource = {
   ],
 }
 
-const signupForm: LoykinResource = {
+const userManagement: LoykinResource = {
   apiVersion: 'loykin.dev/v1alpha1',
   kind: 'DesignKitDataBody',
-  metadata: { name: 'signup-form' },
+  metadata: { name: 'user-management' },
   spec: {
-    title: 'Create user',
-    description: 'Signup-style form rendered with DesignKit DataBody rows and inputs.',
+    title: 'Team members',
+    description: 'Invite, edit, and manage workspace access.',
+    variables: [
+      { name: 'usersVersion', type: 'string', default: '0' },
+      { name: 'createOpen', type: 'string' },
+    ],
   },
   slots: [
     {
@@ -829,12 +861,14 @@ const signupForm: LoykinResource = {
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'DesignKitButton',
-          spec: { label: 'Save draft', size: 'sm', variant: 'outline' },
-        },
-        {
-          apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitButton',
-          spec: { label: 'Create user', size: 'sm' },
+          spec: {
+            label: 'Add member',
+            size: 'sm',
+            value: '1',
+            events: {
+              click: { kind: 'setVariable', variable: 'createOpen', from: 'value' },
+            },
+          },
         },
       ],
     },
@@ -842,107 +876,118 @@ const signupForm: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitDataBodyGroup',
+          kind: 'GridKitTable',
           spec: {
-            title: 'Account',
-            description: 'Login identity and initial access.',
-            layout: 'horizontal',
-            variant: 'bordered',
-          },
-          slots: [
-            {
-              children: [
-                {
-                  apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyRow',
-                  spec: { label: 'Name', required: true },
-                  slots: [
-                    {
-                      children: [
-                        {
-                          apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitInput',
-                          spec: { name: 'name', placeholder: 'Sarah Kim', value: 'Sarah Kim' },
-                        },
-                      ],
-                    },
-                  ],
-                },
-                {
-                  apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyRow',
-                  spec: { label: 'Email', required: true },
-                  slots: [
-                    {
-                      children: [
-                        {
-                          apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitInput',
-                          spec: { name: 'email', type: 'email', placeholder: 'sarah@acme.com', value: 'sarah@acme.com' },
-                        },
-                      ],
-                    },
-                  ],
-                },
-                {
-                  apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyRow',
-                  spec: { label: 'Password', required: true },
-                  slots: [
-                    {
-                      children: [
-                        {
-                          apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitInput',
-                          spec: { name: 'password', type: 'password', placeholder: 'Temporary password' },
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
+            enableSorting: true,
+            globalSearch: true,
+            searchPlaceholder: 'Search members...',
+            searchableColumns: ['name', 'email', 'role', 'status'],
+            tableHeight: 480,
+            pagination: { pageSize: 10 },
+            data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
+            columns: {
+              id: { label: 'ID', flex: 0.4, tone: 'muted' },
+              name: { label: 'Name', flex: 1.2, emphasis: 'strong' },
+              email: { label: 'Email', flex: 1.4, tone: 'muted' },
+              role: { label: 'Role', flex: 0.8, display: 'badge', variant: 'outline' },
+              status: {
+                label: 'Status',
+                flex: 0.8,
+                display: 'badge',
+                map: { Active: 'default', Pending: 'secondary', Inactive: 'outline' },
+              },
+              joined: { label: 'Joined', type: 'date', flex: 0.9, tone: 'muted' },
             },
-          ],
+          },
         },
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DesignKitDataBodyGroup',
-          spec: {
-            title: 'Profile',
-            description: 'Workspace profile values shown after signup.',
-            layout: 'horizontal',
-            variant: 'bordered',
-          },
+          kind: 'DesignKitSheet',
+          spec: { openVariable: 'createOpen', title: 'Add member', width: 440 },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyRow',
-                  spec: { label: 'Company' },
-                  slots: [
-                    {
-                      children: [
-                        {
-                          apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitInput',
-                          spec: { name: 'company', placeholder: 'Acme Corp', value: 'Acme Corp' },
-                        },
+                  kind: 'DesignKitForm',
+                  spec: {
+                    submit: {
+                      action: 'users.create',
+                      mutation: { target: 'memory', collection: 'users' },
+                      onSuccess: [
+                        { kind: 'setVariable', variable: 'usersVersion', from: 'version' },
+                        { kind: 'setVariable', variable: 'createOpen' },
+                        { kind: 'emit', event: 'users.created' },
                       ],
                     },
-                  ],
-                },
-                {
-                  apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DesignKitDataBodyRow',
-                  spec: { label: 'Role' },
+                    submitLabel: 'Create member',
+                  },
                   slots: [
                     {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
-                          kind: 'DesignKitInput',
-                          spec: { name: 'role', placeholder: 'Admin', value: 'Admin' },
+                          kind: 'DesignKitDataBodyGroup',
+                          spec: {
+                            title: 'Profile',
+                            description: 'The member receives an invite email.',
+                            layout: 'stacked',
+                            variant: 'plain',
+                          },
+                          slots: [
+                            {
+                              children: [
+                                {
+                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  kind: 'DesignKitDataBodyRow',
+                                  spec: { label: 'Name', required: true },
+                                  slots: [
+                                    {
+                                      children: [
+                                        {
+                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          kind: 'DesignKitInput',
+                                          spec: { name: 'name', placeholder: 'Full name' },
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                                {
+                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  kind: 'DesignKitDataBodyRow',
+                                  spec: { label: 'Email', required: true },
+                                  slots: [
+                                    {
+                                      children: [
+                                        {
+                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          kind: 'DesignKitInput',
+                                          spec: { name: 'email', type: 'email', placeholder: 'name@acme.com' },
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                                {
+                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  kind: 'DesignKitDataBodyRow',
+                                  spec: { label: 'Role' },
+                                  slots: [
+                                    {
+                                      children: [
+                                        {
+                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          kind: 'DesignKitInput',
+                                          spec: { name: 'role', placeholder: 'Admin / Editor / Viewer' },
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
                         },
                       ],
                     },
@@ -957,7 +1002,188 @@ const signupForm: LoykinResource = {
   ],
 }
 
+const userEditor: LoykinResource = {
+  apiVersion: 'loykin.dev/v1alpha1',
+  kind: 'DesignKitListDetail',
+  metadata: { name: 'user-editor' },
+  spec: {
+    listWidth: 540,
+    selectionVariable: 'userId',
+    variables: [
+      { name: 'userId', type: 'string', default: '1' },
+      { name: 'usersVersion', type: 'string', default: '0' },
+    ],
+  },
+  slots: [
+    {
+      name: 'list',
+      children: [
+        {
+          apiVersion: 'loykin.dev/v1alpha1',
+          kind: 'GridKitTable',
+          spec: {
+            title: 'Users',
+            enableSorting: true,
+            tableHeight: 480,
+            data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
+            columns: {
+              id: { label: 'ID', flex: 0.5, tone: 'muted' },
+              name: { label: 'Name', flex: 1.2, emphasis: 'strong' },
+              email: { label: 'Email', flex: 1.4, tone: 'muted' },
+              role: { label: 'Role', flex: 0.8, display: 'badge', variant: 'outline' },
+              status: {
+                label: 'Status',
+                flex: 0.8,
+                display: 'badge',
+                map: { Active: 'default', Pending: 'secondary', Inactive: 'outline' },
+              },
+              joined: { label: 'Joined', type: 'date', flex: 0.9, tone: 'muted' },
+            },
+            events: {
+              rowSelect: { kind: 'setVariable', variable: 'userId', from: 'row.id' },
+            },
+          },
+        },
+      ],
+    },
+    {
+      name: 'detail',
+      children: [
+        {
+          apiVersion: 'loykin.dev/v1alpha1',
+          kind: 'DesignKitPanel',
+          spec: { title: 'Edit user', eyebrow: 'record scope → form → mutation → refetch' },
+          slots: [
+            {
+              children: [
+                {
+                  apiVersion: 'loykin.dev/v1alpha1',
+                  kind: 'DesignKitRecord',
+                  spec: {
+                    data: { source: 'memory', collection: 'users', id: '${userId}', v: '${usersVersion}' },
+                  },
+                  slots: [
+                    {
+                      children: [
+                        {
+                          apiVersion: 'loykin.dev/v1alpha1',
+                          kind: 'DesignKitForm',
+                          spec: {
+                            submit: {
+                              action: 'users.update',
+                              mutation: { target: 'memory', collection: 'users', id: '${userId}' },
+                              onSuccess: [{ kind: 'setVariable', variable: 'usersVersion', from: 'version' }],
+                            },
+                            submitLabel: 'Save changes',
+                            successMessage: 'User updated — list refreshed.',
+                          },
+                          slots: [
+                            {
+                              children: [
+                                {
+                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  kind: 'DesignKitDataBodyGroup',
+                                  spec: { title: 'Profile', layout: 'horizontal', variant: 'bordered' },
+                                  slots: [
+                                    {
+                                      children: [
+                                        {
+                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          kind: 'DesignKitDataBodyRow',
+                                          spec: { label: 'Name', required: true },
+                                          slots: [
+                                            {
+                                              children: [
+                                                {
+                                                  apiVersion: 'loykin.dev/v1alpha1',
+                                                  kind: 'DesignKitInput',
+                                                  spec: { name: 'name', fieldRef: 'name', placeholder: 'Full name' },
+                                                },
+                                              ],
+                                            },
+                                          ],
+                                        },
+                                        {
+                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          kind: 'DesignKitDataBodyRow',
+                                          spec: { label: 'Email', required: true },
+                                          slots: [
+                                            {
+                                              children: [
+                                                {
+                                                  apiVersion: 'loykin.dev/v1alpha1',
+                                                  kind: 'DesignKitInput',
+                                                  spec: { name: 'email', type: 'email', fieldRef: 'email', placeholder: 'user@acme.com' },
+                                                },
+                                              ],
+                                            },
+                                          ],
+                                        },
+                                        {
+                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          kind: 'DesignKitDataBodyRow',
+                                          spec: { label: 'Role' },
+                                          slots: [
+                                            {
+                                              children: [
+                                                {
+                                                  apiVersion: 'loykin.dev/v1alpha1',
+                                                  kind: 'DesignKitInput',
+                                                  spec: { name: 'role', fieldRef: 'role', placeholder: 'Admin / Editor / Viewer' },
+                                                },
+                                              ],
+                                            },
+                                          ],
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'emptyDetail',
+      children: [
+        {
+          apiVersion: 'loykin.dev/v1alpha1',
+          kind: 'DesignKitPanel',
+          spec: { title: 'No user selected' },
+          slots: [
+            {
+              children: [
+                {
+                  apiVersion: 'loykin.dev/v1alpha1',
+                  kind: 'DesignKitText',
+                  spec: { text: 'Select a row to load the record into the form.' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+}
+
 const examples = [
+  {
+    id: 'user-editor',
+    name: 'User editor (CRUD)',
+    description: 'Row select → record fetch → form prefill → mutation → list refetch.',
+    resource: userEditor,
+  },
   {
     id: 'customer-workspace',
     name: 'Customer workspace',
@@ -1007,17 +1233,18 @@ const examples = [
     resource: datasourceDataTable,
   },
   {
-    id: 'signup-form',
-    name: 'Signup form',
-    description: 'DesignKit DataBody form rows for a new user signup screen.',
-    resource: signupForm,
+    id: 'user-management',
+    name: 'User management',
+    description: 'Full page: table + Add member sheet + create mutation + toast via onEvent.',
+    resource: userManagement,
   },
 ] as const
 
 const registry = createRegistry<KindRenderFn>()
 registry.use({
   name: 'playground-resolvers',
-  dataResolvers: { datasource: playgroundDatasourceResolver, rest: restResolver, static: staticResolver },
+  dataResolvers: { datasource: playgroundDatasourceResolver, rest: restResolver, static: staticResolver, memory: memoryDataResolver },
+  mutationResolvers: { memory: memoryMutationResolver },
 })
 registry.use(createPlaygroundResourceAdapters())
 
@@ -1368,6 +1595,18 @@ const styles = `
     border: 1px solid var(--destructive);
     background: var(--muted);
   }
+  .rk-toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 100;
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    background: var(--foreground);
+    color: var(--background);
+    font-size: 13px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  }
   @media (max-width: 1040px) {
     .rk-render-toolbar {
       align-items: flex-start;
@@ -1387,6 +1626,16 @@ export function App() {
   const [loadError, setLoadError] = useState<string>()
   const [jsonSheetOpen, setJsonSheetOpen] = useState(false)
   const [aiRequestSheetOpen, setAiRequestSheetOpen] = useState(false)
+  const [toast, setToast] = useState<string>()
+
+  // External hook: documents emit events; the app decides what they mean.
+  const handleDocumentEvent = (event: string, payload?: unknown) => {
+    if (event === 'users.created') {
+      const record = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
+      setToast(`${String(record.name ?? 'Member')} added to the team`)
+      window.setTimeout(() => setToast(undefined), 3500)
+    }
+  }
 
   const selectedExample = examples.find((example) => example.id === selectedExampleId) ?? examples[0]
   const validation = useMemo(() => validateResource(resource, playgroundScope), [resource])
@@ -1449,11 +1698,13 @@ export function App() {
       {loadError ? <pre className="rk-message">{loadError}</pre> : null}
       <ResourceRenderer
         registry={registry}
+        onEvent={handleDocumentEvent}
         renderError={(error) => <div className="fallback">{error instanceof Error ? error.message : 'Render error'}</div>}
         renderLoading={() => <div className="fallback">Loading kind...</div>}
         renderUnknownKind={(resource) => <div className="fallback">Unknown kind: {resource.kind}</div>}
         resource={resource}
       />
+      {toast && <div className="rk-toast">{toast}</div>}
     </>
   )
 
