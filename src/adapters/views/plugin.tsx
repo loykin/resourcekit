@@ -18,7 +18,7 @@ interface SelectableListSpec {
 }
 
 interface ObjectFieldsSpec {
-  data: DataBinding
+  data?: DataBinding
   valuePath?: string
   fields: Array<{ label: string; path: string; display?: 'badge' }>
 }
@@ -29,10 +29,11 @@ interface JsonViewerSpec {
   defaultExpandedDepth?: number
 }
 
-function useRows(binding: DataBinding, ctx: RenderContext) {
+function useRows(binding: DataBinding | undefined, ctx: RenderContext) {
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
   const [error, setError] = useState<unknown>(null)
-  const bindingKey = JSON.stringify(binding)
+  const bindingKey = binding ? JSON.stringify(binding) : ''
+  const recordKey = binding ? '' : JSON.stringify(ctx.record ?? null)
   const refNames = useMemo(
     () => [...bindingKey.matchAll(/\$\{([^}]+)}/g)].map((match) => match[1]),
     [bindingKey],
@@ -42,6 +43,12 @@ function useRows(binding: DataBinding, ctx: RenderContext) {
   useEffect(() => {
     let cancelled = false
     setError(null)
+    if (!binding) {
+      setRows(ctx.record ? [ctx.record] : [])
+      return () => {
+        cancelled = true
+      }
+    }
     ctx.data
       .resolve(binding)
       .then((next) => {
@@ -54,7 +61,7 @@ function useRows(binding: DataBinding, ctx: RenderContext) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bindingKey, refFingerprint])
+  }, [bindingKey, recordKey, refFingerprint])
 
   return { rows, error }
 }
@@ -75,7 +82,7 @@ function SelectableList({ spec, ctx }: { spec: SelectableListSpec; ctx: RenderCo
   if (rows.length === 0) return <div className="resourcekit-state">No items</div>
 
   return (
-    <div className="resourcekit-selectable-list divide-y">
+    <div className="resourcekit-selectable-list">
       {rows.map((row, index) => {
         const id = textAt(row, idField)
         const active = selected === id
@@ -83,14 +90,16 @@ function SelectableList({ spec, ctx }: { spec: SelectableListSpec; ctx: RenderCo
           <button
             key={id || index}
             type="button"
-            className={`block w-full px-4 py-3 text-left transition-colors ${active ? 'bg-muted' : 'hover:bg-muted/60'}`}
+            className={`block w-full border-b px-4 py-3 text-left transition-colors last:border-b-0 ${
+              active ? 'bg-muted' : 'bg-background hover:bg-muted/60'
+            }`}
             onClick={() => ctx.events.emit('select', { row })}
           >
             <div className="truncate text-sm font-medium">{textAt(row, spec.primary.field)}</div>
             {spec.secondary && spec.secondary.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <div className="mt-1 grid gap-0.5 text-xs text-muted-foreground">
                 {spec.secondary.map((item) => (
-                  <span key={item.field} className="truncate">
+                  <span key={item.field} className="block truncate">
                     {item.label ? `${item.label}: ` : ''}
                     {textAt(row, item.field)}
                   </span>
@@ -112,7 +121,7 @@ function ObjectFields({ spec, ctx }: { spec: ObjectFieldsSpec; ctx: RenderContex
   const object = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
 
   return (
-    <dl className="grid gap-3 p-4 text-sm">
+    <dl className="grid gap-3 text-sm">
       {spec.fields.map((field) => {
         const value = getValueAtPath(object, field.path)
         return (
@@ -168,7 +177,7 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
         specSchema: {
           type: 'object',
           additionalProperties: false,
-          required: ['data', 'fields'],
+          required: ['fields'],
           properties: {
             data: { type: 'object' },
             valuePath: { type: 'string' },

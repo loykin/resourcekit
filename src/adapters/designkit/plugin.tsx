@@ -763,9 +763,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             <KitInput
               key={`${spec.name ?? ''}:${value ?? ''}`}
               aria-label={spec.name ?? spec.placeholder}
+              className="w-full min-w-[16rem]"
               defaultValue={value}
               name={spec.name}
               placeholder={spec.placeholder}
+              style={{ minWidth: 256, width: '100%' }}
               type={spec.type ?? 'text'}
             />
           )

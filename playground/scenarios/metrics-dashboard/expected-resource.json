@@ -20,7 +20,7 @@
                 {
                   "apiVersion": "loykin.dev/v1alpha1",
                   "kind": "DataBodyGroup",
-                  "spec": { "title": "Current status", "layout": "inline", "variant": "bordered" },
+                  "spec": { "title": "Current status", "layout": "inline", "variant": "plain" },
                   "slots": [
                     {
                       "children": [

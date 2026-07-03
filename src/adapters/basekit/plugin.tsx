@@ -35,7 +35,17 @@ export function createBaseKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             const spec = resource.spec as FilterInputSpec
             const variable = variableName(spec.valueRef)
             const value = variable ? ctx.variables.get(variable) : spec.value
-            return <KitFilterInput config={spec.config} value={value} onChange={(nextValue: unknown) => ctx.events.emit('change', { value: nextValue })} />
+            return (
+              <div className="min-w-[14rem] max-w-full shrink-0 overflow-visible">
+                <KitFilterInput
+                  className="w-full"
+                  classNames={{ row: 'flex-nowrap', control: 'min-w-0', clearButton: 'shrink-0' }}
+                  config={spec.config}
+                  value={value}
+                  onChange={(nextValue: unknown) => ctx.events.emit('change', { value: nextValue })}
+                />
+              </div>
+            )
           },
         },
       ],

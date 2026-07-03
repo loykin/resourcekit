@@ -24,11 +24,11 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     seedData: { customers },
     expectedResource: customerCrmExpected as LoykinResource,
     rubric: {
-      requiredKinds: ['ListDetail', 'PageTopBar', 'SelectableList', 'DataBody', 'DataBodySummary', 'ChartView', 'FilterControl'],
+      requiredKinds: ['ListDetail', 'PageTopBar', 'SelectableList', 'RecordScope', 'DataBody', 'DataBodyGroup', 'ObjectFields', 'ChartView', 'FilterControl'],
       requiredVariables: ['customerId', 'status'],
       requiredEvents: ['select', 'change'],
       requiredBindings: [{ source: 'datasource', datasourceUid: 'crm' }],
-      requiredText: ['Customers', 'Customer detail', 'Status'],
+      requiredText: ['Customers', 'Customer detail', 'Profile', 'Status'],
       forbiddenKindPrefixes: ['DesignKit', 'GridKit', 'ChartKit', 'BaseKit'],
     },
   },

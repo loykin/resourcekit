@@ -31,7 +31,7 @@ export const customerCrmScenario: LoykinResource = {
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'PageTopBar',
-          spec: { left: 'Customers' },
+          spec: { left: 'Customers', height: '76px' },
           slots: [
             {
               name: 'right',
@@ -85,54 +85,61 @@ export const customerCrmScenario: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'DataBody',
-          spec: { title: 'Customer detail', description: 'Scenario output using generic resource vocabulary.' },
+          kind: 'RecordScope',
+          spec: {
+            data: {
+              source: 'datasource',
+              datasourceUid: 'crm',
+              query: { id: '${customerId}' },
+            },
+          },
           slots: [
             {
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'DataBodySummary',
-                  spec: {},
+                  kind: 'DataBody',
+                  spec: { title: 'Customer detail', description: 'Selected customer profile and revenue trend.' },
                   slots: [
                     {
                       children: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyGroup',
-                          spec: { title: 'Selected customer', layout: 'inline', variant: 'bordered' },
+                          spec: { title: 'Profile', layout: 'inline', variant: 'plain' },
                           slots: [
                             {
                               children: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DataBodyField',
-                                  spec: { label: 'Customer ID', valueRef: 'variables.customerId' },
-                                },
-                                {
-                                  apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DataBodyField',
-                                  spec: { label: 'Status filter', valueRef: 'variables.status' },
+                                  kind: 'ObjectFields',
+                                  spec: {
+                                    fields: [
+                                      { label: 'Name', path: 'name' },
+                                      { label: 'Status', path: 'status', display: 'badge' },
+                                      { label: 'Revenue', path: 'revenue' },
+                                    ],
+                                  },
                                 },
                               ],
                             },
                           ],
                         },
+                        {
+                          apiVersion: 'loykin.dev/v1alpha1',
+                          kind: 'ChartView',
+                          spec: {
+                            chart: {
+                              type: 'bar',
+                              height: 220,
+                              categories: scenarioCustomerRows.map((row) => row.name),
+                              series: [{ label: 'Revenue', color: '#2563eb', values: scenarioCustomerRows.map((row) => row.revenue) }],
+                            },
+                          },
+                        },
                       ],
                     },
                   ],
-                },
-                {
-                  apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ChartView',
-                  spec: {
-                    chart: {
-                      type: 'bar',
-                      height: 220,
-                      categories: scenarioCustomerRows.map((row) => row.name),
-                      series: [{ label: 'Revenue', color: '#2563eb', values: scenarioCustomerRows.map((row) => row.revenue) }],
-                    },
-                  },
                 },
               ],
             },
@@ -224,7 +231,7 @@ export const metricsDashboardScenario: LoykinResource = {
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBodyGroup',
-                  spec: { title: 'Current status', layout: 'inline', variant: 'bordered' },
+                  spec: { title: 'Current status', layout: 'inline', variant: 'plain' },
                   slots: [
                     {
                       children: [

@@ -67,9 +67,9 @@ function jsonDataUrl(value: unknown): string {
 const playgroundDatasourceResolver: DataResolver = async (binding) => {
   if (binding.source !== 'datasource' || binding.datasourceUid !== 'crm') return []
   const query = typeof binding.query === 'object' && binding.query !== null ? (binding.query as Record<string, unknown>) : {}
-  if (query.table !== 'customers') return []
   const status = typeof query.status === 'string' ? query.status : undefined
-  return status ? customerRows.filter((row) => row.status === status) : customerRows
+  const id = typeof query.id === 'string' ? query.id : undefined
+  return customerRows.filter((row) => (!status || row.status === status) && (!id || row.id === id))
 }
 
 // In-memory CRUD backend — stands in for a real REST API or datasource so the
@@ -119,10 +119,11 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'Panel',
-          spec: { title: 'Customers', eyebrow: 'resourcekit playground' },
+          kind: 'PageTopBar',
+          spec: { left: 'Customers', height: '76px' },
           slots: [
             {
+              name: 'right',
               children: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
@@ -144,19 +145,6 @@ const customerWorkspace: LoykinResource = {
                     },
                   },
                 },
-                {
-                  apiVersion: 'loykin.dev/v1alpha1',
-                  kind: 'ActionButton',
-                  spec: {
-                    label: 'Select Grace',
-                    value: '2',
-                    size: 'sm',
-                    variant: 'outline',
-                    events: {
-                      click: { kind: 'setVariable', variable: 'customerId', from: 'value' },
-                    },
-                  },
-                },
               ],
             },
           ],
@@ -168,15 +156,21 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'TableView',
+          kind: 'SelectableList',
           spec: {
-            title: 'Customers',
             data: {
               source: 'static',
               rows: customerRows,
             },
+            idField: 'id',
+            selectedRef: 'variables.customerId',
+            primary: { field: 'name' },
+            secondary: [
+              { field: 'status', label: 'Status' },
+              { field: 'revenue', label: 'Revenue' },
+            ],
             events: {
-              rowSelect: { kind: 'setVariable', variable: 'customerId', from: 'row.id' },
+              select: { kind: 'setVariable', variable: 'customerId', from: 'row.id' },
             },
           },
         },
@@ -187,8 +181,14 @@ const customerWorkspace: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'Panel',
-          spec: { title: 'Customer detail', eyebrow: 'DesignKit Panel' },
+          kind: 'RecordScope',
+          spec: {
+            data: {
+              source: 'datasource',
+              datasourceUid: 'crm',
+              query: { id: '${customerId}' },
+            },
+          },
           slots: [
             {
               children: [
@@ -196,8 +196,8 @@ const customerWorkspace: LoykinResource = {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBody',
                   spec: {
-                    title: 'Runtime state',
-                    description: 'Resource document rendered with real kit adapters.',
+                    title: 'Customer profile',
+                    description: 'Selected record rendered through a scoped detail view.',
                   },
                   slots: [
                     {
@@ -205,19 +205,20 @@ const customerWorkspace: LoykinResource = {
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyGroup',
-                          spec: { title: 'Selection', layout: 'inline', variant: 'bordered' },
+                          spec: { title: 'Overview', layout: 'inline', variant: 'plain' },
                           slots: [
                             {
                               children: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DataBodyField',
-                                  spec: { label: 'Customer', value: 'Selected through ResourceRenderer events' },
-                                },
-                                {
-                                  apiVersion: 'loykin.dev/v1alpha1',
-                                  kind: 'DataBodyField',
-                                  spec: { label: 'Status filter', value: 'Bound through FilterControl' },
+                                  kind: 'ObjectFields',
+                                  spec: {
+                                    fields: [
+                                      { label: 'Name', path: 'name' },
+                                      { label: 'Status', path: 'status', display: 'badge' },
+                                      { label: 'Revenue', path: 'revenue' },
+                                    ],
+                                  },
                                 },
                               ],
                             },
@@ -1009,7 +1010,7 @@ const userEditor: LoykinResource = {
   kind: 'ListDetail',
   metadata: { name: 'user-editor' },
   spec: {
-    listWidth: 540,
+    listWidth: 380,
     selectionVariable: 'userId',
     variables: [
       { name: 'userId', type: 'string', default: '1' },
@@ -1022,27 +1023,19 @@ const userEditor: LoykinResource = {
       children: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
-          kind: 'TableView',
+          kind: 'SelectableList',
           spec: {
-            title: 'Users',
-            enableSorting: true,
-            tableHeight: 480,
             data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
-            columns: {
-              id: { label: 'ID', flex: 0.5, tone: 'muted' },
-              name: { label: 'Name', flex: 1.2, emphasis: 'strong' },
-              email: { label: 'Email', flex: 1.4, tone: 'muted' },
-              role: { label: 'Role', flex: 0.8, display: 'badge', variant: 'outline' },
-              status: {
-                label: 'Status',
-                flex: 0.8,
-                display: 'badge',
-                map: { Active: 'default', Pending: 'secondary', Inactive: 'outline' },
-              },
-              joined: { label: 'Joined', type: 'date', flex: 0.9, tone: 'muted' },
-            },
+            idField: 'id',
+            selectedRef: 'variables.userId',
+            primary: { field: 'name' },
+            secondary: [
+              { field: 'email' },
+              { field: 'role', label: 'Role' },
+              { field: 'status', label: 'Status' },
+            ],
             events: {
-              rowSelect: { kind: 'setVariable', variable: 'userId', from: 'row.id' },
+              select: { kind: 'setVariable', variable: 'userId', from: 'row.id' },
             },
           },
         },
@@ -1085,7 +1078,7 @@ const userEditor: LoykinResource = {
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
                                   kind: 'DataBodyGroup',
-                                  spec: { title: 'Profile', layout: 'horizontal', variant: 'bordered' },
+                                  spec: { title: 'Profile', layout: 'stacked', variant: 'plain' },
                                   slots: [
                                     {
                                       children: [
@@ -1500,6 +1493,20 @@ const styles = `
   }
   .rk-render-body > * {
     min-width: 0;
+  }
+  .rk-render-body .layout-databody [data-slot="data-page-tabs"],
+  .rk-render-body .layout-databody > .shrink-0.border-b,
+  .rk-render-body .layout-list-detail aside,
+  .rk-render-body .layout-list-detail main > .border-b,
+  .rk-render-body .resourcekit-selectable-list > button {
+    border-color: var(--border) !important;
+  }
+  .rk-render-body .layout-databody [data-slot="data-page-tab"][data-active="true"] {
+    border-bottom-color: var(--primary) !important;
+  }
+  .rk-render-body .resourcekit-selectable-list {
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
   }
   .rk-json-sheet-content {
     display: grid;
