@@ -13,7 +13,7 @@
   "slots": [
     {
       "name": "topBar",
-      "children": [
+      "items": [
         {
           "apiVersion": "loykin.dev/v1alpha1",
           "kind": "PageTopBar",
@@ -21,7 +21,7 @@
           "slots": [
             {
               "name": "right",
-              "children": [
+              "items": [
                 {
                   "apiVersion": "loykin.dev/v1alpha1",
                   "kind": "FilterControl",
@@ -48,7 +48,7 @@
     },
     {
       "name": "list",
-      "children": [
+      "items": [
         {
           "apiVersion": "loykin.dev/v1alpha1",
           "kind": "SelectableList",
@@ -72,7 +72,7 @@
     },
     {
       "name": "detail",
-      "children": [
+      "items": [
         {
           "apiVersion": "loykin.dev/v1alpha1",
           "kind": "RecordScope",
@@ -85,21 +85,21 @@
           },
           "slots": [
             {
-              "children": [
+              "items": [
                 {
                   "apiVersion": "loykin.dev/v1alpha1",
                   "kind": "DataBody",
                   "spec": { "title": "Customer detail", "description": "Selected customer profile and revenue trend." },
                   "slots": [
                     {
-                      "children": [
+                      "items": [
                         {
                           "apiVersion": "loykin.dev/v1alpha1",
                           "kind": "DataBodyGroup",
                           "spec": { "title": "Profile", "layout": "inline", "variant": "plain" },
                           "slots": [
                             {
-                              "children": [
+                              "items": [
                                 {
                                   "apiVersion": "loykin.dev/v1alpha1",
                                   "kind": "ObjectFields",

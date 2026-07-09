@@ -6,24 +6,24 @@
   "slots": [
     {
       "name": "topBar",
-      "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Metrics" } }]
+      "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Metrics" } }]
     },
     {
-      "children": [
+      "items": [
         {
           "apiVersion": "loykin.dev/v1alpha1",
           "kind": "DataBodySummary",
           "spec": {},
           "slots": [
             {
-              "children": [
+              "items": [
                 {
                   "apiVersion": "loykin.dev/v1alpha1",
                   "kind": "DataBodyGroup",
                   "spec": { "title": "Current status", "layout": "inline", "variant": "plain" },
                   "slots": [
                     {
-                      "children": [
+                      "items": [
                         { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Services", "value": "3" } },
                         { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Errors", "value": "47" } }
                       ]
@@ -40,7 +40,7 @@
           "spec": { "id": "overview", "label": "Overview", "count": 3 },
           "slots": [
             {
-              "children": [
+              "items": [
                 {
                   "apiVersion": "loykin.dev/v1alpha1",
                   "kind": "TableView",

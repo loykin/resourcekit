@@ -34,8 +34,8 @@ describe('ResourceRenderer', () => {
       kind: 'Panel',
       spec: {},
       slots: [
-        { children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Body' } }] },
-        { name: 'aside', children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Aside' } }] },
+        { items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Body' } }] },
+        { name: 'aside', items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Aside' } }] },
       ],
     }
 
@@ -74,7 +74,7 @@ describe('ResourceRenderer', () => {
       apiVersion: 'loykin.dev/v1alpha1',
       kind: 'List',
       spec: {},
-      slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Entry' } }] }],
+      slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Entry' } }] }],
     }
 
     expect(renderToStaticMarkup(createElement(ResourceRenderer, { resource, registry }))).toBe('<ul><li><span>Entry</span></li></ul>')

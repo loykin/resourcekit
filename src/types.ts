@@ -28,7 +28,7 @@ export interface LoykinMetadata {
 /** Parent-owned placement group. `name` is omitted for the default slot. */
 export interface LoykinSlot {
   name?: string
-  children: LoykinResource[]
+  items: LoykinResource[]
 }
 
 // ─── Slot policy ──────────────────────────────────────────────────────────────

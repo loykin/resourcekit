@@ -53,8 +53,8 @@ function slotName(slot: unknown): string | undefined {
 }
 
 function children(slot: unknown): unknown[] {
-  if (!isRecord(slot) || !Array.isArray(slot.children)) return []
-  return slot.children
+  if (!isRecord(slot) || !Array.isArray(slot.items)) return []
+  return slot.items
 }
 
 function validateRule(
@@ -70,7 +70,7 @@ function validateRule(
   if (rule.accepts) {
     children(slot).forEach((child, index) => {
       if (isRecord(child) && typeof child.kind === 'string' && !rule.accepts?.includes(child.kind)) {
-        addIssue(issues, `${path}/children/${index}/kind`, `kind ${child.kind} is not accepted by this slot`)
+        addIssue(issues, `${path}/items/${index}/kind`, `kind ${child.kind} is not accepted by this slot`)
       }
     })
   }
@@ -91,8 +91,8 @@ function validateSlots(resource: LoykinResource, registry: ResourceRegistry | Sc
       addIssue(issues, `${path}/slots/${index}`, 'slot must be an object')
       return
     }
-    if (!Array.isArray(slot.children)) {
-      addIssue(issues, `${path}/slots/${index}/children`, 'slot children must be an array')
+    if (!Array.isArray(slot.items)) {
+      addIssue(issues, `${path}/slots/${index}/items`, 'slot items must be an array')
       return
     }
 

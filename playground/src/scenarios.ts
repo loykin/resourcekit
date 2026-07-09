@@ -27,7 +27,7 @@ export const customerCrmScenario: LoykinResource = {
   slots: [
     {
       name: 'topBar',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'PageTopBar',
@@ -35,7 +35,7 @@ export const customerCrmScenario: LoykinResource = {
           slots: [
             {
               name: 'right',
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'FilterControl',
@@ -62,7 +62,7 @@ export const customerCrmScenario: LoykinResource = {
     },
     {
       name: 'list',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'SelectableList',
@@ -82,7 +82,7 @@ export const customerCrmScenario: LoykinResource = {
     },
     {
       name: 'detail',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'RecordScope',
@@ -95,21 +95,21 @@ export const customerCrmScenario: LoykinResource = {
           },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBody',
                   spec: { title: 'Customer detail', description: 'Selected customer profile and revenue trend.' },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyGroup',
                           spec: { title: 'Profile', layout: 'inline', variant: 'plain' },
                           slots: [
                             {
-                              children: [
+                              items: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
                                   kind: 'ObjectFields',
@@ -149,7 +149,7 @@ export const customerCrmScenario: LoykinResource = {
     },
     {
       name: 'emptyDetail',
-      children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Panel', spec: { title: 'No customer selected' } }],
+      items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Panel', spec: { title: 'No customer selected' } }],
     },
   ],
 }
@@ -162,10 +162,10 @@ export const settingsFormScenario: LoykinResource = {
   slots: [
     {
       name: 'topBar',
-      children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Settings / Workspace' } }],
+      items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Settings / Workspace' } }],
     },
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'ResourceForm',
@@ -176,25 +176,25 @@ export const settingsFormScenario: LoykinResource = {
           },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBodySection',
                   spec: { id: 'general', label: 'General', description: 'Workspace identity' },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyRow',
                           spec: { label: 'Name', required: true },
-                          slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'InputControl', spec: { name: 'name', value: 'Acme Operations' } }] }],
+                          slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'InputControl', spec: { name: 'name', value: 'Acme Operations' } }] }],
                         },
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyRow',
                           spec: { label: 'Slug' },
-                          slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'InputControl', spec: { name: 'slug', value: 'acme-ops' } }] }],
+                          slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'InputControl', spec: { name: 'slug', value: 'acme-ops' } }] }],
                         },
                       ],
                     },
@@ -217,24 +217,24 @@ export const metricsDashboardScenario: LoykinResource = {
   slots: [
     {
       name: 'topBar',
-      children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Metrics' } }],
+      items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Metrics' } }],
     },
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'DataBodySummary',
           spec: {},
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBodyGroup',
                   spec: { title: 'Current status', layout: 'inline', variant: 'plain' },
                   slots: [
                     {
-                      children: [
+                      items: [
                         { apiVersion: 'loykin.dev/v1alpha1', kind: 'DataBodyField', spec: { label: 'Services', value: '3' } },
                         { apiVersion: 'loykin.dev/v1alpha1', kind: 'DataBodyField', spec: { label: 'Errors', value: '47' } },
                       ],
@@ -251,7 +251,7 @@ export const metricsDashboardScenario: LoykinResource = {
           spec: { id: 'overview', label: 'Overview', count: scenarioMetricsRows.length },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'TableView',

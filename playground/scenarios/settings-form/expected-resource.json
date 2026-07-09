@@ -6,10 +6,10 @@
   "slots": [
     {
       "name": "topBar",
-      "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Settings / Workspace" } }]
+      "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Settings / Workspace" } }]
     },
     {
-      "children": [
+      "items": [
         {
           "apiVersion": "loykin.dev/v1alpha1",
           "kind": "ResourceForm",
@@ -20,25 +20,25 @@
           },
           "slots": [
             {
-              "children": [
+              "items": [
                 {
                   "apiVersion": "loykin.dev/v1alpha1",
                   "kind": "DataBodySection",
                   "spec": { "id": "general", "label": "General", "description": "Workspace identity" },
                   "slots": [
                     {
-                      "children": [
+                      "items": [
                         {
                           "apiVersion": "loykin.dev/v1alpha1",
                           "kind": "DataBodyRow",
                           "spec": { "label": "Name", "required": true },
-                          "slots": [{ "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "name", "value": "Acme Operations" } }] }]
+                          "slots": [{ "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "name", "value": "Acme Operations" } }] }]
                         },
                         {
                           "apiVersion": "loykin.dev/v1alpha1",
                           "kind": "DataBodyRow",
                           "spec": { "label": "Slug" },
-                          "slots": [{ "children": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "slug", "value": "acme-ops" } }] }]
+                          "slots": [{ "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "slug", "value": "acme-ops" } }] }]
                         }
                       ]
                     }

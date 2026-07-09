@@ -116,7 +116,7 @@ const customerWorkspace: LoykinResource = {
   slots: [
     {
       name: 'topBar',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'PageTopBar',
@@ -124,7 +124,7 @@ const customerWorkspace: LoykinResource = {
           slots: [
             {
               name: 'right',
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'FilterControl',
@@ -153,7 +153,7 @@ const customerWorkspace: LoykinResource = {
     },
     {
       name: 'list',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'SelectableList',
@@ -178,7 +178,7 @@ const customerWorkspace: LoykinResource = {
     },
     {
       name: 'detail',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'RecordScope',
@@ -191,7 +191,7 @@ const customerWorkspace: LoykinResource = {
           },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBody',
@@ -201,14 +201,14 @@ const customerWorkspace: LoykinResource = {
                   },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyGroup',
                           spec: { title: 'Overview', layout: 'inline', variant: 'plain' },
                           slots: [
                             {
-                              children: [
+                              items: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
                                   kind: 'ObjectFields',
@@ -251,14 +251,14 @@ const customerWorkspace: LoykinResource = {
     },
     {
       name: 'emptyDetail',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'No customer selected' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'Text',
@@ -280,7 +280,7 @@ const metricsChart: LoykinResource = {
   spec: { title: 'Monthly revenue', eyebrow: 'ChartKit example' },
   slots: [
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Text',
@@ -314,7 +314,7 @@ const chartGallery: LoykinResource = {
   slots: [
     {
       name: 'topBar',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
@@ -324,14 +324,14 @@ const chartGallery: LoykinResource = {
     },
     {
       name: 'leftPane',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Donut' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'ChartView',
@@ -360,14 +360,14 @@ const chartGallery: LoykinResource = {
     },
     {
       name: 'mainPane',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Time series' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'ChartView',
@@ -398,14 +398,14 @@ const chartGallery: LoykinResource = {
     },
     {
       name: 'rightPane',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Stat' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'ChartView',
@@ -463,7 +463,7 @@ const workbenchTemplate: LoykinResource = {
   slots: [
     {
       name: 'topBar',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
@@ -473,21 +473,21 @@ const workbenchTemplate: LoykinResource = {
     },
     {
       name: 'leftPane',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'DataBody',
           spec: { title: 'Queue', description: 'Compact side content.' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBodyGroup',
                   spec: { title: 'Counts', variant: 'bordered' },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyField',
@@ -510,7 +510,7 @@ const workbenchTemplate: LoykinResource = {
     },
     {
       name: 'mainPane',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'TableView',
@@ -531,14 +531,14 @@ const workbenchTemplate: LoykinResource = {
     },
     {
       name: 'rightPane',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Throughput' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'ChartView',
@@ -572,7 +572,7 @@ const fromValueBinding: LoykinResource = {
   slots: [
     {
       name: 'actions',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'ActionButton',
@@ -601,21 +601,21 @@ const fromValueBinding: LoykinResource = {
       ],
     },
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'DataBody',
           spec: { title: 'Runtime variable' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBodyGroup',
                   spec: { title: 'Selected plan', layout: 'inline', variant: 'bordered' },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyField',
@@ -650,7 +650,7 @@ const fromRowBinding: LoykinResource = {
   slots: [
     {
       name: 'list',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'TableView',
@@ -669,14 +669,14 @@ const fromRowBinding: LoykinResource = {
     },
     {
       name: 'detail',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Selected incident', eyebrow: 'from: row.id' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'DataBodyField',
@@ -703,7 +703,7 @@ const restDataTable: LoykinResource = {
   slots: [
     {
       name: 'actions',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'ActionButton',
@@ -717,7 +717,7 @@ const restDataTable: LoykinResource = {
       ],
     },
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'TableView',
@@ -768,7 +768,7 @@ const datasourceDataTable: LoykinResource = {
   slots: [
     {
       name: 'actions',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'ActionButton',
@@ -783,7 +783,7 @@ const datasourceDataTable: LoykinResource = {
     },
     {
       name: 'toolbarLeft',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'FilterControl',
@@ -806,7 +806,7 @@ const datasourceDataTable: LoykinResource = {
       ],
     },
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'TableView',
@@ -860,7 +860,7 @@ const userManagement: LoykinResource = {
   slots: [
     {
       name: 'actions',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'ActionButton',
@@ -876,7 +876,7 @@ const userManagement: LoykinResource = {
       ],
     },
     {
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'TableView',
@@ -909,7 +909,7 @@ const userManagement: LoykinResource = {
           spec: { openVariable: 'createOpen', title: 'Add member', width: 440 },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'ResourceForm',
@@ -927,7 +927,7 @@ const userManagement: LoykinResource = {
                   },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'DataBodyGroup',
@@ -939,14 +939,14 @@ const userManagement: LoykinResource = {
                           },
                           slots: [
                             {
-                              children: [
+                              items: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
                                   kind: 'DataBodyRow',
                                   spec: { label: 'Name', required: true },
                                   slots: [
                                     {
-                                      children: [
+                                      items: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
                                           kind: 'InputControl',
@@ -962,7 +962,7 @@ const userManagement: LoykinResource = {
                                   spec: { label: 'Email', required: true },
                                   slots: [
                                     {
-                                      children: [
+                                      items: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
                                           kind: 'InputControl',
@@ -978,7 +978,7 @@ const userManagement: LoykinResource = {
                                   spec: { label: 'Role' },
                                   slots: [
                                     {
-                                      children: [
+                                      items: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
                                           kind: 'InputControl',
@@ -1020,7 +1020,7 @@ const userEditor: LoykinResource = {
   slots: [
     {
       name: 'list',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'SelectableList',
@@ -1043,14 +1043,14 @@ const userEditor: LoykinResource = {
     },
     {
       name: 'detail',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Edit user', eyebrow: 'record scope → form → mutation → refetch' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'RecordScope',
@@ -1059,7 +1059,7 @@ const userEditor: LoykinResource = {
                   },
                   slots: [
                     {
-                      children: [
+                      items: [
                         {
                           apiVersion: 'loykin.dev/v1alpha1',
                           kind: 'ResourceForm',
@@ -1074,21 +1074,21 @@ const userEditor: LoykinResource = {
                           },
                           slots: [
                             {
-                              children: [
+                              items: [
                                 {
                                   apiVersion: 'loykin.dev/v1alpha1',
                                   kind: 'DataBodyGroup',
                                   spec: { title: 'Profile', layout: 'stacked', variant: 'plain' },
                                   slots: [
                                     {
-                                      children: [
+                                      items: [
                                         {
                                           apiVersion: 'loykin.dev/v1alpha1',
                                           kind: 'DataBodyRow',
                                           spec: { label: 'Name', required: true },
                                           slots: [
                                             {
-                                              children: [
+                                              items: [
                                                 {
                                                   apiVersion: 'loykin.dev/v1alpha1',
                                                   kind: 'InputControl',
@@ -1104,7 +1104,7 @@ const userEditor: LoykinResource = {
                                           spec: { label: 'Email', required: true },
                                           slots: [
                                             {
-                                              children: [
+                                              items: [
                                                 {
                                                   apiVersion: 'loykin.dev/v1alpha1',
                                                   kind: 'InputControl',
@@ -1120,7 +1120,7 @@ const userEditor: LoykinResource = {
                                           spec: { label: 'Role' },
                                           slots: [
                                             {
-                                              children: [
+                                              items: [
                                                 {
                                                   apiVersion: 'loykin.dev/v1alpha1',
                                                   kind: 'InputControl',
@@ -1150,14 +1150,14 @@ const userEditor: LoykinResource = {
     },
     {
       name: 'emptyDetail',
-      children: [
+      items: [
         {
           apiVersion: 'loykin.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'No user selected' },
           slots: [
             {
-              children: [
+              items: [
                 {
                   apiVersion: 'loykin.dev/v1alpha1',
                   kind: 'Text',
@@ -1313,7 +1313,7 @@ function collectEvents(resource: LoykinResource, path = resource.kind): Array<{ 
   const events: Array<{ path: string; events: unknown }> =
     isRecord(resource.spec) && isRecord(resource.spec.events) ? [{ path, events: resource.spec.events }] : []
   for (const slot of resource.slots ?? []) {
-    slot.children.forEach((child, index) => {
+    slot.items.forEach((child, index) => {
       events.push(...collectEvents(child, `${path}/slots/${slot.name ?? 'default'}/${index}:${child.kind}`))
     })
   }

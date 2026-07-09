@@ -107,7 +107,7 @@ export function evaluateScenarioResource<TSeed>(
 function collectKinds(resource: LoykinResource, kinds: string[] = []): string[] {
   kinds.push(resource.kind)
   for (const slot of resource.slots ?? []) {
-    for (const child of slot.children) collectKinds(child, kinds)
+    for (const child of slot.items) collectKinds(child, kinds)
   }
   return kinds
 }
@@ -127,7 +127,7 @@ function collectVariables(resource: LoykinResource, variables: string[] = []): s
     })
   }
   for (const slot of resource.slots ?? []) {
-    for (const child of slot.children) collectVariables(child, variables)
+    for (const child of slot.items) collectVariables(child, variables)
   }
   return [...new Set(variables)]
 }
@@ -137,7 +137,7 @@ function collectEventNames(resource: LoykinResource, events: string[] = []): str
     events.push(...Object.keys(resource.spec.events))
   }
   for (const slot of resource.slots ?? []) {
-    for (const child of slot.children) collectEventNames(child, events)
+    for (const child of slot.items) collectEventNames(child, events)
   }
   return [...new Set(events)]
 }
@@ -160,7 +160,7 @@ function collectBindings(resource: LoykinResource, bindings: Array<{ source: str
 
   visit(resource.spec)
   for (const slot of resource.slots ?? []) {
-    for (const child of slot.children) collectBindings(child, bindings)
+    for (const child of slot.items) collectBindings(child, bindings)
   }
   return bindings
 }

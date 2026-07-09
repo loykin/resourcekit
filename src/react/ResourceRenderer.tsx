@@ -51,7 +51,7 @@ function collectVariables(resource: LoykinResource, declarations: VariableDeclar
   }
 
   for (const slot of resource.slots ?? []) {
-    for (const child of slot.children) collectVariables(child, declarations)
+    for (const child of slot.items) collectVariables(child, declarations)
   }
 
   return declarations
@@ -164,11 +164,11 @@ function renderKindNode(
     const slotNodes = new Map<string | undefined, ReactNode>()
     const slotEntries = new Map<string | undefined, Array<{ resource: LoykinResource; node: ReactNode }>>()
     for (const [index, slot] of slots.entries()) {
-      const nodes = renderNodes(slot.children, props, `slot-${index}-${slot.name ?? 'default'}`)
+      const nodes = renderNodes(slot.items, props, `slot-${index}-${slot.name ?? 'default'}`)
       slotNodes.set(slot.name, nodes)
       slotEntries.set(
         slot.name,
-        slot.children.map((child, childIndex) => ({
+        slot.items.map((child, childIndex) => ({
           resource: child,
           node: Array.isArray(nodes) ? nodes[childIndex] : null,
         })),
@@ -186,7 +186,7 @@ function renderKindNode(
           if (node === undefined || node === null) throw new Error(`required slot ${name} is missing`)
           return node
         },
-        resources: (name: string) => slots.find((slot) => slot.name === name)?.children ?? [],
+        resources: (name: string) => slots.find((slot) => slot.name === name)?.items ?? [],
         entries: (name?: string) => slotEntries.get(name) ?? [],
       },
       data: {

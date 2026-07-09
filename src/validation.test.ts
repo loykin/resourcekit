@@ -46,7 +46,7 @@ describe('validateResource', () => {
         apiVersion: 'loykin.dev/v1alpha1',
         kind: 'Panel',
         spec: { title: 'Customers', data: { source: 'static', rows: [{ id: '1' }] } },
-        slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Hello' } }] }],
+        slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Hello' } }] }],
       },
       registry(),
     )
@@ -60,14 +60,14 @@ describe('validateResource', () => {
         apiVersion: 'loykin.dev/v1alpha1',
         kind: 'Panel',
         spec: { title: 1 },
-        slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Panel', spec: { title: 'Nested' } }] }],
+        slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Panel', spec: { title: 'Nested' } }] }],
       },
       registry(),
     )
 
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.path)).toContain('/spec/title')
-    expect(result.issues.map((issue) => issue.path)).toContain('/slots/0/children/0/kind')
+    expect(result.issues.map((issue) => issue.path)).toContain('/slots/0/items/0/kind')
   })
 
   it('enforces scoped kinds, variables, datasources, actions, and maxDepth', () => {
@@ -89,7 +89,7 @@ describe('validateResource', () => {
           events: { rowSelect: { kind: 'action', action: 'customers.delete' } },
           variables: [{ name: 'tenant', default: 'other' }],
         },
-        slots: [{ children: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Hidden' } }] }],
+        slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Hidden' } }] }],
       },
       scoped,
     )

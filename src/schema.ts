@@ -109,7 +109,7 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
 
   const slotItemSchema = (name: string | undefined, accepts?: string[], min?: number, max?: number): JsonSchema => {
     const properties: Record<string, unknown> = {
-      children: {
+      items: {
         type: 'array',
         items: resourceItemsForAccepts(accepts),
       },
@@ -119,14 +119,14 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
     } else {
       properties.name = { const: name }
     }
-    const children = properties.children as Record<string, unknown>
-    if (min !== undefined) children.minItems = min
-    if (max !== undefined) children.maxItems = max
+    const itemsProp = properties.items as Record<string, unknown>
+    if (min !== undefined) itemsProp.minItems = min
+    if (max !== undefined) itemsProp.maxItems = max
 
     return {
       type: 'object',
       additionalProperties: false,
-      required: ['children'],
+      required: ['items'],
       properties,
     }
   }
