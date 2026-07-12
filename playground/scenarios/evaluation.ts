@@ -1,5 +1,5 @@
 import { buildDocumentSchema, scanVariableRefs, validateResource } from '../../src'
-import type { JsonSchema, LoykinResource, ResourceRegistry, ScopeOptions, ValidationIssue } from '../../src'
+import type { JsonSchema, Resource, ResourceRegistry, ScopeOptions, ValidationIssue } from '../../src'
 import type { KindRenderFn } from '../../src/react'
 
 export interface ScenarioDefinition<TSeed = unknown> {
@@ -7,7 +7,7 @@ export interface ScenarioDefinition<TSeed = unknown> {
   prompt: string
   scope: ScopeOptions
   seedData: TSeed
-  expectedResource: LoykinResource
+  expectedResource: Resource
   rubric: ScenarioRubric
 }
 
@@ -50,7 +50,7 @@ export function buildGenerationPayload<TSeed>(
 
 export function evaluateScenarioResource<TSeed>(
   scenario: ScenarioDefinition<TSeed>,
-  candidate: LoykinResource,
+  candidate: Resource,
   registry: ResourceRegistry<KindRenderFn>,
 ): ScenarioEvaluation {
   const scoped = registry.scope(scenario.scope)
@@ -104,7 +104,7 @@ export function evaluateScenarioResource<TSeed>(
   }
 }
 
-function collectKinds(resource: LoykinResource, kinds: string[] = []): string[] {
+function collectKinds(resource: Resource, kinds: string[] = []): string[] {
   kinds.push(resource.kind)
   for (const slot of resource.slots ?? []) {
     for (const child of slot.items) collectKinds(child, kinds)
@@ -112,7 +112,7 @@ function collectKinds(resource: LoykinResource, kinds: string[] = []): string[] 
   return kinds
 }
 
-function collectVariables(resource: LoykinResource, variables: string[] = []): string[] {
+function collectVariables(resource: Resource, variables: string[] = []): string[] {
   const spec = resource.spec
   if (isRecord(spec)) {
     if (Array.isArray(spec.variables)) {
@@ -132,7 +132,7 @@ function collectVariables(resource: LoykinResource, variables: string[] = []): s
   return [...new Set(variables)]
 }
 
-function collectEventNames(resource: LoykinResource, events: string[] = []): string[] {
+function collectEventNames(resource: Resource, events: string[] = []): string[] {
   if (isRecord(resource.spec) && isRecord(resource.spec.events)) {
     events.push(...Object.keys(resource.spec.events))
   }
@@ -142,7 +142,7 @@ function collectEventNames(resource: LoykinResource, events: string[] = []): str
   return [...new Set(events)]
 }
 
-function collectBindings(resource: LoykinResource, bindings: Array<{ source: string; datasourceUid?: string }> = []): Array<{ source: string; datasourceUid?: string }> {
+function collectBindings(resource: Resource, bindings: Array<{ source: string; datasourceUid?: string }> = []): Array<{ source: string; datasourceUid?: string }> {
   const visit = (value: unknown) => {
     if (Array.isArray(value)) {
       value.forEach(visit)

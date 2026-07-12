@@ -27,11 +27,12 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
-import { Braces, LayoutDashboard, Sparkles } from 'lucide-react'
-import { buildDocumentSchema, createRegistry, restResolver, staticResolver, validateResource } from '@loykin/resourcekit'
-import type { DataResolver, LoykinResource, MutationResolver } from '@loykin/resourcekit'
+import { Braces, LayoutDashboard, Route, Sparkles } from 'lucide-react'
+import { createRegistry, nextStage, nextStageBatch, restResolver, singleKindSchema, staticResolver, validateResource } from '@loykin/resourcekit'
+import type { DataResolver, JsonSchema, Resource, MutationResolver, ValidationResult } from '@loykin/resourcekit'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
+import { publicKindNames } from '@loykin/resourcekit/adapters'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
 import { scenarioExamples } from './scenarios'
 
@@ -101,8 +102,8 @@ const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => 
   return { ...row, version: String(Date.now()) }
 }
 
-const customerWorkspace: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const customerWorkspace: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'customers' },
   spec: {
@@ -118,7 +119,7 @@ const customerWorkspace: LoykinResource = {
       name: 'topBar',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'PageTopBar',
           spec: { left: 'Customers', height: '76px' },
           slots: [
@@ -126,7 +127,7 @@ const customerWorkspace: LoykinResource = {
               name: 'right',
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'FilterControl',
                   spec: {
                     valueRef: 'variables.status',
@@ -155,7 +156,7 @@ const customerWorkspace: LoykinResource = {
       name: 'list',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
           spec: {
             data: {
@@ -180,7 +181,7 @@ const customerWorkspace: LoykinResource = {
       name: 'detail',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
           spec: {
             data: {
@@ -193,7 +194,7 @@ const customerWorkspace: LoykinResource = {
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBody',
                   spec: {
                     title: 'Customer profile',
@@ -203,14 +204,14 @@ const customerWorkspace: LoykinResource = {
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyGroup',
                           spec: { title: 'Overview', layout: 'inline', variant: 'plain' },
                           slots: [
                             {
                               items: [
                                 {
-                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                   kind: 'ObjectFields',
                                   spec: {
                                     fields: [
@@ -225,7 +226,7 @@ const customerWorkspace: LoykinResource = {
                           ],
                         },
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'ChartView',
                           spec: {
                             chart: {
@@ -253,14 +254,14 @@ const customerWorkspace: LoykinResource = {
       name: 'emptyDetail',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'No customer selected' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'Text',
                   spec: { text: 'Select a row to inspect the renderer variable binding path.' },
                 },
@@ -273,8 +274,49 @@ const customerWorkspace: LoykinResource = {
   ],
 }
 
-const metricsChart: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+// Built by a blind subagent test of examples/mcp-server: zero prior knowledge
+// of resourcekit's schema, only MCP tool calls + their JSON responses.
+// Validated on the first attempt. See the session for the full transcript.
+const trendingReposPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataBody',
+  metadata: { name: 'trending-repos-page' },
+  spec: {
+    title: "This Week's Top Trending Repositories",
+    description: 'The top 5 trending GitHub repositories this week, by star count.',
+  },
+  slots: [
+    {
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'TableView',
+          spec: {
+            title: 'Top 5 Trending Repositories',
+            data: {
+              source: 'static',
+              rows: [
+                { name: 'torvalds/linux', language: 'C', stars: 178000 },
+                { name: 'facebook/react', language: 'JavaScript', stars: 231000 },
+                { name: 'microsoft/vscode', language: 'TypeScript', stars: 168000 },
+                { name: 'vercel/next.js', language: 'JavaScript', stars: 128000 },
+                { name: 'ollama/ollama', language: 'Go', stars: 100000 },
+              ],
+            },
+            columns: {
+              name: { label: 'Repository', type: 'text' },
+              language: { label: 'Language', type: 'text' },
+              stars: { label: 'Stars', type: 'number', align: 'right' },
+            },
+          },
+        },
+      ],
+    },
+  ],
+}
+
+const metricsChart: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Panel',
   metadata: { name: 'monthly-revenue' },
   spec: { title: 'Monthly revenue', eyebrow: 'ChartKit example' },
@@ -282,12 +324,12 @@ const metricsChart: LoykinResource = {
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Text',
           spec: { text: 'A smaller resource document that renders one chart leaf.' },
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ChartView',
           spec: {
             chart: {
@@ -306,8 +348,8 @@ const metricsChart: LoykinResource = {
   ],
 }
 
-const chartGallery: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const chartGallery: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
   metadata: { name: 'chart-gallery' },
   spec: { leftWidth: 360, rightWidth: 360 },
@@ -316,7 +358,7 @@ const chartGallery: LoykinResource = {
       name: 'topBar',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Chart gallery', eyebrow: 'ChartKit specs rendered from JSON' },
         },
@@ -326,14 +368,14 @@ const chartGallery: LoykinResource = {
       name: 'leftPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Donut' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ChartView',
                   spec: {
                     chart: {
@@ -362,14 +404,14 @@ const chartGallery: LoykinResource = {
       name: 'mainPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Time series' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ChartView',
                   spec: {
                     chart: {
@@ -400,14 +442,14 @@ const chartGallery: LoykinResource = {
       name: 'rightPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Stat' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ChartView',
                   spec: {
                     chart: {
@@ -427,7 +469,7 @@ const chartGallery: LoykinResource = {
                   },
                 },
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ChartView',
                   spec: {
                     chart: {
@@ -455,8 +497,8 @@ const chartGallery: LoykinResource = {
   ],
 }
 
-const workbenchTemplate: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const workbenchTemplate: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
   metadata: { name: 'operations-workbench' },
   spec: { leftWidth: 320, rightWidth: 340 },
@@ -465,7 +507,7 @@ const workbenchTemplate: LoykinResource = {
       name: 'topBar',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Operations workbench', eyebrow: 'Workbench' },
         },
@@ -475,26 +517,26 @@ const workbenchTemplate: LoykinResource = {
       name: 'leftPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DataBody',
           spec: { title: 'Queue', description: 'Compact side content.' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBodyGroup',
                   spec: { title: 'Counts', variant: 'bordered' },
                   slots: [
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyField',
                           spec: { label: 'Open', value: '24' },
                         },
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyField',
                           spec: { label: 'Blocked', value: '3' },
                         },
@@ -512,7 +554,7 @@ const workbenchTemplate: LoykinResource = {
       name: 'mainPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TableView',
           spec: {
             title: 'Tasks',
@@ -533,14 +575,14 @@ const workbenchTemplate: LoykinResource = {
       name: 'rightPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Throughput' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ChartView',
                   spec: {
                     chart: {
@@ -560,8 +602,8 @@ const workbenchTemplate: LoykinResource = {
   ],
 }
 
-const fromValueBinding: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const fromValueBinding: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Panel',
   metadata: { name: 'from-value-binding' },
   spec: {
@@ -574,7 +616,7 @@ const fromValueBinding: LoykinResource = {
       name: 'actions',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: {
             label: 'Set Growth',
@@ -586,7 +628,7 @@ const fromValueBinding: LoykinResource = {
           },
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: {
             label: 'Set Enterprise',
@@ -603,21 +645,21 @@ const fromValueBinding: LoykinResource = {
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DataBody',
           spec: { title: 'Runtime variable' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBodyGroup',
                   spec: { title: 'Selected plan', layout: 'inline', variant: 'bordered' },
                   slots: [
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyField',
                           spec: {
                             label: 'variables.selectedPlan',
@@ -638,21 +680,20 @@ const fromValueBinding: LoykinResource = {
   ],
 }
 
-const fromRowBinding: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
-  kind: 'ListDetail',
+const fromRowBinding: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'Workbench',
   metadata: { name: 'from-row-binding' },
   spec: {
-    listWidth: 420,
-    selectionVariable: 'ticketId',
+    rightPaneWidth: 320,
     variables: [{ name: 'ticketId', type: 'string', default: 'INC-1001' }],
   },
   slots: [
     {
-      name: 'list',
+      name: 'mainPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TableView',
           spec: {
             title: 'Incidents',
@@ -668,17 +709,17 @@ const fromRowBinding: LoykinResource = {
       ],
     },
     {
-      name: 'detail',
+      name: 'rightPane',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Selected incident', eyebrow: 'from: row.id' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBodyField',
                   spec: {
                     label: 'variables.ticketId',
@@ -695,8 +736,8 @@ const fromRowBinding: LoykinResource = {
   ],
 }
 
-const restDataTable: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const restDataTable: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'DataBody',
   metadata: { name: 'rest-data-table' },
   spec: { title: 'Users', description: 'Rows resolved through source: "rest" and rowsPath.' },
@@ -705,12 +746,12 @@ const restDataTable: LoykinResource = {
       name: 'actions',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: { label: 'Export', size: 'sm', variant: 'outline' },
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: { label: 'Add User', size: 'sm' },
         },
@@ -719,7 +760,7 @@ const restDataTable: LoykinResource = {
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TableView',
           spec: {
             title: 'Users from REST',
@@ -753,8 +794,8 @@ const restDataTable: LoykinResource = {
   ],
 }
 
-const datasourceDataTable: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const datasourceDataTable: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'DataBody',
   metadata: { name: 'datasource-data-table' },
   spec: {
@@ -770,12 +811,12 @@ const datasourceDataTable: LoykinResource = {
       name: 'actions',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: { label: 'Sync', size: 'sm', variant: 'outline' },
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: { label: 'Add Customer', size: 'sm' },
         },
@@ -785,7 +826,7 @@ const datasourceDataTable: LoykinResource = {
       name: 'toolbarLeft',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'FilterControl',
           spec: {
             valueRef: 'variables.status',
@@ -808,7 +849,7 @@ const datasourceDataTable: LoykinResource = {
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TableView',
           spec: {
             title: 'CRM customers',
@@ -845,8 +886,8 @@ const datasourceDataTable: LoykinResource = {
   ],
 }
 
-const userManagement: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const userManagement: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'DataBody',
   metadata: { name: 'user-management' },
   spec: {
@@ -862,7 +903,7 @@ const userManagement: LoykinResource = {
       name: 'actions',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ActionButton',
           spec: {
             label: 'Add member',
@@ -878,7 +919,7 @@ const userManagement: LoykinResource = {
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TableView',
           spec: {
             enableSorting: true,
@@ -904,14 +945,14 @@ const userManagement: LoykinResource = {
           },
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Sheet',
           spec: { openVariable: 'createOpen', title: 'Add member', width: 440 },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ResourceForm',
                   spec: {
                     submit: {
@@ -929,7 +970,7 @@ const userManagement: LoykinResource = {
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyGroup',
                           spec: {
                             title: 'Profile',
@@ -941,14 +982,14 @@ const userManagement: LoykinResource = {
                             {
                               items: [
                                 {
-                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                   kind: 'DataBodyRow',
                                   spec: { label: 'Name', required: true },
                                   slots: [
                                     {
                                       items: [
                                         {
-                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
                                           kind: 'InputControl',
                                           spec: { name: 'name', placeholder: 'Full name' },
                                         },
@@ -957,14 +998,14 @@ const userManagement: LoykinResource = {
                                   ],
                                 },
                                 {
-                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                   kind: 'DataBodyRow',
                                   spec: { label: 'Email', required: true },
                                   slots: [
                                     {
                                       items: [
                                         {
-                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
                                           kind: 'InputControl',
                                           spec: { name: 'email', type: 'email', placeholder: 'name@acme.com' },
                                         },
@@ -973,14 +1014,14 @@ const userManagement: LoykinResource = {
                                   ],
                                 },
                                 {
-                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                   kind: 'DataBodyRow',
                                   spec: { label: 'Role' },
                                   slots: [
                                     {
                                       items: [
                                         {
-                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
                                           kind: 'InputControl',
                                           spec: { name: 'role', placeholder: 'Admin / Editor / Viewer' },
                                         },
@@ -1005,8 +1046,8 @@ const userManagement: LoykinResource = {
   ],
 }
 
-const userEditor: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+const userEditor: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'user-editor' },
   spec: {
@@ -1022,7 +1063,7 @@ const userEditor: LoykinResource = {
       name: 'list',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
           spec: {
             data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
@@ -1045,14 +1086,14 @@ const userEditor: LoykinResource = {
       name: 'detail',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'Edit user', eyebrow: 'record scope → form → mutation → refetch' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'RecordScope',
                   spec: {
                     data: { source: 'memory', collection: 'users', id: '${userId}', v: '${usersVersion}' },
@@ -1061,7 +1102,7 @@ const userEditor: LoykinResource = {
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'ResourceForm',
                           spec: {
                             submit: {
@@ -1076,21 +1117,21 @@ const userEditor: LoykinResource = {
                             {
                               items: [
                                 {
-                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                   kind: 'DataBodyGroup',
                                   spec: { title: 'Profile', layout: 'stacked', variant: 'plain' },
                                   slots: [
                                     {
                                       items: [
                                         {
-                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
                                           kind: 'DataBodyRow',
                                           spec: { label: 'Name', required: true },
                                           slots: [
                                             {
                                               items: [
                                                 {
-                                                  apiVersion: 'loykin.dev/v1alpha1',
+                                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                                   kind: 'InputControl',
                                                   spec: { name: 'name', fieldRef: 'name', placeholder: 'Full name' },
                                                 },
@@ -1099,14 +1140,14 @@ const userEditor: LoykinResource = {
                                           ],
                                         },
                                         {
-                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
                                           kind: 'DataBodyRow',
                                           spec: { label: 'Email', required: true },
                                           slots: [
                                             {
                                               items: [
                                                 {
-                                                  apiVersion: 'loykin.dev/v1alpha1',
+                                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                                   kind: 'InputControl',
                                                   spec: { name: 'email', type: 'email', fieldRef: 'email', placeholder: 'user@acme.com' },
                                                 },
@@ -1115,14 +1156,14 @@ const userEditor: LoykinResource = {
                                           ],
                                         },
                                         {
-                                          apiVersion: 'loykin.dev/v1alpha1',
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
                                           kind: 'DataBodyRow',
                                           spec: { label: 'Role' },
                                           slots: [
                                             {
                                               items: [
                                                 {
-                                                  apiVersion: 'loykin.dev/v1alpha1',
+                                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                                   kind: 'InputControl',
                                                   spec: { name: 'role', fieldRef: 'role', placeholder: 'Admin / Editor / Viewer' },
                                                 },
@@ -1152,14 +1193,14 @@ const userEditor: LoykinResource = {
       name: 'emptyDetail',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           spec: { title: 'No user selected' },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'Text',
                   spec: { text: 'Select a row to load the record into the form.' },
                 },
@@ -1185,6 +1226,12 @@ const examples = [
     name: 'Customer workspace',
     description: 'List/detail layout with a filter, table, detail panel, and chart.',
     resource: customerWorkspace,
+  },
+  {
+    id: 'trending-repos-page',
+    name: 'Trending repos (MCP blind test)',
+    description: 'Built by a subagent with zero prior schema knowledge, via examples/mcp-server tool calls only.',
+    resource: trendingReposPage,
   },
   {
     id: 'metrics-chart',
@@ -1245,12 +1292,675 @@ registry.use({
 registry.use(createPlaygroundResourceAdapters())
 
 const playgroundScope = registry.scope({
-  apiVersions: ['loykin.dev/v1alpha1'],
+  apiVersions: ['resourcekit.dev/v1alpha1'],
   kinds: {
-    include: registry.listKinds().map((manifest) => manifest.kind),
+    include: publicKindNames(registry),
   },
   maxDepth: 8,
 })
+
+// ─── Step-by-step generation demo ──────────────────────────────────────────
+// Demonstrates nextStage/nextStageBatch directly, with no pre-built loop —
+// every step is a human click. This mirrors how an MCP client (already an
+// agent) consumes these primitives itself: see
+// docs/staged-generation-experiment.md "Final decision" for why resourcekit
+// doesn't ship an orchestration loop of its own. Same registry as the
+// runtime examples above, just scoped to root-eligible templates.
+const stepScope = registry.scope({
+  apiVersions: ['resourcekit.dev/v1alpha1'],
+  kinds: { include: publicKindNames(registry) },
+  rootLevels: ['template'],
+  maxDepth: 8,
+})
+
+interface StepWorkingNode {
+  apiVersion: string
+  kind: string
+  spec: unknown
+  slots: { name?: string; items: StepWorkingNode[] }[]
+}
+
+interface StepCandidate {
+  apiVersion: string
+  kind: string
+  description?: string
+}
+
+function stepResolveRef(schema: JsonSchema, defs: Record<string, JsonSchema>): JsonSchema {
+  if (typeof schema.$ref === 'string') return defs[schema.$ref.replace('#/$defs/', '')] ?? {}
+  return schema
+}
+
+function stepSlotOneOf(propSchema: JsonSchema): JsonSchema[] {
+  const raw = propSchema.type === 'array' ? (propSchema.items as JsonSchema | undefined)?.oneOf : propSchema.oneOf
+  return (raw ?? []) as JsonSchema[]
+}
+
+function stepCandidatesFromOneOf(oneOf: JsonSchema[], defs: Record<string, JsonSchema>): StepCandidate[] {
+  return oneOf.map((branch) => {
+    const resolved = stepResolveRef(branch, defs)
+    const properties = (resolved.properties ?? {}) as Record<string, JsonSchema>
+    return {
+      apiVersion: (properties.apiVersion as JsonSchema | undefined)?.const as string,
+      kind: (properties.kind as JsonSchema | undefined)?.const as string,
+      description: resolved.description as string | undefined,
+    }
+  })
+}
+
+/** Generic schema-driven placeholder filler — spec content isn't the point of this demo, structural navigation is. */
+function stepFillSpec(schema: JsonSchema, defs: Record<string, JsonSchema>, keyHint = 'value'): unknown {
+  const resolved = stepResolveRef(schema, defs)
+  if (resolved.const !== undefined) return resolved.const
+  if (Array.isArray(resolved.enum) && resolved.enum.length > 0) return resolved.enum[0]
+  if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) return stepFillSpec(resolved.oneOf[0] as JsonSchema, defs, keyHint)
+  if (resolved.type === 'object') {
+    const properties = (resolved.properties ?? {}) as Record<string, JsonSchema>
+    const required = Array.isArray(resolved.required) ? (resolved.required as string[]) : []
+    const value: Record<string, unknown> = {}
+    for (const key of required) if (properties[key]) value[key] = stepFillSpec(properties[key], defs, key)
+    return value
+  }
+  if (resolved.type === 'array') {
+    const minItems = typeof resolved.minItems === 'number' ? resolved.minItems : 0
+    const itemsSchema = (resolved.items ?? {}) as JsonSchema
+    return Array.from({ length: minItems }, () => stepFillSpec(itemsSchema, defs, keyHint))
+  }
+  if (resolved.type === 'boolean') return true
+  if (resolved.type === 'number' || resolved.type === 'integer') return 0
+  if (resolved.type === 'string') return `${keyHint} (placeholder)`
+  return {}
+}
+
+function stepFillNodeSpec(apiVersion: string, kind: string): unknown {
+  const schema = singleKindSchema(stepScope, apiVersion, kind)
+  if (!schema) return {}
+  const defs = (schema.$defs ?? {}) as Record<string, JsonSchema>
+  const properties = (schema.properties ?? {}) as Record<string, JsonSchema>
+  return properties.spec ? stepFillSpec(properties.spec as JsonSchema, defs, 'value') : {}
+}
+
+function stepAddChild(node: StepWorkingNode, slotKey: string, child: StepWorkingNode): void {
+  const realName = slotKey === '(default)' ? undefined : slotKey
+  let entry = node.slots.find((s) => s.name === realName)
+  if (!entry) {
+    entry = { name: realName, items: [] }
+    node.slots.push(entry)
+  }
+  entry.items.push(child)
+}
+
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+/**
+ * Resolves every open slot on `node` by calling `nextStageBatch` and picking
+ * a random valid candidate at each wave, recursing into what it added —
+ * exactly the loop an automated MCP client would run itself, just with a
+ * random pick instead of a model call. `budget` caps total nodes added so a
+ * chain of repeatable slots can't produce an unbounded tree.
+ */
+function autoResolveNode(node: StepWorkingNode, logs: string[], budget: { remaining: number }): void {
+  if (budget.remaining <= 0) return
+  const batch = nextStageBatch(stepScope, { parent: { apiVersion: node.apiVersion, kind: node.kind } })
+
+  for (const [slotKey, k] of Object.entries(batch.fixed)) {
+    if (budget.remaining <= 0) break
+    const child: StepWorkingNode = { apiVersion: k.apiVersion, kind: k.kind, spec: stepFillNodeSpec(k.apiVersion, k.kind), slots: [] }
+    stepAddChild(node, slotKey, child)
+    budget.remaining -= 1
+    logs.push(`${node.kind} → ${slotKey}: only ${k.kind} is valid here — auto-applied`)
+    autoResolveNode(child, logs, budget)
+  }
+
+  const properties = (batch.schema?.properties ?? {}) as Record<string, JsonSchema>
+  const required = new Set((batch.schema?.required ?? []) as string[])
+  const defs = (batch.schema?.$defs ?? {}) as Record<string, JsonSchema>
+
+  for (const [slotKey, propSchema] of Object.entries(properties)) {
+    if (budget.remaining <= 0) break
+    const isRequired = required.has(slotKey)
+    if (propSchema.type === 'array') {
+      const candidates = stepCandidatesFromOneOf(stepSlotOneOf((propSchema.items ?? {}) as JsonSchema), defs)
+      const min = typeof propSchema.minItems === 'number' ? propSchema.minItems : 0
+      const max = typeof propSchema.maxItems === 'number' ? propSchema.maxItems : min + 2
+      const cap = Math.min(max, min + 2, budget.remaining)
+      const count = min >= cap ? min : min + Math.floor(Math.random() * (cap - min + 1))
+      if (count === 0) {
+        logs.push(`${node.kind} → ${slotKey}: auto-declined (optional, repeatable)`)
+        continue
+      }
+      for (let i = 0; i < count && budget.remaining > 0; i++) {
+        const candidate = pickRandom(candidates)
+        const child: StepWorkingNode = { apiVersion: candidate.apiVersion, kind: candidate.kind, spec: stepFillNodeSpec(candidate.apiVersion, candidate.kind), slots: [] }
+        stepAddChild(node, slotKey, child)
+        budget.remaining -= 1
+        logs.push(`${node.kind} → ${slotKey}[${i}]: auto-picked ${candidate.kind}`)
+        autoResolveNode(child, logs, budget)
+      }
+    } else {
+      if (!isRequired && Math.random() >= 0.6) {
+        logs.push(`${node.kind} → ${slotKey}: auto-declined (optional)`)
+        continue
+      }
+      const candidates = stepCandidatesFromOneOf(stepSlotOneOf(propSchema), defs)
+      const candidate = pickRandom(candidates)
+      const child: StepWorkingNode = { apiVersion: candidate.apiVersion, kind: candidate.kind, spec: stepFillNodeSpec(candidate.apiVersion, candidate.kind), slots: [] }
+      stepAddChild(node, slotKey, child)
+      budget.remaining -= 1
+      logs.push(`${node.kind} → ${slotKey}: auto-picked ${candidate.kind}`)
+      autoResolveNode(child, logs, budget)
+    }
+  }
+}
+
+function stepToResource(node: StepWorkingNode): Resource {
+  const resource: Resource = { apiVersion: node.apiVersion, kind: node.kind, spec: node.spec }
+  if (node.slots.length > 0) {
+    resource.slots = node.slots.map((slot) => ({ ...(slot.name !== undefined ? { name: slot.name } : {}), items: slot.items.map(stepToResource) }))
+  }
+  return resource
+}
+
+/**
+ * Replays a real, hand-authored example's actual structure through
+ * `nextStageBatch` — for every slot in the real document, checks whether the
+ * rule engine considers the kind actually used there valid. Directly answers
+ * "does the rule engine agree with our real examples?" rather than assuming it.
+ */
+interface ReplayCheck {
+  path: string
+  parentKind: string
+  slotKey: string
+  actualKind: string
+  validKinds: string[] | 'fixed'
+  ok: boolean
+}
+
+function replayResource(resource: Resource, path = ''): ReplayCheck[] {
+  const checks: ReplayCheck[] = []
+  if (!resource.slots || resource.slots.length === 0) return checks
+
+  const batch = nextStageBatch(stepScope, { parent: { apiVersion: resource.apiVersion, kind: resource.kind } })
+  const defs = (batch.schema?.$defs ?? {}) as Record<string, JsonSchema>
+  const properties = (batch.schema?.properties ?? {}) as Record<string, JsonSchema>
+
+  for (const slot of resource.slots) {
+    const slotKey = slot.name ?? '(default)'
+    slot.items.forEach((child, index) => {
+      const childPath = `${path}/slots/${slotKey}/${index}`
+      const fixed = batch.fixed[slotKey]
+      if (fixed) {
+        checks.push({
+          path: childPath,
+          parentKind: resource.kind,
+          slotKey,
+          actualKind: child.kind,
+          validKinds: 'fixed',
+          ok: fixed.apiVersion === child.apiVersion && fixed.kind === child.kind,
+        })
+      } else {
+        const propSchema = properties[slotKey]
+        const candidateKinds = propSchema ? stepCandidatesFromOneOf(stepSlotOneOf(propSchema), defs).map((c) => c.kind) : []
+        checks.push({ path: childPath, parentKind: resource.kind, slotKey, actualKind: child.kind, validKinds: candidateKinds, ok: candidateKinds.includes(child.kind) })
+      }
+      checks.push(...replayResource(child, childPath))
+    })
+  }
+  return checks
+}
+
+function StepByStepBuilder() {
+  const [root, setRoot] = useState<StepWorkingNode | null>(null)
+  const [queue, setQueue] = useState<StepWorkingNode[]>([])
+  const [openSlots, setOpenSlots] = useState<string[]>([])
+  const [slotIndex, setSlotIndex] = useState(0)
+  const [slotProperties, setSlotProperties] = useState<Record<string, JsonSchema>>({})
+  const [slotRequired, setSlotRequired] = useState<Set<string>>(new Set())
+  const [slotDefs, setSlotDefs] = useState<Record<string, JsonSchema>>({})
+  const [currentSchema, setCurrentSchema] = useState<JsonSchema | null>(null)
+  const [pendingChildren, setPendingChildren] = useState<StepWorkingNode[]>([])
+  const [log, setLog] = useState<string[]>([])
+  const [result, setResult] = useState<{ resource: Resource; validation: ValidationResult } | null>(null)
+  const [schemaOpen, setSchemaOpen] = useState(false)
+  const [candidateFilter, setCandidateFilter] = useState('')
+  const [jsonSheetOpen, setJsonSheetOpen] = useState(false)
+
+  const finalize = (rootNode: StepWorkingNode) => {
+    const resource = stepToResource(rootNode)
+    setResult({ resource, validation: validateResource(resource, stepScope) })
+  }
+
+  const runAutoSkip = (startQueue: StepWorkingNode[], rootNode: StepWorkingNode) => {
+    let q = startQueue
+    const newLogs: string[] = []
+    while (q.length > 0) {
+      const head = q[0]
+      const batch = nextStageBatch(stepScope, { parent: { apiVersion: head.apiVersion, kind: head.kind } })
+      const children: StepWorkingNode[] = []
+      for (const [slotKey, k] of Object.entries(batch.fixed)) {
+        const child: StepWorkingNode = { apiVersion: k.apiVersion, kind: k.kind, spec: stepFillNodeSpec(k.apiVersion, k.kind), slots: [] }
+        stepAddChild(head, slotKey, child)
+        children.push(child)
+        newLogs.push(`${head.kind} → ${slotKey}: only ${k.kind} is valid here — auto-applied, no click needed`)
+      }
+      const properties = (batch.schema?.properties ?? {}) as Record<string, JsonSchema>
+      const openKeys = Object.keys(properties)
+      if (openKeys.length > 0) {
+        setQueue(q)
+        setOpenSlots(openKeys)
+        setSlotIndex(0)
+        setSlotProperties(properties)
+        setSlotRequired(new Set((batch.schema?.required ?? []) as string[]))
+        setSlotDefs((batch.schema?.$defs ?? {}) as Record<string, JsonSchema>)
+        setCurrentSchema(batch.schema ?? null)
+        setPendingChildren(children)
+        setCandidateFilter('')
+        setLog((l) => [...l, ...newLogs])
+        return
+      }
+      q = [...q.slice(1), ...children]
+    }
+    setQueue([])
+    setOpenSlots([])
+    setCurrentSchema(null)
+    setLog((l) => [...l, ...newLogs, `Done — every node resolved, no more open slots anywhere in the tree.`])
+    finalize(rootNode)
+  }
+
+  const startRoot = (candidate: StepCandidate) => {
+    const node: StepWorkingNode = { apiVersion: candidate.apiVersion, kind: candidate.kind, spec: stepFillNodeSpec(candidate.apiVersion, candidate.kind), slots: [] }
+    setRoot(node)
+    setResult(null)
+    setLog([`root: you chose ${candidate.kind}`])
+    runAutoSkip([node], node)
+  }
+
+  const advanceSlot = (children: StepWorkingNode[]) => {
+    if (!root) return
+    if (slotIndex + 1 < openSlots.length) {
+      setSlotIndex(slotIndex + 1)
+      setPendingChildren(children)
+      setCandidateFilter('')
+    } else {
+      runAutoSkip([...queue.slice(1), ...children], root)
+    }
+  }
+
+  const pickForSlot = (candidate: StepCandidate) => {
+    const head = queue[0]
+    const slotKey = openSlots[slotIndex]
+    const child: StepWorkingNode = { apiVersion: candidate.apiVersion, kind: candidate.kind, spec: stepFillNodeSpec(candidate.apiVersion, candidate.kind), slots: [] }
+    stepAddChild(head, slotKey, child)
+    const nextPending = [...pendingChildren, child]
+    setPendingChildren(nextPending)
+    setLog((l) => [...l, `${head.kind} → ${slotKey}: you chose ${candidate.kind}`])
+
+    const propSchema = slotProperties[slotKey]
+    if (propSchema.type === 'array') {
+      const realName = slotKey === '(default)' ? undefined : slotKey
+      const count = head.slots.find((s) => s.name === realName)?.items.length ?? 0
+      const maxItems = typeof propSchema.maxItems === 'number' ? propSchema.maxItems : Infinity
+      if (count >= maxItems) advanceSlot(nextPending)
+    } else {
+      advanceSlot(nextPending)
+    }
+  }
+
+  const skipSlot = () => {
+    const head = queue[0]
+    const slotKey = openSlots[slotIndex]
+    setLog((l) => [...l, `${head.kind} → ${slotKey}: declined (optional, no item added)`])
+    advanceSlot(pendingChildren)
+  }
+
+  const finishRepeatableSlot = () => {
+    advanceSlot(pendingChildren)
+  }
+
+  const reset = () => {
+    setRoot(null)
+    setQueue([])
+    setOpenSlots([])
+    setLog([])
+    setResult(null)
+    setCurrentSchema(null)
+    setCandidateFilter('')
+  }
+
+  const rootStage = useMemo(() => nextStage(stepScope, {}), [])
+  const rootDefs = (rootStage.schema?.$defs ?? {}) as Record<string, JsonSchema>
+  const rootCandidates = rootStage.schema ? stepCandidatesFromOneOf((rootStage.schema.oneOf as JsonSchema[]) ?? [], rootDefs) : []
+
+  const autoGenerate = () => {
+    const rootCandidate = rootStage.fixed
+      ? { apiVersion: rootStage.fixed.apiVersion, kind: rootStage.fixed.kind }
+      : pickRandom(rootCandidates)
+    const node: StepWorkingNode = {
+      apiVersion: rootCandidate.apiVersion,
+      kind: rootCandidate.kind,
+      spec: stepFillNodeSpec(rootCandidate.apiVersion, rootCandidate.kind),
+      slots: [],
+    }
+    const logs = [`root: auto-picked ${rootCandidate.kind}`]
+    autoResolveNode(node, logs, { remaining: 60 })
+    logs.push('Done — auto-generated end to end, no clicks.')
+    setRoot(node)
+    setQueue([])
+    setOpenSlots([])
+    setCurrentSchema(null)
+    setCandidateFilter('')
+    setLog(logs)
+    finalize(node)
+  }
+
+  const filterCandidates = (candidates: StepCandidate[]) => {
+    if (!candidateFilter.trim()) return candidates
+    const needle = candidateFilter.trim().toLowerCase()
+    return candidates.filter((c) => c.kind.toLowerCase().includes(needle) || (c.description ?? '').toLowerCase().includes(needle))
+  }
+
+  if (!root) {
+    if (rootStage.fixed) {
+      return (
+        <div className="rk-step-panel">
+          <p>
+            Only one root-eligible kind in this scope: <strong>{rootStage.fixed.kind}</strong>.
+          </p>
+          <Button size="sm" onClick={() => startRoot({ apiVersion: rootStage.fixed!.apiVersion, kind: rootStage.fixed!.kind })}>
+            Start
+          </Button>
+        </div>
+      )
+    }
+    const filteredRoot = filterCandidates(rootCandidates)
+    return (
+      <div className="rk-step-panel">
+        <div className="rk-step-auto-row">
+          <p className="rk-step-slot-desc">
+            Want a finished example instead of clicking through every region yourself? This runs the exact same{' '}
+            <code>nextStage</code>/<code>nextStageBatch</code> loop, just with a random pick at each decision instead
+            of a click — a random result every time.
+          </p>
+          <Button size="sm" variant="outline" onClick={autoGenerate}>
+            <Sparkles />
+            Auto-generate a full example
+          </Button>
+        </div>
+        <p className="rk-step-prompt">Or pick a root template yourself and build it one decision at a time:</p>
+        {rootCandidates.length > 8 ? (
+          <input
+            className="rk-step-filter"
+            placeholder={`Filter ${rootCandidates.length} options...`}
+            value={candidateFilter}
+            onChange={(event) => setCandidateFilter(event.target.value)}
+          />
+        ) : null}
+        <div className="rk-step-candidates rk-step-candidates-scroll">
+          {filteredRoot.map((candidate) => (
+            <button key={candidate.kind} className="rk-step-candidate" onClick={() => startRoot(candidate)}>
+              <strong>{candidate.kind}</strong>
+              {candidate.description ? <span>{candidate.description}</span> : null}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const currentSlotKey = openSlots[slotIndex]
+  const currentPropSchema = currentSlotKey ? slotProperties[currentSlotKey] : undefined
+  const currentCandidates = currentPropSchema ? stepCandidatesFromOneOf(stepSlotOneOf(currentPropSchema), slotDefs) : []
+  const filteredCandidates = filterCandidates(currentCandidates)
+  const isRepeatable = currentPropSchema?.type === 'array'
+  const isRequired = currentSlotKey ? slotRequired.has(currentSlotKey) : false
+  const head = queue[0]
+  const liveResource = stepToResource(root)
+
+  const renderCandidatePicker = () => (
+    <div className="rk-tree-picker">
+      {currentPropSchema?.description ? <p className="rk-step-slot-desc">{currentPropSchema.description as string}</p> : null}
+      {isRepeatable ? <p className="rk-step-slot-desc">Repeatable — add as many as you like.</p> : null}
+      {currentCandidates.length > 8 ? (
+        <input
+          className="rk-step-filter"
+          placeholder={`Filter ${currentCandidates.length} options...`}
+          value={candidateFilter}
+          onChange={(event) => setCandidateFilter(event.target.value)}
+        />
+      ) : null}
+      <div className="rk-step-candidates rk-step-candidates-scroll">
+        {filteredCandidates.map((candidate) => (
+          <button key={candidate.kind} className="rk-step-candidate" onClick={() => pickForSlot(candidate)}>
+            <strong>{candidate.kind}</strong>
+            {candidate.description ? <span>{candidate.description}</span> : null}
+          </button>
+        ))}
+        {filteredCandidates.length === 0 ? <p className="rk-step-slot-desc">No options match "{candidateFilter}".</p> : null}
+      </div>
+      <div className="rk-pane-actions">
+        {!isRequired && !isRepeatable ? (
+          <Button size="sm" variant="outline" onClick={skipSlot}>
+            Skip this slot
+          </Button>
+        ) : null}
+        {isRepeatable ? (
+          <Button size="sm" variant="outline" onClick={finishRepeatableSlot}>
+            Done with this slot
+          </Button>
+        ) : null}
+      </div>
+      <button className="rk-step-raw-toggle" onClick={() => setSchemaOpen(!schemaOpen)} type="button">
+        {schemaOpen ? '▾' : '▸'} What the real nextStageBatch request looks like for this whole region set
+      </button>
+      {schemaOpen ? (
+        <div className="rk-editor-shell rk-step-editor">
+          <JsonEditor value={currentSchema ? prettyJson(currentSchema) : ''} readOnly />
+        </div>
+      ) : null}
+    </div>
+  )
+
+  const renderOpenSlotsFor = (node: StepWorkingNode, depth: number): React.ReactNode => {
+    if (node !== head) return null
+    return openSlots.map((key, index) => {
+      const alreadyResolved = node.slots.some((s) => (s.name ?? '(default)') === key)
+      if (alreadyResolved) return null
+      const rowStyle = { marginLeft: depth * 20 }
+      if (index < slotIndex) {
+        return (
+          <div key={key} className="rk-tree-row rk-tree-row-declined" style={rowStyle}>
+            <code>{key}</code> — declined (optional, no item added)
+          </div>
+        )
+      }
+      if (index === slotIndex) {
+        return (
+          <div key={key} className="rk-tree-row rk-tree-row-active" style={rowStyle}>
+            <div className="rk-tree-row-label">
+              👉 <code>{key}</code> — pick one:
+            </div>
+            {renderCandidatePicker()}
+          </div>
+        )
+      }
+      return (
+        <div key={key} className="rk-tree-row rk-tree-row-pending" style={rowStyle}>
+          <code>{key}</code> — not yet (comes after {openSlots[slotIndex]})
+        </div>
+      )
+    })
+  }
+
+  const renderNode = (node: StepWorkingNode, label: string | null, depth: number): React.ReactNode => (
+    <div key={`${label ?? 'root'}-${depth}-${node.kind}`} className="rk-tree-node">
+      <div className="rk-tree-row rk-tree-row-resolved" style={{ marginLeft: depth * 20 }}>
+        {label ? (
+          <>
+            <code>{label}</code> →{' '}
+          </>
+        ) : null}
+        <strong>{node.kind}</strong>
+      </div>
+      {node.slots.map((slot) => slot.items.map((child, i) => renderNode(child, slot.name ?? '(default)', depth + 1)))}
+      {renderOpenSlotsFor(node, depth + 1)}
+    </div>
+  )
+
+  return (
+    <div className="rk-step-panel">
+      <p className="rk-step-prompt">
+        Every region of the template you're building is shown below, in place — filled-in regions show what you
+        picked, <strong>👉 marks the one you're deciding right now</strong>, and greyed-out regions are still
+        waiting their turn. Nested regions (a region's own sub-regions) appear indented underneath it.
+      </p>
+      <div className="rk-tree">{renderNode(root, null, 0)}</div>
+
+      <div className="rk-step-live">
+        <div className="rk-step-live-header">
+          <div className="rk-step-log-title">Actual rendered UI so far</div>
+          <Button size="sm" variant="outline" onClick={() => setJsonSheetOpen(true)}>
+            <Braces />
+            Show JSON
+          </Button>
+        </div>
+        {result ? (
+          <div className={result.validation.valid ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
+            {result.validation.valid ? '✓ validateResource: valid — this is the finished document' : `✗ invalid: ${result.validation.issues.map((issue) => issue.message).join('; ')}`}
+          </div>
+        ) : (
+          <p className="rk-step-slot-desc">Still building — the tree above still has a 👉 region, so this preview is incomplete.</p>
+        )}
+        <div className="rk-render-body rk-step-live-render">
+          <ResourceRenderer
+            registry={registry}
+            renderError={(err) => <div className="fallback">{err instanceof Error ? err.message : 'Render error'}</div>}
+            renderLoading={() => <div className="fallback">Loading kind...</div>}
+            renderUnknownKind={(res) => <div className="fallback">Unknown kind: {res.kind}</div>}
+            resource={liveResource}
+          />
+        </div>
+      </div>
+
+      <div className="rk-step-btn-row">
+        <Button size="sm" variant="outline" onClick={reset}>
+          Start over
+        </Button>
+        {!openSlots.length ? (
+          <Button size="sm" variant="outline" onClick={autoGenerate}>
+            <Sparkles />
+            Auto-generate another random example
+          </Button>
+        ) : null}
+      </div>
+      <div className="rk-step-log-title">What happened so far</div>
+      <ol className="rk-workflow-call-log">
+        {log.map((entry, index) => (
+          <li key={index}>{entry}</li>
+        ))}
+      </ol>
+
+      <Sheet open={jsonSheetOpen} onOpenChange={setJsonSheetOpen}>
+        <SheetContent side="right" className="rk-json-sheet-content">
+          <SheetHeader className="rk-json-sheet-header">
+            <div>
+              <SheetTitle className="rk-json-sheet-title">Document so far — JSON</SheetTitle>
+              <p className="rk-json-sheet-description">Updates live as you make choices; not the final document until every slot is resolved.</p>
+            </div>
+          </SheetHeader>
+          <div className="rk-editor-shell">
+            <JsonEditor value={prettyJson(liveResource)} readOnly />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}
+
+function ReplayCheckPanel() {
+  const [checks, setChecks] = useState<ReplayCheck[] | null>(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+
+  const run = () => setChecks(replayResource(workbenchTemplate))
+  const allOk = checks ? checks.every((c) => c.ok) : false
+
+  return (
+    <div className="rk-step-panel">
+      <p className="rk-step-prompt">
+        <strong>Why this exists:</strong> the left panel lets you hand-pick kinds yourself, but that doesn't prove
+        the rule engine matches how a <em>real</em> document is actually built. <code>workbenchTemplate</code> (the
+        "Workbench template" example already rendering live in the "Resource runtime" tab) was hand-authored before
+        any of this — it never went through <code>nextStageBatch</code>. This button walks that real example's
+        actual structure and checks, slot by slot, whether <code>nextStageBatch</code> would have allowed the exact
+        kind it uses. If they all pass, the rule engine agrees with a document nobody built through it.
+      </p>
+      <Button size="sm" onClick={run}>
+        Replay workbenchTemplate
+      </Button>
+      {checks ? (
+        <>
+          <p className={allOk ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
+            {allOk
+              ? `✓ all ${checks.length} slot picks in the real example are valid under the rule engine`
+              : `✗ ${checks.filter((c) => !c.ok).length} of ${checks.length} mismatched`}
+          </p>
+          <div className="rk-step-log-title">The real, rendered workbenchTemplate — exactly as it shows in "Resource runtime"</div>
+          <div className="rk-render-body rk-step-live-render">
+            <ResourceRenderer
+              registry={registry}
+              renderError={(err) => <div className="fallback">{err instanceof Error ? err.message : 'Render error'}</div>}
+              renderLoading={() => <div className="fallback">Loading kind...</div>}
+              renderUnknownKind={(res) => <div className="fallback">Unknown kind: {res.kind}</div>}
+              resource={workbenchTemplate}
+            />
+          </div>
+          <div className="rk-step-raw">
+            <button className="rk-step-raw-toggle" onClick={() => setDetailsOpen(!detailsOpen)} type="button">
+              {detailsOpen ? '▾' : '▸'} Slot-by-slot detail ({checks.length} checks)
+            </button>
+            {detailsOpen ? (
+              <ol className="rk-workflow-call-log">
+                {checks.map((check) => (
+                  <li key={check.path}>
+                    {check.ok ? '✓' : '✗'} <code>{check.parentKind}</code> → <code>{check.slotKey}</code>: real
+                    example uses <strong>{check.actualKind}</strong>
+                    {check.validKinds === 'fixed'
+                      ? ' (rule engine: deterministic, only this kind is valid)'
+                      : check.ok
+                        ? ` (rule engine: valid — one of ${check.validKinds.join(', ')})`
+                        : ` (rule engine says valid options are: ${check.validKinds.join(', ') || '(none)'})`}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function StepByStepDemo() {
+  const [replayOpen, setReplayOpen] = useState(false)
+  return (
+    <div className="rk-step-demo">
+      <p className="rk-workflow-demo-note">
+        This calls <code>nextStage</code>/<code>nextStageBatch</code> directly — no pre-built loop, no mock model.
+        You're doing what an MCP client would do itself: get a schema back, make a choice, get the next schema back.
+      </p>
+      <StepByStepBuilder />
+
+      <div className="rk-step-replay-divider">
+        <button className="rk-step-raw-toggle" onClick={() => setReplayOpen(!replayOpen)} type="button">
+          {replayOpen ? '▾' : '▸'} Separate check: does a real, already-built example agree with this? (not
+          connected to what you're building above)
+        </button>
+        {replayOpen ? <ReplayCheckPanel /> : null}
+      </div>
+    </div>
+  )
+}
 
 const shellStyle = {
   '--sidebar-width': '260px',
@@ -1299,25 +2009,6 @@ function ExampleSelect({ value, onValueChange }: { value: string; onValueChange:
 
 function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function collectVariables(resource: LoykinResource): unknown[] {
-  return isRecord(resource.spec) && Array.isArray(resource.spec.variables) ? resource.spec.variables : []
-}
-
-function collectEvents(resource: LoykinResource, path = resource.kind): Array<{ path: string; events: unknown }> {
-  const events: Array<{ path: string; events: unknown }> =
-    isRecord(resource.spec) && isRecord(resource.spec.events) ? [{ path, events: resource.spec.events }] : []
-  for (const slot of resource.slots ?? []) {
-    slot.items.forEach((child, index) => {
-      events.push(...collectEvents(child, `${path}/slots/${slot.name ?? 'default'}/${index}:${child.kind}`))
-    })
-  }
-  return events
 }
 
 function JsonEditor({ value, onChange, readOnly = false }: { value: string; onChange?: (value: string) => void; readOnly?: boolean }) {
@@ -1562,6 +2253,268 @@ const styles = `
     font-size: 13px;
     white-space: pre-wrap;
   }
+  .rk-workflow-demo-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .rk-workflow-demo-note {
+    font-size: 13px;
+    color: var(--muted-foreground);
+    margin: 0 0 12px;
+  }
+  .rk-workflow-demo-note code {
+    background: var(--muted);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .rk-workflow-call-log {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0;
+    margin: 8px 0 0;
+    list-style: none;
+  }
+  .rk-workflow-call-log li {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .rk-workflow-call-log code {
+    background: var(--muted);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .rk-workflow-validation-ok {
+    color: var(--primary);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .rk-workflow-validation-error {
+    color: var(--destructive);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: pre-wrap;
+  }
+  .rk-workflow-result {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    margin-top: 12px;
+  }
+  .rk-step-demo {
+    padding: 16px;
+    max-width: 1200px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .rk-step-replay-divider {
+    border-top: 2px dashed var(--border);
+    padding-top: 16px;
+  }
+  .rk-step-panel {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .rk-step-main {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .rk-step-auto-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .rk-step-auto-row .rk-step-slot-desc {
+    margin: 0;
+    font-size: 12px;
+    flex: 1;
+    min-width: 220px;
+  }
+  .rk-step-auto-row button svg {
+    width: 14px;
+    height: 14px;
+  }
+  .rk-step-btn-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .rk-step-btn-row button svg {
+    width: 14px;
+    height: 14px;
+  }
+  .rk-step-prompt {
+    font-size: 13px;
+    margin: 0;
+  }
+  .rk-step-prompt code {
+    background: var(--muted);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .rk-step-slot-desc {
+    color: var(--muted-foreground);
+    font-weight: 400;
+  }
+  .rk-step-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .rk-step-candidate {
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    background: var(--background);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+  }
+  .rk-step-candidate:hover {
+    background: var(--muted);
+  }
+  .rk-step-candidate span {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    font-weight: 400;
+  }
+  .rk-step-sidebar {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .rk-step-log-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .rk-step-raw {
+    border-top: 1px dashed var(--border);
+    padding-top: 8px;
+  }
+  .rk-step-raw-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  .rk-step-editor {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .rk-step-editor .cm-editor {
+    min-height: 160px;
+  }
+  .rk-step-live {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--background);
+  }
+  .rk-step-live-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .rk-step-live-render {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    min-height: 360px;
+    max-height: 640px;
+    overflow: auto;
+  }
+  .rk-step-filter {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    background: var(--background);
+    color: inherit;
+  }
+  .rk-step-candidates-scroll {
+    max-height: 320px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .rk-tree {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .rk-tree-node {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .rk-tree-row {
+    padding: 6px 10px;
+    border-radius: 6px;
+  }
+  .rk-tree-row code {
+    background: var(--muted);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .rk-tree-row-resolved {
+    background: var(--muted);
+  }
+  .rk-tree-row-declined {
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+  .rk-tree-row-pending {
+    color: var(--muted-foreground);
+    border: 1px dashed var(--border);
+  }
+  .rk-tree-row-active {
+    border: 2px solid var(--primary);
+    background: var(--background);
+    padding: 10px;
+  }
+  .rk-tree-row-label {
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .rk-tree-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
   .rk-json-panel {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
@@ -1631,11 +2584,12 @@ const styles = `
 export function App() {
   useStyleInjector()
 
+  const [view, setView] = useState<'runtime' | 'step-by-step'>('runtime')
   const [selectedExampleId, setSelectedExampleId] = useState<(typeof examples)[number]['id']>(() => initialExample().id)
-  const [resource, setResource] = useState<LoykinResource>(() => initialExample().resource)
+  const [resource, setResource] = useState<Resource>(() => initialExample().resource)
   const [loadError, setLoadError] = useState<string>()
   const [jsonSheetOpen, setJsonSheetOpen] = useState(false)
-  const [aiRequestSheetOpen, setAiRequestSheetOpen] = useState(false)
+  const [aiTraceSheetOpen, setAiTraceSheetOpen] = useState(false)
   const [toast, setToast] = useState<string>()
 
   // External hook: documents emit events; the app decides what they mean.
@@ -1647,38 +2601,24 @@ export function App() {
     }
   }
 
-  const selectedExample = examples.find((example) => example.id === selectedExampleId) ?? examples[0]
-  const validation = useMemo(() => validateResource(resource, playgroundScope), [resource])
-  const schema = useMemo(() => buildDocumentSchema(playgroundScope), [])
-  const variablesAndEvents = useMemo(
-    () => ({
-      variables: collectVariables(resource),
-      events: collectEvents(resource),
-    }),
-    [resource],
-  )
   const resourceJson = useMemo(() => prettyJson(resource), [resource])
-  const aiRequest = useMemo(
-    () =>
-      prettyJson({
-        task: 'Render this Loykin resource document in a host app using @loykin/resourcekit.',
-        selectedExample: {
-          id: selectedExample.id,
-          name: selectedExample.name,
-          description: selectedExample.description,
-        },
-        instructions: [
-          'Use only kinds and fields allowed by scopedSchema.',
-          'Return a JSON resource document that follows the same envelope shape.',
-          'Use variables/events for local interaction state instead of imperative UI code.',
-        ],
-        resource,
-        scopedSchema: schema,
-        validation,
-        variablesAndEvents,
-      }),
-    [resource, schema, selectedExample.description, selectedExample.id, selectedExample.name, validation, variablesAndEvents],
-  )
+
+  // The real nextStage/nextStageBatch trace for whatever resource is loaded —
+  // not a one-shot "here's the whole schema, generate a document" dump (that
+  // model was rejected; see docs/staged-generation-experiment.md "Final
+  // decision"). Reuses the same replay logic the Step-by-step tab uses to
+  // check hand-authored examples against the rule engine.
+  const aiTraceRoot = useMemo(() => {
+    // playgroundScope (not stepScope's rootLevels:['template']) — some Resource
+    // runtime examples are intentionally smaller fragments (e.g. a bare Panel),
+    // not whole-page templates, and are still valid roots in this tab's own scope.
+    const stage = nextStage(playgroundScope, {})
+    if (stage.fixed) return { onlyOption: true as const, ok: stage.fixed.kind === resource.kind, candidateKinds: [stage.fixed.kind] }
+    const defs = (stage.schema?.$defs ?? {}) as Record<string, JsonSchema>
+    const candidateKinds = (stage.schema ? stepCandidatesFromOneOf((stage.schema.oneOf as JsonSchema[]) ?? [], defs) : []).map((c) => c.kind)
+    return { onlyOption: false as const, ok: candidateKinds.includes(resource.kind), candidateKinds }
+  }, [resource.kind])
+  const aiTraceChecks = useMemo(() => replayResource(resource), [resource])
 
   useEffect(() => {
     const onPopState = () => {
@@ -1740,9 +2680,15 @@ export function App() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   <SidebarMenuItem>
-                    <SidebarMenuButton isActive type="button">
+                    <SidebarMenuButton isActive={view === 'runtime'} type="button" onClick={() => setView('runtime')}>
                       <LayoutDashboard />
                       <span>Resource runtime</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton isActive={view === 'step-by-step'} type="button" onClick={() => setView('step-by-step')}>
+                      <Route />
+                      <span>Step-by-step generation</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
@@ -1754,22 +2700,33 @@ export function App() {
           <section className="rk-runtime">
             <section className="rk-panel">
               <div className="rk-workbench">
-                <section className="rk-render-pane">
-                  <div className="rk-render-toolbar">
-                    <ExampleSelect value={selectedExampleId} onValueChange={selectExampleById} />
-                    <div className="rk-pane-actions">
-                      <Button size="sm" variant="outline" onClick={() => setAiRequestSheetOpen(true)}>
-                        <Sparkles />
-                        AI request
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => setJsonSheetOpen(true)}>
-                        <Braces />
-                        Show JSON
-                      </Button>
+                {view === 'step-by-step' ? (
+                  <section className="rk-render-pane">
+                    <div className="rk-render-toolbar">
+                      <h2 className="rk-workflow-demo-title">Step-by-step generation</h2>
                     </div>
-                  </div>
-                  <div className="rk-render-body">{renderOutput}</div>
-                </section>
+                    <div className="rk-render-body">
+                      <StepByStepDemo />
+                    </div>
+                  </section>
+                ) : (
+                  <section className="rk-render-pane">
+                    <div className="rk-render-toolbar">
+                      <ExampleSelect value={selectedExampleId} onValueChange={selectExampleById} />
+                      <div className="rk-pane-actions">
+                        <Button size="sm" variant="outline" onClick={() => setAiTraceSheetOpen(true)}>
+                          <Sparkles />
+                          How AI builds this
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setJsonSheetOpen(true)}>
+                          <Braces />
+                          Show JSON
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="rk-render-body">{renderOutput}</div>
+                  </section>
+                )}
                 <Sheet open={jsonSheetOpen} onOpenChange={setJsonSheetOpen}>
                   <SheetContent side="right" className="rk-json-sheet-content">
                     <SheetHeader className="rk-json-sheet-header">
@@ -1783,16 +2740,45 @@ export function App() {
                     </div>
                   </SheetContent>
                 </Sheet>
-                <Sheet open={aiRequestSheetOpen} onOpenChange={setAiRequestSheetOpen}>
+                <Sheet open={aiTraceSheetOpen} onOpenChange={setAiTraceSheetOpen}>
                   <SheetContent side="right" className="rk-json-sheet-content">
                     <SheetHeader className="rk-json-sheet-header">
                       <div>
-                        <SheetTitle className="rk-json-sheet-title">AI request</SheetTitle>
-                        <p className="rk-json-sheet-description">Prompt payload for generating or modifying a resource document.</p>
+                        <SheetTitle className="rk-json-sheet-title">How AI builds this</SheetTitle>
+                        <p className="rk-json-sheet-description">
+                          The real nextStage/nextStageBatch trace for this document — not a one-shot "here's the
+                          whole schema, generate a document" request. This is what an MCP client actually sees and
+                          decides, one position at a time.
+                        </p>
                       </div>
                     </SheetHeader>
-                    <div className="rk-editor-shell">
-                      <JsonEditor value={aiRequest} readOnly />
+                    <div className="rk-step-panel">
+                      <p className={aiTraceRoot.ok ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
+                        {aiTraceRoot.onlyOption
+                          ? `root: only ${aiTraceRoot.candidateKinds[0]} is a valid root here — no choice needed`
+                          : !aiTraceRoot.ok
+                            ? `root: ${resource.kind} is NOT a valid root per the rule engine (valid options: ${aiTraceRoot.candidateKinds.join(', ') || '(none)'})`
+                            : aiTraceRoot.candidateKinds.length > 8
+                              ? `root: chose ${resource.kind} (valid — this scope has no root restriction, so any of the ${aiTraceRoot.candidateKinds.length} registered kinds qualify)`
+                              : `root: chose ${resource.kind} (valid — one of ${aiTraceRoot.candidateKinds.join(', ')})`}
+                      </p>
+                      {aiTraceChecks.length > 0 ? (
+                        <ol className="rk-workflow-call-log">
+                          {aiTraceChecks.map((check) => (
+                            <li key={check.path}>
+                              {check.ok ? '✓' : '✗'} <code>{check.parentKind}</code> → <code>{check.slotKey}</code>:
+                              chose <strong>{check.actualKind}</strong>
+                              {check.validKinds === 'fixed'
+                                ? ' (only this kind is valid here)'
+                                : check.ok
+                                  ? ` (valid — one of ${check.validKinds.join(', ')})`
+                                  : ` (rule engine says valid options are: ${check.validKinds.join(', ') || '(none)'})`}
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="rk-step-slot-desc">This document has no slots — nothing to resolve beyond the root.</p>
+                      )}
                     </div>
                   </SheetContent>
                 </Sheet>

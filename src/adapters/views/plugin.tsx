@@ -164,8 +164,11 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
     name: 'resource-view-adapter',
     kinds: [
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'SelectableList',
+        level: ['leaf'],
+        description:
+          'A vertical list of selectable rows bound to `data`, highlighting the row matching `selectedRef` and emitting a `select` event with the row on click. Use for the list pane of a list/detail screen.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -182,8 +185,11 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
         render: (resource, ctx) => <SelectableList spec={resource.spec as SelectableListSpec} ctx={ctx} />,
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'ObjectFields',
+        level: ['leaf'],
+        description:
+          'A read-only label/value grid rendered from a single bound record\'s fields (via `fields[].path`). Use for a fixed, non-interactive detail view — for editable or structured field grouping, use DataBodyGroup/DataBodyRow/DataBodyField instead.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -209,8 +215,10 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
         render: (resource, ctx) => <ObjectFields spec={resource.spec as ObjectFieldsSpec} ctx={ctx} />,
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'JsonViewer',
+        level: ['leaf'],
+        description: 'A raw, syntax-highlighted JSON viewer for a bound value. Use for debugging/inspector views, not end-user content.',
         specSchema: {
           type: 'object',
           additionalProperties: false,

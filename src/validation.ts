@@ -1,7 +1,7 @@
 import Ajv from 'ajv'
 import type { ErrorObject } from 'ajv'
 import { scanVariableRefs } from './variables'
-import type { LoykinResource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
+import type { Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
 import type { ResourceRegistry, ScopedRegistry } from './registry'
 
 const ajv = new Ajv({ allErrors: true, strict: false })
@@ -18,12 +18,16 @@ function addIssue(issues: ValidationIssue[], path: string, message: string): voi
   issues.push({ path, message })
 }
 
+function intersectsLevel(level: string[] | undefined, allowed: string[]): boolean {
+  return level?.some((value) => allowed.includes(value)) ?? false
+}
+
 function formatAjvError(error: ErrorObject): string {
   const field = error.instancePath || '/'
   return `${field} ${error.message ?? 'is invalid'}`
 }
 
-function validateEnvelope(resource: unknown, path: string, issues: ValidationIssue[]): resource is LoykinResource {
+function validateEnvelope(resource: unknown, path: string, issues: ValidationIssue[]): resource is Resource {
   if (!isRecord(resource)) {
     addIssue(issues, path, 'resource must be an object')
     return false
@@ -36,7 +40,7 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   return typeof resource.apiVersion === 'string' && typeof resource.kind === 'string' && 'spec' in resource
 }
 
-function validateSpec(resource: LoykinResource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
+function validateSpec(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
   const manifest = registry.getKind(resource.apiVersion, resource.kind)
   if (!manifest) return
 
@@ -61,22 +65,27 @@ function validateRule(
   rule: SlotRule,
   slot: unknown,
   path: string,
+  registry: ResourceRegistry | ScopedRegistry,
   issues: ValidationIssue[],
 ): void {
   const count = children(slot).length
   if (rule.min !== undefined && count < rule.min) addIssue(issues, path, `slot must contain at least ${rule.min} child resource(s)`)
   if (rule.max !== undefined && count > rule.max) addIssue(issues, path, `slot must contain at most ${rule.max} child resource(s)`)
 
-  if (rule.accepts) {
+  if (rule.accepts || rule.acceptsLevels) {
     children(slot).forEach((child, index) => {
-      if (isRecord(child) && typeof child.kind === 'string' && !rule.accepts?.includes(child.kind)) {
+      if (!isRecord(child) || typeof child.kind !== 'string') return
+      const acceptedByName = rule.accepts?.includes(child.kind) ?? false
+      const manifest = typeof child.apiVersion === 'string' ? registry.getKind(child.apiVersion, child.kind) : undefined
+      const acceptedByLevel = rule.acceptsLevels ? intersectsLevel(manifest?.level, rule.acceptsLevels) : false
+      if (!acceptedByName && !acceptedByLevel) {
         addIssue(issues, `${path}/items/${index}/kind`, `kind ${child.kind} is not accepted by this slot`)
       }
     })
   }
 }
 
-function validateSlots(resource: LoykinResource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
+function validateSlots(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
   const manifest = registry.getKind(resource.apiVersion, resource.kind)
   if (!manifest) return
 
@@ -102,7 +111,7 @@ function validateSlots(resource: LoykinResource, registry: ResourceRegistry | Sc
       addIssue(issues, `${path}/slots/${index}/name`, name === undefined ? 'default slot is not accepted' : `slot ${name} is not accepted`)
       return
     }
-    validateRule(rule, slot, `${path}/slots/${index}`, issues)
+    validateRule(rule, slot, `${path}/slots/${index}`, registry, issues)
   })
 }
 
@@ -126,7 +135,7 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-function validateScopedCapabilities(resource: LoykinResource, options: ScopeOptions | undefined, path: string, depth: number, issues: ValidationIssue[]): void {
+function validateScopedCapabilities(resource: Resource, options: ScopeOptions | undefined, path: string, depth: number, issues: ValidationIssue[]): void {
   if (!options) return
   if (options.maxDepth !== undefined && depth > options.maxDepth) {
     addIssue(issues, path, `resource depth exceeds maxDepth ${options.maxDepth}`)
@@ -154,7 +163,7 @@ function validateScopedCapabilities(resource: LoykinResource, options: ScopeOpti
   }
 }
 
-function validateDatasourceAndActions(resource: LoykinResource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
+function validateDatasourceAndActions(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
   const options = scopedOptions(registry)
   const visit = (current: unknown, currentPath: string) => {
     if (Array.isArray(current)) {
@@ -199,7 +208,7 @@ function validateDatasourceAndActions(resource: LoykinResource, registry: Resour
  * 7. Validate datasource and action allowlists.
  */
 export function validateResource(
-  resource: LoykinResource,
+  resource: Resource,
   registry: ResourceRegistry | ScopedRegistry,
 ): ValidationResult {
   const issues: ValidationIssue[] = []
@@ -212,6 +221,9 @@ export function validateResource(
     if (!manifest) {
       addIssue(issues, `${path}/kind`, `kind ${current.apiVersion}/${current.kind} is not registered or not allowed in this scope`)
     } else {
+      if (depth === 0 && options?.rootLevels && !intersectsLevel(manifest.level, options.rootLevels)) {
+        addIssue(issues, `${path}/kind`, `kind ${current.kind} is not an allowed root level`)
+      }
       validateSpec(current, registry, path, issues)
       validateSlots(current, registry, path, issues)
       validateDatasourceAndActions(current, registry, path, issues)

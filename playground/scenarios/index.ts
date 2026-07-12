@@ -7,7 +7,7 @@ import { metrics } from './metrics-dashboard/seed-data'
 import settingsFormExpected from './settings-form/expected-resource.json'
 import { scope as settingsFormScope } from './settings-form/schema-scope'
 import { workspace } from './settings-form/seed-data'
-import type { LoykinResource } from '../../src'
+import type { Resource } from '../../src'
 import type { ScenarioDefinition } from './evaluation'
 
 const customerCrmPrompt = `Build a customer CRM list/detail screen. The page should show a searchable customer list, preserve selected customer id in a variable, and show a detail panel with revenue status and a small chart.`
@@ -22,7 +22,7 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     prompt: customerCrmPrompt,
     scope: customerCrmScope,
     seedData: { customers },
-    expectedResource: customerCrmExpected as LoykinResource,
+    expectedResource: customerCrmExpected as Resource,
     rubric: {
       requiredKinds: ['ListDetail', 'PageTopBar', 'SelectableList', 'RecordScope', 'DataBody', 'DataBodyGroup', 'ObjectFields', 'ChartView', 'FilterControl'],
       requiredVariables: ['customerId', 'status'],
@@ -37,7 +37,7 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     prompt: settingsFormPrompt,
     scope: settingsFormScope,
     seedData: { workspace },
-    expectedResource: settingsFormExpected as LoykinResource,
+    expectedResource: settingsFormExpected as Resource,
     rubric: {
       requiredKinds: ['DataBody', 'PageTopBar', 'ResourceForm', 'DataBodySection', 'DataBodyRow', 'InputControl'],
       requiredText: ['Workspace settings', 'Settings / Workspace', 'Save settings'],
@@ -49,7 +49,7 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     prompt: metricsDashboardPrompt,
     scope: metricsDashboardScope,
     seedData: { metrics },
-    expectedResource: metricsDashboardExpected as LoykinResource,
+    expectedResource: metricsDashboardExpected as Resource,
     rubric: {
       requiredKinds: ['DataBody', 'PageTopBar', 'DataBodySummary', 'DataBodyTab', 'TableView', 'ChartView'],
       requiredBindings: [{ source: 'datasource', datasourceUid: 'metrics' }],

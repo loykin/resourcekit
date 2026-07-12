@@ -9,15 +9,15 @@ describe('createRegistry', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TestPanel',
           specSchema: { type: 'object' },
         },
       ],
     })
 
-    expect(registry.getKind('loykin.dev/v1alpha1', 'TestPanel')).toBeDefined()
-    expect(registry.getKind('loykin.dev/v1alpha1', 'Missing')).toBeUndefined()
+    expect(registry.getKind('resourcekit.dev/v1alpha1', 'TestPanel')).toBeDefined()
+    expect(registry.getKind('resourcekit.dev/v1alpha1', 'Missing')).toBeUndefined()
     expect(registry.listKinds()).toHaveLength(1)
   })
 
@@ -46,7 +46,7 @@ describe('createRegistry', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           specSchema: {
             type: 'object',
@@ -64,7 +64,7 @@ describe('createRegistry', () => {
           },
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Login',
           specSchema: { type: 'object' },
         },
@@ -78,11 +78,11 @@ describe('createRegistry', () => {
       slots: { Panel: { include: ['main'] } },
     })
 
-    expect(scoped.getKind('loykin.dev/v1alpha1', 'Login')).toBeUndefined()
+    expect(scoped.getKind('resourcekit.dev/v1alpha1', 'Login')).toBeUndefined()
     expect(scoped.listKinds().map((kind) => kind.kind)).toEqual(['Panel'])
     expect(scoped.getDataResolver('static')).toBe(staticResolver)
 
-    const scopedPanel = scoped.getKind('loykin.dev/v1alpha1', 'Panel')
+    const scopedPanel = scoped.getKind('resourcekit.dev/v1alpha1', 'Panel')
     expect(scopedPanel?.slotPolicy?.slots).toEqual({ main: { min: 1 } })
     expect(scopedPanel?.specSchema).toEqual({
       type: 'object',
@@ -93,6 +93,6 @@ describe('createRegistry', () => {
       required: ['pageSize'],
     })
 
-    expect(registry.getKind('loykin.dev/v1alpha1', 'Panel')?.slotPolicy?.slots).toHaveProperty('aside')
+    expect(registry.getKind('resourcekit.dev/v1alpha1', 'Panel')?.slotPolicy?.slots).toHaveProperty('aside')
   })
 })

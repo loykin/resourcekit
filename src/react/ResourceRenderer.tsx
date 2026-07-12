@@ -1,6 +1,6 @@
 import { createElement, Fragment, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import type { DataBinding, EventPolicy, LoykinKindManifest, LoykinResource, VariableDeclaration } from '../types'
+import type { DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration } from '../types'
 import type { ResourceRegistry, ScopedRegistry } from '../registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../variables'
 import type { VariableEngine } from '../variables'
@@ -9,12 +9,12 @@ import { runSubmit } from '../submit'
 import type { KindRenderFn, RenderContext } from './types'
 
 export interface ResourceRendererProps {
-  resource: LoykinResource
+  resource: Resource
   registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>
   /** Rendered for unregistered (or not-yet-loaded) kinds. Defaults to null. */
-  renderUnknownKind?: (resource: LoykinResource) => ReactNode
+  renderUnknownKind?: (resource: Resource) => ReactNode
   renderLoading?: () => ReactNode
-  renderError?: (error: unknown, resource: LoykinResource) => ReactNode
+  renderError?: (error: unknown, resource: Resource) => ReactNode
   /**
    * External hook: receives `emit` event policies and submit `emit` effects.
    * This is how a document reaches app-owned behavior (toasts, navigation,
@@ -43,7 +43,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function collectVariables(resource: LoykinResource, declarations: VariableDeclaration[] = []): VariableDeclaration[] {
+function collectVariables(resource: Resource, declarations: VariableDeclaration[] = []): VariableDeclaration[] {
   if (isRecord(resource.spec) && Array.isArray(resource.spec.variables)) {
     for (const item of resource.spec.variables) {
       if (isRecord(item) && typeof item.name === 'string') declarations.push(item as unknown as VariableDeclaration)
@@ -58,7 +58,7 @@ function collectVariables(resource: LoykinResource, declarations: VariableDeclar
 }
 
 function renderNodes(
-  resources: LoykinResource[],
+  resources: Resource[],
   props: ResourceNodeProps,
   keyPrefix: string,
 ): ReactNode {
@@ -104,7 +104,7 @@ function applyValuePath(rows: Record<string, unknown>[], binding: DataBinding): 
   })
 }
 
-function eventPolicy(resource: LoykinResource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
+function eventPolicy(resource: Resource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
   if (manifestPolicy) return manifestPolicy
   if (!isRecord(resource.spec) || !isRecord(resource.spec.events)) return undefined
   const policy = resource.spec.events[event]
@@ -154,7 +154,7 @@ function useLoadedRender(manifestRender: KindRenderFn | undefined, load: (() => 
 
 function renderKindNode(
   props: ResourceNodeProps,
-  manifest: LoykinKindManifest<unknown, KindRenderFn>,
+  manifest: KindManifest<unknown, KindRenderFn>,
   render: KindRenderFn,
 ): ReactNode {
   const { resource, registry, runtime, record } = props
@@ -162,7 +162,7 @@ function renderKindNode(
   try {
     const slots = resource.slots ?? []
     const slotNodes = new Map<string | undefined, ReactNode>()
-    const slotEntries = new Map<string | undefined, Array<{ resource: LoykinResource; node: ReactNode }>>()
+    const slotEntries = new Map<string | undefined, Array<{ resource: Resource; node: ReactNode }>>()
     for (const [index, slot] of slots.entries()) {
       const nodes = renderNodes(slot.items, props, `slot-${index}-${slot.name ?? 'default'}`)
       slotNodes.set(slot.name, nodes)
@@ -233,7 +233,7 @@ function renderKindNode(
 }
 
 interface RecordScopeNodeProps extends ResourceNodeProps {
-  manifest: LoykinKindManifest<unknown, KindRenderFn>
+  manifest: KindManifest<unknown, KindRenderFn>
   render: KindRenderFn
 }
 

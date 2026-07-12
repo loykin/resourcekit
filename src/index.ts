@@ -6,9 +6,9 @@
 
 export type {
   JsonSchema,
-  LoykinResource,
-  LoykinMetadata,
-  LoykinSlot,
+  Resource,
+  Metadata,
+  Slot,
   SlotPolicy,
   SlotRule,
   BehaviorPolicy,
@@ -26,18 +26,22 @@ export type {
   MutationResolver,
   SubmitSpec,
   SubmitEffect,
-  LoykinKindManifest,
+  KindManifest,
   ResourceKitPlugin,
   ScopeOptions,
   ValidationIssue,
   ValidationResult,
+  StagePosition,
+  StageResult,
+  StageBatchPosition,
+  StageBatchResult,
 } from './types'
 
 export { createRegistry } from './registry'
 export type { ResourceRegistry, ScopedRegistry } from './registry'
 
 export { validateResource } from './validation'
-export { buildDocumentSchema } from './schema'
+export { buildDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './schema'
 
 export { createVariableEngine, scanVariableRefs, interpolate } from './variables'
 export type { VariableEngine } from './variables'

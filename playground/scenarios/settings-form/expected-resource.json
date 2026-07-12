@@ -1,17 +1,17 @@
 {
-  "apiVersion": "loykin.dev/v1alpha1",
+  "apiVersion": "resourcekit.dev/v1alpha1",
   "kind": "DataBody",
   "metadata": { "name": "scenario-settings-form" },
   "spec": { "title": "Workspace settings", "description": "Form-local state with declarative submit." },
   "slots": [
     {
       "name": "topBar",
-      "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Settings / Workspace" } }]
+      "items": [{ "apiVersion": "resourcekit.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Settings / Workspace" } }]
     },
     {
       "items": [
         {
-          "apiVersion": "loykin.dev/v1alpha1",
+          "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "ResourceForm",
           "spec": {
             "submitLabel": "Save settings",
@@ -22,23 +22,23 @@
             {
               "items": [
                 {
-                  "apiVersion": "loykin.dev/v1alpha1",
+                  "apiVersion": "resourcekit.dev/v1alpha1",
                   "kind": "DataBodySection",
                   "spec": { "id": "general", "label": "General", "description": "Workspace identity" },
                   "slots": [
                     {
                       "items": [
                         {
-                          "apiVersion": "loykin.dev/v1alpha1",
+                          "apiVersion": "resourcekit.dev/v1alpha1",
                           "kind": "DataBodyRow",
                           "spec": { "label": "Name", "required": true },
-                          "slots": [{ "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "name", "value": "Acme Operations" } }] }]
+                          "slots": [{ "items": [{ "apiVersion": "resourcekit.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "name", "value": "Acme Operations" } }] }]
                         },
                         {
-                          "apiVersion": "loykin.dev/v1alpha1",
+                          "apiVersion": "resourcekit.dev/v1alpha1",
                           "kind": "DataBodyRow",
                           "spec": { "label": "Slug" },
-                          "slots": [{ "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "slug", "value": "acme-ops" } }] }]
+                          "slots": [{ "items": [{ "apiVersion": "resourcekit.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "slug", "value": "acme-ops" } }] }]
                         }
                       ]
                     }

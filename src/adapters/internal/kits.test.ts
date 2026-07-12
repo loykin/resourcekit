@@ -10,7 +10,7 @@ describe('createFirstPartyResourceAdapters', () => {
     const plugin = composeResourceKitPlugins('composed', [
       {
         name: 'child',
-        kinds: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Probe', specSchema: { type: 'object' } }],
+        kinds: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', specSchema: { type: 'object' } }],
         dataResolvers: { custom: dataResolver },
         mutationResolvers: { custom: mutationResolver },
       },

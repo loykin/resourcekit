@@ -5,4 +5,5 @@ export {
   createFirstPartyResourceAdapters,
   createGridKitPlugin,
   createResourceViewPlugin,
+  publicKindNames,
 } from './internal/kits'

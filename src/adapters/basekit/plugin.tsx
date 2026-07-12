@@ -100,8 +100,10 @@ export function createBaseKitPlugin(): ResourceKitPlugin<KindRenderFn> {
       name: 'basekit-adapter',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'BaseKitFilterInput',
+          level: ['leaf'],
+          description: 'A single filter control (select/date/text/etc., per `config`) for narrowing a bound list/table via a variable.',
           specSchema: {
             type: 'object',
             additionalProperties: true,

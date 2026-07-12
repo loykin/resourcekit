@@ -1,7 +1,7 @@
 import type {
   JsonSchema,
   DataResolver,
-  LoykinKindManifest,
+  KindManifest,
   MutationResolver,
   ResourceKitPlugin,
   ScopeOptions,
@@ -14,8 +14,8 @@ import type {
  */
 export interface ResourceRegistry<TRender = unknown> {
   use(plugin: ResourceKitPlugin<TRender>): void
-  getKind(apiVersion: string, kind: string): LoykinKindManifest<unknown, TRender> | undefined
-  listKinds(): LoykinKindManifest<unknown, TRender>[]
+  getKind(apiVersion: string, kind: string): KindManifest<unknown, TRender> | undefined
+  listKinds(): KindManifest<unknown, TRender>[]
   getDataResolver(source: string): DataResolver | undefined
   listDataResolvers(): string[]
   getMutationResolver(target: string): MutationResolver | undefined
@@ -82,7 +82,7 @@ function applySpecScope(schema: JsonSchema, kind: string, options: ScopeOptions)
   return scoped
 }
 
-function applySlotScope<T>(manifest: LoykinKindManifest<unknown, T>, options: ScopeOptions): LoykinKindManifest<unknown, T> {
+function applySlotScope<T>(manifest: KindManifest<unknown, T>, options: ScopeOptions): KindManifest<unknown, T> {
   const slotOptions = options.slots?.[manifest.kind]
   const specSchema = applySpecScope(manifest.specSchema, manifest.kind, options)
   if (!slotOptions || !manifest.slotPolicy) {
@@ -101,7 +101,7 @@ function applySlotScope<T>(manifest: LoykinKindManifest<unknown, T>, options: Sc
   return { ...manifest, specSchema, slotPolicy }
 }
 
-function kindAllowed(manifest: LoykinKindManifest, options: ScopeOptions): boolean {
+function kindAllowed(manifest: KindManifest, options: ScopeOptions): boolean {
   const apiVersionAllowed = !options.apiVersions || options.apiVersions.includes(manifest.apiVersion)
   const included = !options.kinds?.include || options.kinds.include.includes(manifest.kind)
   const excluded = options.kinds?.exclude?.includes(manifest.kind) ?? false
@@ -109,7 +109,7 @@ function kindAllowed(manifest: LoykinKindManifest, options: ScopeOptions): boole
 }
 
 export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
-  const kinds = new Map<string, LoykinKindManifest<unknown, TRender>>()
+  const kinds = new Map<string, KindManifest<unknown, TRender>>()
   const dataResolvers = new Map<string, DataResolver>()
   const mutationResolvers = new Map<string, MutationResolver>()
   const listeners = new Set<() => void>()

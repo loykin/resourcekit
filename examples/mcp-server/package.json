@@ -1,0 +1,26 @@
+{
+  "name": "resourcekit-mcp-server-example",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Minimal MCP server exposing resourcekit's staged-generation primitives (nextStage/nextStageBatch/validateResource) as tools, so a real MCP client can be tested end to end instead of the playground's random auto-filler.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@loykin/resourcekit": "workspace:*",
+    "@loykin/chartkit": "0.0.1-dev.0",
+    "@loykin/designkit": "0.0.1-dev.6",
+    "@loykin/filter-input": "0.0.1-dev.0",
+    "@loykin/gridkit": "^0.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3"
+  }
+}

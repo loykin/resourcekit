@@ -253,39 +253,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     name: 'designkit-adapter',
     kinds: [
       {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'PageTopBar',
-        specSchema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            left: { type: 'string' },
-            variant: { enum: ['ghost', 'default'] },
-            height: { type: 'string' },
-            sidebarTrigger: { type: 'boolean' },
-          },
-        },
-        slotPolicy: {
-          slots: {
-            right: { min: 0, max: 1 },
-          },
-        },
-        render: (resource, ctx) => {
-          const spec = resource.spec as PageTopBarSpec
-          return (
-            <KitPageTopBar
-              left={spec.left}
-              right={ctx.slots.one('right')}
-              variant={spec.variant}
-              height={spec.height}
-              sidebarTrigger={spec.sidebarTrigger === false ? false : undefined}
-            />
-          )
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitPageTopBar',
+        level: ['organism'],
+        description:
+          'Page header bar with a left-aligned title and an optional right-aligned slot for controls. Always nested inside a template — never a document root.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -298,7 +270,12 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
         slotPolicy: {
           slots: {
-            right: { min: 0, max: 1 },
+            right: {
+              min: 0,
+              max: 1,
+              accepts: ['FilterControl'],
+              description: 'Controls rendered at the right edge of the top bar, e.g. a filter or search control.',
+            },
           },
         },
         render: (resource, ctx) => {
@@ -315,8 +292,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitListDetail',
+        level: ['template'],
+        description:
+          'Two-pane browse layout: a selectable list on the left, a detail view on the right that shows the selected record. Use for record-browsing/CRM-style screens.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -328,10 +308,31 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
         slotPolicy: {
           slots: {
-            topBar: { min: 0, max: 1 },
-            list: { min: 1, max: 1 },
-            detail: { min: 0, max: 1 },
-            emptyDetail: { min: 0, max: 1 },
+            topBar: {
+              min: 0,
+              max: 1,
+              accepts: ['PageTopBar'],
+              description: 'Header bar for the whole list/detail screen.',
+            },
+            list: {
+              min: 1,
+              max: 1,
+              accepts: ['SelectableList'],
+              description:
+                'The selectable list of records (required) — must be SelectableList. The list pane is a fixed-width, non-scrolling rail, so wide multi-column views like TableView/GridKitTable don\'t fit here; use those in a Workbench mainPane instead.',
+            },
+            detail: {
+              min: 0,
+              max: 1,
+              accepts: ['RecordScope', 'DataBody', 'Panel'],
+              description: 'The detail view for the currently selected record — typically RecordScope wrapping a DataBody.',
+            },
+            emptyDetail: {
+              min: 0,
+              max: 1,
+              accepts: ['Panel'],
+              description: 'Shown in the detail pane instead of `detail` when nothing is selected yet.',
+            },
           },
         },
         render: (resource, ctx) => {
@@ -352,8 +353,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitWorkbench',
+        level: ['template'],
+        description:
+          'Resizable multi-pane workspace layout (like an IDE): optional side/bottom panes around one required main pane. Use for data-tool screens where the user works across several regions at once (filters, a primary table/editor, an inspector).',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -377,13 +381,49 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
         slotPolicy: {
           slots: {
-            topBar: { min: 0, max: 1 },
-            headerRight: { min: 0, max: 1 },
-            actions: { min: 0, max: 1 },
-            leftPane: { min: 0, max: 1 },
-            mainPane: { min: 1, max: 1 },
-            rightPane: { min: 0, max: 1 },
-            bottomPane: { min: 0, max: 1 },
+            topBar: {
+              min: 0,
+              max: 1,
+              accepts: ['Panel', 'PageTopBar'],
+              description: 'Header bar for the whole workbench.',
+            },
+            headerRight: {
+              min: 0,
+              max: 1,
+              acceptsLevels: ['organism', 'leaf'],
+              description: 'Controls rendered at the right of the header, alongside topBar.',
+            },
+            actions: {
+              min: 0,
+              max: 1,
+              acceptsLevels: ['organism', 'leaf'],
+              description: 'Primary action buttons for the workbench, typically near the header.',
+            },
+            leftPane: {
+              min: 0,
+              max: 1,
+              accepts: ['FilterControl', 'Panel', 'DataBody'],
+              description: 'Secondary content to the left of mainPane — typically filters, navigation, or a list.',
+            },
+            mainPane: {
+              min: 1,
+              max: 1,
+              accepts: ['TableView', 'Panel'],
+              description: 'The primary content of the workbench (required) — the main table, editor, or view the user works in.',
+            },
+            rightPane: {
+              min: 0,
+              max: 1,
+              accepts: ['Panel'],
+              description:
+                'Secondary content to the right of mainPane — typically an inspector, detail panel, or contextual info for the current selection.',
+            },
+            bottomPane: {
+              min: 0,
+              max: 1,
+              accepts: ['ChartView'],
+              description: 'Secondary content below mainPane — typically a chart, log, or console tied to the main content.',
+            },
           },
         },
         render: (resource, ctx) => {
@@ -415,8 +455,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBody',
+        level: ['template', 'organism'],
+        description:
+          'Labeled body of structured content (forms, summaries, tabbed data). Can be the whole document (a settings/detail page) or nested inside another template\'s slot (e.g. a Workbench mainPane or a ListDetail detail pane) as that region\'s content. Its own content goes through DataBodyGroup/DataBodySection/DataBodyTab/DataBodySummary.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -428,12 +471,46 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           },
         },
         slotPolicy: {
-          defaultSlot: { min: 0 },
+          defaultSlot: {
+            min: 0,
+            accepts: [
+              'DataBodyGroup',
+              'DataBodySummary',
+              'DataBodyTab',
+              'DataBodySection',
+              'DataBodyBody',
+              'ChartView',
+              'ResourceForm',
+              'TableView',
+              'Sheet',
+            ],
+            description:
+              'The body content — DataBodyGroup/DataBodySection/DataBodyTab/DataBodySummary to organize it, or content kinds directly.',
+          },
           slots: {
-            topBar: { min: 0, max: 1 },
-            actions: { min: 0, max: 1 },
-            toolbarLeft: { min: 0, max: 1 },
-            toolbarRight: { min: 0, max: 1 },
+            topBar: {
+              min: 0,
+              max: 1,
+              accepts: ['PageTopBar'],
+              description: 'Header bar for this content body.',
+            },
+            actions: {
+              min: 0,
+              accepts: ['ActionButton'],
+              description: 'Primary action buttons for this content body.',
+            },
+            toolbarLeft: {
+              min: 0,
+              max: 1,
+              accepts: ['FilterControl'],
+              description: 'Toolbar controls left-aligned above the body content.',
+            },
+            toolbarRight: {
+              min: 0,
+              max: 1,
+              acceptsLevels: ['organism', 'leaf'],
+              description: 'Toolbar controls right-aligned above the body content.',
+            },
           },
         },
         render: (resource, ctx) => {
@@ -455,23 +532,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'DataBodyBody',
-        specSchema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            className: { type: 'string' },
-          },
-        },
-        slotPolicy: { defaultSlot: { min: 0 } },
-        render: (resource, ctx) => {
-          return <>{ctx.slots.children()}</>
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodyBody',
+        level: ['organism'],
+        description:
+          'Groups a chunk of DataBody content under one visual block with no label of its own. Use when content does not need a title/id, unlike DataBodySection or DataBodyTab.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -479,32 +544,19 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             className: { type: 'string' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: { min: 0, acceptsLevels: ['organism', 'leaf'], description: 'Content wrapped by this block.' },
+        },
         render: (resource, ctx) => {
           return <>{ctx.slots.children()}</>
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'DataBodyTab',
-        specSchema: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['id', 'label'],
-          properties: {
-            id: { type: 'string' },
-            label: { type: 'string' },
-            count: { type: 'number' },
-          },
-        },
-        slotPolicy: { defaultSlot: { min: 0 } },
-        render: (resource, ctx) => {
-          return <>{ctx.slots.children()}</>
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodyTab',
+        level: ['organism'],
+        description:
+          'One tab of a tabbed DataBody, switching its content in and out with sibling DataBodyTab kinds. Use when content should be organized as tabs the user switches between, not all visible at once — contrast with DataBodySection, where every section stays visible together.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -515,32 +567,23 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             count: { type: 'number' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
-        render: (resource, ctx) => {
-          return <>{ctx.slots.children()}</>
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'DataBodySection',
-        specSchema: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['id', 'label'],
-          properties: {
-            id: { type: 'string' },
-            label: { type: 'string' },
-            description: { type: 'string' },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['TableView', 'ChartView', 'DataBodyGroup'],
+            description: 'Content shown when this tab is active.',
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
         render: (resource, ctx) => {
           return <>{ctx.slots.children()}</>
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodySection',
+        level: ['organism'],
+        description:
+          'A labeled, always-visible section of a DataBody (e.g. a settings form\'s "General" section). Use when content should be visible all at once under its own heading — contrast with DataBodyTab, whose content is switched, not co-visible.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -551,29 +594,23 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             description: { type: 'string' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
-        render: (resource, ctx) => {
-          return <>{ctx.slots.children()}</>
-        },
-      },
-      {
-        apiVersion: 'loykin.dev/v1alpha1',
-        kind: 'DataBodySummary',
-        specSchema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            className: { type: 'string' },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['DataBodyRow', 'DataBodyGroup'],
+            description: 'Content belonging to this section.',
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
         render: (resource, ctx) => {
           return <>{ctx.slots.children()}</>
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodySummary',
+        level: ['organism'],
+        description:
+          'A compact summary band at the top of a DataBody, typically DataBodyGroup wrapping key-metric DataBodyField entries (e.g. a dashboard status strip). Use for at-a-glance metrics, not the main content.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -581,14 +618,23 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             className: { type: 'string' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['DataBodyGroup'],
+            description: 'The summary content, typically DataBodyGroup wrapping DataBodyField entries.',
+          },
+        },
         render: (resource, ctx) => {
           return <>{ctx.slots.children()}</>
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodyGroup',
+        level: ['organism'],
+        description:
+          'Groups related DataBodyRow/DataBodyField entries under an optional title with layout/variant styling (e.g. a card or an inline strip). The field-organizing unit inside a DataBody, DataBodySection, or DataBodyTab — not a page-level container.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -599,7 +645,13 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             variant: { type: 'string' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['ObjectFields', 'DataBodyField', 'DataBodyRow'],
+            description: 'The rows or fields belonging to this group.',
+          },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as DataBodyGroupSpec
           return (
@@ -610,8 +662,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodyRow',
+        level: ['organism'],
+        description:
+          'One labeled row inside a DataBodyGroup, pairing a label with an input control (a form field row). For read-only key/value display with no input, use DataBodyField directly instead.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -621,7 +676,13 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             required: { type: 'boolean' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['InputControl'],
+            description: 'The control for this row, typically InputControl.',
+          },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as DataBodyRowSpec
           return (
@@ -632,8 +693,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodyField',
+        level: ['organism'],
+        description:
+          'A read-only labeled value display (label + value), for showing data rather than collecting it. Set at most one of value/valueRef/fieldRef.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -641,12 +705,18 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           properties: {
             label: { type: 'string' },
             description: { type: 'string' },
-            value: { type: 'string' },
-            valueRef: { type: 'string' },
-            fieldRef: { type: 'string' },
+            value: { type: 'string', description: 'A literal value to display.' },
+            valueRef: { type: 'string', description: 'Display the value of this page variable, e.g. "variables.status".' },
+            fieldRef: { type: 'string', description: 'Display this dot-path from the nearest record scope (e.g. inside a RecordScope).' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['Badge'],
+            description: 'Optional override content instead of the plain text value, e.g. a Badge.',
+          },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as DataBodyFieldSpec
           const variable = variableName(spec.valueRef)
@@ -660,8 +730,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitPanel',
+        level: ['organism'],
+        description:
+          'A titled card for grouping arbitrary content — the general-purpose container when none of the more specific templates (DataBody, ListDetail, Workbench) fit. Not root-eligible; always nested inside another template\'s slot.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -671,10 +744,14 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           },
         },
         slotPolicy: {
-          defaultSlot: { min: 0 },
+          defaultSlot: { min: 0, acceptsLevels: ['organism', 'leaf'], description: 'The panel\'s content.' },
           slots: {
-            actions: { min: 0, max: 1 },
-            footer: { min: 0, max: 1 },
+            actions: {
+              min: 0,
+              accepts: ['ActionButton'],
+              description: 'Action controls in the panel header, next to the title.',
+            },
+            footer: { min: 0, max: 1, acceptsLevels: ['organism', 'leaf'], description: 'Content pinned to the bottom of the panel.' },
           },
         },
         render: (resource, ctx) => {
@@ -687,8 +764,10 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitText',
+        level: ['leaf'],
+        description: 'Plain static text.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -700,8 +779,10 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitBadge',
+        level: ['leaf'],
+        description: 'A small colored label for status/category, e.g. "Active" or "Prospect".',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -717,15 +798,17 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitButton',
+        level: ['leaf'],
+        description: 'A clickable button. Its `value` is included in the emitted click event payload.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
           required: ['label'],
           properties: {
             label: { type: 'string' },
-            value: { type: 'string' },
+            value: { type: 'string', description: 'Included as `value` in the click event payload emitted on click.' },
             variant: { type: 'string' },
             size: { type: 'string' },
             events: { type: 'object' },
@@ -741,8 +824,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitInput',
+        level: ['leaf'],
+        description:
+          'A text input control. Set at most one of value/valueRef/fieldRef to prefill it. Standalone inputs update immediately — for a group of inputs submitted together, wrap them in DesignKitForm instead.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -750,9 +836,9 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             name: { type: 'string' },
             placeholder: { type: 'string' },
             type: { type: 'string' },
-            value: { type: 'string' },
-            valueRef: { type: 'string' },
-            fieldRef: { type: 'string' },
+            value: { type: 'string', description: 'A literal prefill value.' },
+            valueRef: { type: 'string', description: 'Prefill from this page variable, e.g. "variables.status".' },
+            fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
           },
         },
         render: (resource, ctx) => {
@@ -776,20 +862,25 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitSheet',
+        level: ['organism'],
+        description:
+          'A slide-in overlay panel (drawer/modal), shown while `openVariable` is truthy and closed by clearing it. Use for secondary/transient content (e.g. a create/edit form triggered from a button) — not root-eligible, always attached to a triggering page.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
           required: ['openVariable'],
           properties: {
-            openVariable: { type: 'string' },
+            openVariable: { type: 'string', description: 'Page variable that controls open/closed state; truthy opens the sheet.' },
             title: { type: 'string' },
             side: { enum: ['left', 'right', 'top', 'bottom'] },
             width: { type: 'number' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: { min: 0, accepts: ['ResourceForm'], description: "The sheet's content." },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as SheetSpec
           const open = Boolean(ctx.variables.get(spec.openVariable))
@@ -813,8 +904,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitRecord',
+        level: ['organism'],
+        description:
+          'Fetches one record via `data` and publishes it as the record scope for descendants (fieldRef lookups resolve against it). Wrap detail content (e.g. a DataBody) in this when it should read from a single fetched record rather than page variables directly.',
         recordScope: true,
         specSchema: {
           type: 'object',
@@ -825,12 +919,21 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             variables: { type: 'array' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['DataBody', 'ResourceForm'],
+            description: 'Content that reads from the fetched record via fieldRef.',
+          },
+        },
         render: (_resource, ctx) => <>{ctx.slots.children()}</>,
       },
       {
-        apiVersion: 'loykin.dev/v1alpha1',
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitForm',
+        level: ['organism'],
+        description:
+          "A native form: collects its input controls' values on submit and dispatches them through the declarative `submit` mutation. Form state stays local until submit — inputs inside it are not wired to page variables. Use when inputs should be submitted together as one action, unlike an individual InputControl bound via valueRef, which updates immediately.",
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -846,14 +949,28 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
                 onSuccess: {
                   type: 'array',
                   items: {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['kind', 'variable'],
-                    properties: {
-                      kind: { const: 'setVariable' },
-                      variable: { type: 'string' },
-                      from: { type: 'string' },
-                    },
+                    oneOf: [
+                      {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['kind', 'variable'],
+                        properties: {
+                          kind: { const: 'setVariable' },
+                          variable: { type: 'string' },
+                          from: { type: 'string' },
+                          value: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+                        },
+                      },
+                      {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['kind', 'event'],
+                        properties: {
+                          kind: { const: 'emit' },
+                          event: { type: 'string' },
+                        },
+                      },
+                    ],
                   },
                 },
               },
@@ -862,15 +979,26 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             successMessage: { type: 'string' },
           },
         },
-        slotPolicy: { defaultSlot: { min: 0 } },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['DataBodySection', 'DataBodyGroup', 'DataBodyRow', 'InputControl'],
+            description: "The form's fields, typically DataBodySection/DataBodyRow/InputControl.",
+          },
+        },
         render: (resource, ctx) => <ResourceForm spec={resource.spec as FormSpec} ctx={ctx} />,
       },
     ],
   },
   [
+    ['DesignKitPageTopBar', 'PageTopBar'],
     ['DesignKitListDetail', 'ListDetail'],
     ['DesignKitWorkbench', 'Workbench'],
     ['DesignKitDataBody', 'DataBody'],
+    ['DesignKitDataBodyBody', 'DataBodyBody'],
+    ['DesignKitDataBodyTab', 'DataBodyTab'],
+    ['DesignKitDataBodySection', 'DataBodySection'],
+    ['DesignKitDataBodySummary', 'DataBodySummary'],
     ['DesignKitDataBodyGroup', 'DataBodyGroup'],
     ['DesignKitDataBodyRow', 'DataBodyRow'],
     ['DesignKitDataBodyField', 'DataBodyField'],

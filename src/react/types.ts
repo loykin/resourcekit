@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { DataBinding, LoykinResource, SubmitSpec } from '../types'
+import type { DataBinding, Resource, SubmitSpec } from '../types'
 
 /**
  * React narrowing of the manifest's generic `render` member.
@@ -7,7 +7,7 @@ import type { DataBinding, LoykinResource, SubmitSpec } from '../types'
  * sibling resources, parent specs, or data kits directly.
  */
 export type KindRenderFn<TSpec = unknown> = (
-  resource: LoykinResource<TSpec>,
+  resource: Resource<TSpec>,
   ctx: RenderContext,
 ) => ReactNode
 
@@ -46,7 +46,7 @@ export interface SlotAccessor {
   /** Named slot; throws a validation-level error when missing. */
   requiredOne(name: string): ReactNode
   /** Raw child resources of a named slot (for kinds that map slots to data props). */
-  resources(name: string): LoykinResource[]
+  resources(name: string): Resource[]
   /** Child resources paired with their rendered node, preserving child boundaries. */
-  entries(name?: string): Array<{ resource: LoykinResource; node: ReactNode }>
+  entries(name?: string): Array<{ resource: Resource; node: ReactNode }>
 }

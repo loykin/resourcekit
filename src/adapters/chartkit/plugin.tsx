@@ -44,8 +44,10 @@ export function createChartKitPlugin(): ResourceKitPlugin<KindRenderFn> {
       name: 'chartkit-adapter',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ChartKitChart',
+          level: ['leaf'],
+          description: 'A chart (bar/line/pie/etc., per `chart.type`) rendered from an inline spec.',
           specSchema: {
             type: 'object',
             additionalProperties: false,

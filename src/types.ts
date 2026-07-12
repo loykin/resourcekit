@@ -11,24 +11,24 @@ export type JsonSchema = Record<string, unknown>
 
 // ─── Resource envelope ────────────────────────────────────────────────────────
 
-export interface LoykinResource<TSpec = unknown> {
+export interface Resource<TSpec = unknown> {
   apiVersion: string
   kind: string
-  metadata?: LoykinMetadata
+  metadata?: Metadata
   spec: TSpec
-  slots?: LoykinSlot[]
+  slots?: Slot[]
 }
 
-export interface LoykinMetadata {
+export interface Metadata {
   name?: string
   labels?: Record<string, string>
   annotations?: Record<string, string>
 }
 
 /** Parent-owned placement group. `name` is omitted for the default slot. */
-export interface LoykinSlot {
+export interface Slot {
   name?: string
-  items: LoykinResource[]
+  items: Resource[]
 }
 
 // ─── Slot policy ──────────────────────────────────────────────────────────────
@@ -43,6 +43,21 @@ export interface SlotRule {
   max?: number
   /** Allowed child kind names. Omit to accept any registered kind. */
   accepts?: string[]
+  /**
+   * Allowed child composition levels (see `KindManifest.level`). A
+   * child matches if its `level` intersects this set. Unions with `accepts`
+   * — a child is allowed if it matches either. Omit both to accept any
+   * registered kind.
+   */
+  acceptsLevels?: string[]
+  /**
+   * What this slot is for, in plain language (e.g. "secondary filters and
+   * navigation, rendered left of mainPane"). Surfaced as JSON Schema
+   * `description` on the generated slot branch — the schema otherwise only
+   * tells the AI which kinds are structurally valid here, not what the slot
+   * means, which matters most when sibling slots accept the same levels.
+   */
+  description?: string
 }
 
 // ─── Behavior policy ──────────────────────────────────────────────────────────
@@ -175,12 +190,27 @@ export interface SubmitSpec {
  * adapter narrows TRender to its renderer signature. `load` supports lazy
  * (code-split) renderers — schema and validation never wait on it.
  */
-export interface LoykinKindManifest<TSpec = unknown, TRender = unknown> {
+export interface KindManifest<TSpec = unknown, TRender = unknown> {
   apiVersion: string
   kind: string
   specSchema: JsonSchema
   slotPolicy?: SlotPolicy
   behaviorPolicy?: BehaviorPolicy
+  /**
+   * Composition levels this kind is valid at (see docs/kind-level-taxonomy.md).
+   * Most kinds carry exactly one tag; a kind that is both a whole-page
+   * template and independently embeddable content (e.g. DataBody) carries
+   * more than one. Used by `ScopeOptions.rootLevels` and `SlotRule.acceptsLevels`.
+   */
+  level?: string[]
+  /**
+   * What this kind is, in plain language, and — critically — when to use it
+   * over a structurally similar sibling kind (e.g. DataBodyGroup vs.
+   * DataBodySection vs. DataBodyTab all wrap children with a label/id and
+   * are otherwise indistinguishable in the schema). Surfaced as JSON Schema
+   * `description` on the kind's generated definition.
+   */
+  description?: string
   /**
    * When true, the runtime resolves `spec.data` to a single record
    * (first row) before rendering children, and publishes it to descendants
@@ -197,7 +227,7 @@ export interface LoykinKindManifest<TSpec = unknown, TRender = unknown> {
 
 export interface ResourceKitPlugin<TRender = unknown> {
   name: string
-  kinds?: LoykinKindManifest<unknown, TRender>[]
+  kinds?: KindManifest<unknown, TRender>[]
   dataResolvers?: Record<string, DataResolver>
   mutationResolvers?: Record<string, MutationResolver>
 }
@@ -236,6 +266,74 @@ export interface ScopeOptions {
     allow?: string[]
   }
   maxDepth?: number
+  /**
+   * Allowed levels for the document root (see docs/kind-level-taxonomy.md).
+   * The root is treated as the outermost implicit slot: a document is valid
+   * only if its root kind's `level` intersects this set. Omit to leave the
+   * root unrestricted (today's behavior).
+   */
+  rootLevels?: string[]
+}
+
+// ─── Staged schema requests ─────────────────────────────────────────────────
+//
+// Stateless "given what's already chosen, what's valid next" primitives.
+// Intended to be called directly by whatever orchestrates generation (an MCP
+// client's own tool-calling loop, a host application's own loop, etc.) —
+// resourcekit deliberately doesn't ship an orchestration loop of its own; see
+// docs/staged-generation-experiment.md for why.
+
+/**
+ * One position in the document tree to resolve — the root (omit `parent`),
+ * or a specific slot on an already-chosen parent node.
+ */
+export interface StagePosition {
+  parent?: {
+    apiVersion: string
+    kind: string
+    /** Omit for the parent's defaultSlot. */
+    slotName?: string
+  }
+}
+
+/**
+ * Result of resolving one `StagePosition`. Exactly one of `fixed`/`schema`
+ * is set:
+ * - `fixed`: this position has exactly one valid kind — insert it directly,
+ *   no AI turn needed for the kind choice.
+ * - `schema`: a self-contained JSON Schema (own `$defs`) scoped to just this
+ *   position — envelope + spec for each candidate kind, not their slots.
+ *   Recurse with a new `StagePosition` once a kind is chosen and its slots
+ *   are known.
+ */
+export interface StageResult {
+  fixed?: { apiVersion: string; kind: string }
+  schema?: JsonSchema
+}
+
+/**
+ * One already-resolved parent whose sibling slots should be resolved
+ * together in a single request, instead of one `StagePosition` at a time.
+ */
+export interface StageBatchPosition {
+  parent: { apiVersion: string; kind: string }
+}
+
+/**
+ * Result of resolving every slot on a `StageBatchPosition.parent` at once.
+ * - `fixed`: slotName -> the single valid kind for slots with no real
+ *   choice — insert directly, no AI turn needed for these.
+ * - `schema`: a self-contained object schema (own `$defs` where needed)
+ *   covering every slot with real choice, one property per open slot name.
+ *   Omitted if every slot is fixed or the parent has no slots. A
+ *   non-repeatable slot's property is a candidate `oneOf` (envelope-only,
+ *   no `spec`); a repeatable slot's property is a `oneOf`-item array with
+ *   `minItems`/`maxItems`. Optional slots (`min` 0 or unset) are not in
+ *   `required` — omitting the key means declining that slot.
+ */
+export interface StageBatchResult {
+  fixed: Record<string, { apiVersion: string; kind: string }>
+  schema?: JsonSchema
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────

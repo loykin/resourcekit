@@ -34,7 +34,7 @@ describe('playground scenarios', () => {
   it.each(scenarioDefinitions)('$id scope only includes registered kinds', (scenario) => {
     const scopedRegistry = registry()
     for (const kind of scenario.scope.kinds?.include ?? []) {
-      expect(scopedRegistry.getKind('loykin.dev/v1alpha1', kind), `${scenario.id} includes unregistered kind ${kind}`).toBeDefined()
+      expect(scopedRegistry.getKind('resourcekit.dev/v1alpha1', kind), `${scenario.id} includes unregistered kind ${kind}`).toBeDefined()
     }
   })
 })

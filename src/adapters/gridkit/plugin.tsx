@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { DataGrid, DataGridPaginationCompact, GlobalSearch, inferTablePayload } from '@loykin/gridkit'
+import { getValueAtPath } from '../../path'
 import type { DataBinding, ResourceKitPlugin } from '../../types'
 import type { KindRenderFn, RenderContext } from '../../react/types'
 import { withKindAliases } from '../internal/shared'
@@ -111,14 +112,29 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
 
   const columns = useMemo(() => {
     if (!rows) return []
-    const inferHints: Record<string, Partial<ColumnHint>> = { ...spec.inferOptions?.hints }
-    for (const [key, hint] of Object.entries(spec.columns ?? {})) {
-      inferHints[key] = { ...inferHints[key], ...hint }
+    const explicitColumns = Object.entries(spec.columns ?? {})
+
+    // `columns` given: it's an allowlist, not decoration — only these show, in
+    // this order. Keys are dot-paths (getValueAtPath), so nested fields like
+    // "company.name" work without the row needing that exact top-level key.
+    if (explicitColumns.length > 0) {
+      return explicitColumns.map(([key, hint]) => {
+        const cell = buildHintCell(hint.type, hint)
+        return {
+          id: key,
+          accessorFn: (row: Record<string, unknown>) => getValueAtPath(row, key),
+          header: hint.label ?? key,
+          ...(cell ? { cell } : {}),
+          meta: { align: hint.align, flex: hint.flex ?? 1 },
+        }
+      })
     }
+
+    // No `columns`: auto-infer every top-level field from the row shape.
     const payload = inferTablePayload(rows, {
       title: spec.title,
       hints: Object.fromEntries(
-        Object.entries(inferHints).map(([key, hint]) => [
+        Object.entries(spec.inferOptions?.hints ?? {}).map(([key, hint]) => [
           key,
           {
             ...(hint.label !== undefined ? { label: hint.label } : {}),
@@ -130,7 +146,7 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
       ),
     })
     return payload.columns.map((col) => {
-      const cell = buildHintCell(col.type, spec.columns?.[col.key])
+      const cell = buildHintCell(col.type, undefined)
       return {
         id: col.key,
         accessorKey: col.key,
@@ -171,8 +187,11 @@ export function createGridKitPlugin(): ResourceKitPlugin<KindRenderFn> {
       name: 'gridkit-adapter',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'GridKitTable',
+          level: ['leaf'],
+          description:
+            'A data table/grid bound to `data`. Omit `columns` to show every top-level field of each row; set `columns` to show only those, in that order — its keys are dot-paths into the row (e.g. "company.name" reaches a nested field), not necessarily top-level keys, which also lets you flatten nested API responses into a flat table.',
           specSchema: {
             type: 'object',
             additionalProperties: true,
@@ -180,7 +199,30 @@ export function createGridKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             properties: {
               title: { type: 'string' },
               data: { type: 'object' },
-              columns: { type: 'object' },
+              columns: {
+                type: 'object',
+                description:
+                  'Ordered allowlist of columns to show, keyed by dot-path into each row (e.g. "name", "company.name"). Omit entirely to auto-infer every top-level field instead.',
+                additionalProperties: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    label: { type: 'string', description: 'Column header. Defaults to the dot-path key.' },
+                    type: { enum: ['text', 'number', 'date', 'boolean'] },
+                    align: { enum: ['left', 'center', 'right'] },
+                    flex: { type: 'number', description: 'Relative column width. Default: 1.' },
+                    emphasis: { enum: ['strong'] },
+                    tone: { enum: ['muted'] },
+                    display: { enum: ['badge'] },
+                    variant: { type: 'string', description: 'Badge variant when display is "badge".' },
+                    map: {
+                      type: 'object',
+                      additionalProperties: { type: 'string' },
+                      description: 'Maps a cell value to a badge variant when display is "badge".',
+                    },
+                  },
+                },
+              },
               enableSorting: { type: 'boolean' },
               enableColumnFilters: { type: 'boolean' },
               filterDisplay: { type: 'string' },

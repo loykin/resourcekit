@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { createRegistry } from '../registry'
-import type { DataResolver, LoykinResource } from '../types'
+import type { DataResolver, Resource } from '../types'
 import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
 
@@ -13,7 +13,7 @@ describe('ResourceRenderer', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Panel',
           specSchema: { type: 'object' },
           slotPolicy: { defaultSlot: { min: 0 }, slots: { aside: { min: 0 } } },
@@ -21,7 +21,7 @@ describe('ResourceRenderer', () => {
             createElement('section', null, createElement('main', null, ctx.slots.children()), createElement('aside', null, ctx.slots.one('aside'))),
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Text',
           specSchema: { type: 'object' },
           render: (resource) => createElement('span', null, (resource.spec as { text: string }).text),
@@ -29,13 +29,13 @@ describe('ResourceRenderer', () => {
       ],
     })
 
-    const resource: LoykinResource = {
-      apiVersion: 'loykin.dev/v1alpha1',
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Panel',
       spec: {},
       slots: [
-        { items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Body' } }] },
-        { name: 'aside', items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Aside' } }] },
+        { items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'Body' } }] },
+        { name: 'aside', items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'Aside' } }] },
       ],
     }
 
@@ -50,7 +50,7 @@ describe('ResourceRenderer', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'List',
           specSchema: { type: 'object' },
           slotPolicy: { defaultSlot: { min: 0 } },
@@ -62,7 +62,7 @@ describe('ResourceRenderer', () => {
             ),
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Text',
           specSchema: { type: 'object' },
           render: (resource) => createElement('span', null, (resource.spec as { text: string }).text),
@@ -70,11 +70,11 @@ describe('ResourceRenderer', () => {
       ],
     })
 
-    const resource: LoykinResource = {
-      apiVersion: 'loykin.dev/v1alpha1',
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'List',
       spec: {},
-      slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Text', spec: { text: 'Entry' } }] }],
+      slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'Entry' } }] }],
     }
 
     expect(renderToStaticMarkup(createElement(ResourceRenderer, { resource, registry }))).toBe('<ul><li><span>Entry</span></li></ul>')
@@ -82,8 +82,8 @@ describe('ResourceRenderer', () => {
 
   it('degrades unknown kinds to the fallback node only', () => {
     const registry = createRegistry<KindRenderFn>()
-    const resource: LoykinResource = {
-      apiVersion: 'loykin.dev/v1alpha1',
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Missing',
       spec: {},
     }
@@ -108,7 +108,7 @@ describe('ResourceRenderer', () => {
       dataResolvers: { rest: resolver },
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Probe',
           specSchema: { type: 'object' },
           behaviorPolicy: { events: { select: { kind: 'setVariable', variable: 'customerId', from: 'row.id' } } },
@@ -120,8 +120,8 @@ describe('ResourceRenderer', () => {
       ],
     })
 
-    const resource: LoykinResource = {
-      apiVersion: 'loykin.dev/v1alpha1',
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Probe',
       spec: { variables: [{ name: 'customerId', default: 'c1' }] },
     }
@@ -150,7 +150,7 @@ describe('ResourceRenderer', () => {
       dataResolvers: { static: resolver },
       kinds: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Probe',
           specSchema: { type: 'object' },
           render: (_resource, ctx) => {
@@ -161,7 +161,7 @@ describe('ResourceRenderer', () => {
       ],
     })
 
-    renderToStaticMarkup(createElement(ResourceRenderer, { resource: { apiVersion: 'loykin.dev/v1alpha1', kind: 'Probe', spec: {} }, registry }))
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} }, registry }))
 
     await expect(captured?.data.resolve({ source: 'static', rows: [], valuePath: 'payload.customer' })).resolves.toEqual([
       { id: 'c1', name: 'Ada' },

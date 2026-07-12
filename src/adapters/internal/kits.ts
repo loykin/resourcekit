@@ -1,4 +1,4 @@
-import type { ResourceKitPlugin } from '../../types'
+import type { KindManifest, ResourceKitPlugin } from '../../types'
 import type { KindRenderFn } from '../../react/types'
 import { createBaseKitPlugin } from '../basekit/plugin'
 import { createChartKitPlugin } from '../chartkit/plugin'
@@ -33,4 +33,21 @@ export function createFirstPartyResourceAdapters(): ResourceKitPlugin<KindRender
 
 export function createPlaygroundResourceAdapters(): ResourceKitPlugin<KindRenderFn> {
   return createFirstPartyResourceAdapters()
+}
+
+const INTERNAL_KIND_NAME = /^(DesignKit|GridKit|ChartKit|BaseKit)[A-Z]/
+
+/**
+ * Kind names meant for documents to actually use. Excludes the internal
+ * `DesignKit`/`GridKit`/`ChartKit`/`BaseKit`-prefixed manifests that
+ * `withKindAliases` (see internal/shared.ts) renames from — every one of
+ * them has a short public alias covering it (e.g. `DesignKitPanel` ->
+ * `Panel`), so listing both in a scope's `kinds.include` just duplicates
+ * every candidate a generated schema offers.
+ */
+export function publicKindNames(registry: { listKinds(): Pick<KindManifest, 'kind'>[] }): string[] {
+  return registry
+    .listKinds()
+    .map((manifest) => manifest.kind)
+    .filter((kind) => !INTERNAL_KIND_NAME.test(kind))
 }

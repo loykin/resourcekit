@@ -1,5 +1,5 @@
 {
-  "apiVersion": "loykin.dev/v1alpha1",
+  "apiVersion": "resourcekit.dev/v1alpha1",
   "kind": "ListDetail",
   "metadata": { "name": "scenario-customer-crm" },
   "spec": {
@@ -15,7 +15,7 @@
       "name": "topBar",
       "items": [
         {
-          "apiVersion": "loykin.dev/v1alpha1",
+          "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "PageTopBar",
           "spec": { "left": "Customers", "height": "76px" },
           "slots": [
@@ -23,7 +23,7 @@
               "name": "right",
               "items": [
                 {
-                  "apiVersion": "loykin.dev/v1alpha1",
+                  "apiVersion": "resourcekit.dev/v1alpha1",
                   "kind": "FilterControl",
                   "spec": {
                     "valueRef": "variables.status",
@@ -50,7 +50,7 @@
       "name": "list",
       "items": [
         {
-          "apiVersion": "loykin.dev/v1alpha1",
+          "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "SelectableList",
           "spec": {
             "data": {
@@ -74,7 +74,7 @@
       "name": "detail",
       "items": [
         {
-          "apiVersion": "loykin.dev/v1alpha1",
+          "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "RecordScope",
           "spec": {
             "data": {
@@ -87,21 +87,21 @@
             {
               "items": [
                 {
-                  "apiVersion": "loykin.dev/v1alpha1",
+                  "apiVersion": "resourcekit.dev/v1alpha1",
                   "kind": "DataBody",
                   "spec": { "title": "Customer detail", "description": "Selected customer profile and revenue trend." },
                   "slots": [
                     {
                       "items": [
                         {
-                          "apiVersion": "loykin.dev/v1alpha1",
+                          "apiVersion": "resourcekit.dev/v1alpha1",
                           "kind": "DataBodyGroup",
                           "spec": { "title": "Profile", "layout": "inline", "variant": "plain" },
                           "slots": [
                             {
                               "items": [
                                 {
-                                  "apiVersion": "loykin.dev/v1alpha1",
+                                  "apiVersion": "resourcekit.dev/v1alpha1",
                                   "kind": "ObjectFields",
                                   "spec": {
                                     "fields": [
@@ -117,7 +117,7 @@
                         }
                       ,
                         {
-                          "apiVersion": "loykin.dev/v1alpha1",
+                          "apiVersion": "resourcekit.dev/v1alpha1",
                           "kind": "ChartView",
                           "spec": {
                             "chart": {

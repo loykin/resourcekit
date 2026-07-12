@@ -1,4 +1,4 @@
-import type { LoykinResource } from '@loykin/resourcekit'
+import type { Resource } from '@loykin/resourcekit'
 
 export const scenarioCustomerRows = [
   { id: '1', name: 'Ada Lovelace', status: 'active', revenue: 140 },
@@ -12,8 +12,8 @@ export const scenarioMetricsRows = [
   { service: 'Search', p95: 132, errors: 7, status: 'healthy' },
 ]
 
-export const customerCrmScenario: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+export const customerCrmScenario: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'scenario-customer-crm' },
   spec: {
@@ -29,7 +29,7 @@ export const customerCrmScenario: LoykinResource = {
       name: 'topBar',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'PageTopBar',
           spec: { left: 'Customers', height: '76px' },
           slots: [
@@ -37,7 +37,7 @@ export const customerCrmScenario: LoykinResource = {
               name: 'right',
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'FilterControl',
                   spec: {
                     valueRef: 'variables.status',
@@ -64,7 +64,7 @@ export const customerCrmScenario: LoykinResource = {
       name: 'list',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
           spec: {
             data: { source: 'static', rows: scenarioCustomerRows },
@@ -84,7 +84,7 @@ export const customerCrmScenario: LoykinResource = {
       name: 'detail',
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
           spec: {
             data: {
@@ -97,21 +97,21 @@ export const customerCrmScenario: LoykinResource = {
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBody',
                   spec: { title: 'Customer detail', description: 'Selected customer profile and revenue trend.' },
                   slots: [
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyGroup',
                           spec: { title: 'Profile', layout: 'inline', variant: 'plain' },
                           slots: [
                             {
                               items: [
                                 {
-                                  apiVersion: 'loykin.dev/v1alpha1',
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
                                   kind: 'ObjectFields',
                                   spec: {
                                     fields: [
@@ -126,7 +126,7 @@ export const customerCrmScenario: LoykinResource = {
                           ],
                         },
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'ChartView',
                           spec: {
                             chart: {
@@ -149,25 +149,25 @@ export const customerCrmScenario: LoykinResource = {
     },
     {
       name: 'emptyDetail',
-      items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'Panel', spec: { title: 'No customer selected' } }],
+      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'No customer selected' } }],
     },
   ],
 }
 
-export const settingsFormScenario: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+export const settingsFormScenario: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'DataBody',
   metadata: { name: 'scenario-settings-form' },
   spec: { title: 'Workspace settings', description: 'Form-local state with declarative submit.' },
   slots: [
     {
       name: 'topBar',
-      items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Settings / Workspace' } }],
+      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Settings / Workspace' } }],
     },
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ResourceForm',
           spec: {
             submitLabel: 'Save settings',
@@ -178,23 +178,23 @@ export const settingsFormScenario: LoykinResource = {
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBodySection',
                   spec: { id: 'general', label: 'General', description: 'Workspace identity' },
                   slots: [
                     {
                       items: [
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyRow',
                           spec: { label: 'Name', required: true },
-                          slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'InputControl', spec: { name: 'name', value: 'Acme Operations' } }] }],
+                          slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'InputControl', spec: { name: 'name', value: 'Acme Operations' } }] }],
                         },
                         {
-                          apiVersion: 'loykin.dev/v1alpha1',
+                          apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyRow',
                           spec: { label: 'Slug' },
-                          slots: [{ items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'InputControl', spec: { name: 'slug', value: 'acme-ops' } }] }],
+                          slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'InputControl', spec: { name: 'slug', value: 'acme-ops' } }] }],
                         },
                       ],
                     },
@@ -209,34 +209,34 @@ export const settingsFormScenario: LoykinResource = {
   ],
 }
 
-export const metricsDashboardScenario: LoykinResource = {
-  apiVersion: 'loykin.dev/v1alpha1',
+export const metricsDashboardScenario: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'DataBody',
   metadata: { name: 'scenario-metrics-dashboard' },
   spec: { title: 'Service metrics', description: 'Scenario dashboard with summary, table, and chart.', defaultTab: 'overview' },
   slots: [
     {
       name: 'topBar',
-      items: [{ apiVersion: 'loykin.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Metrics' } }],
+      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Metrics' } }],
     },
     {
       items: [
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DataBodySummary',
           spec: {},
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBodyGroup',
                   spec: { title: 'Current status', layout: 'inline', variant: 'plain' },
                   slots: [
                     {
                       items: [
-                        { apiVersion: 'loykin.dev/v1alpha1', kind: 'DataBodyField', spec: { label: 'Services', value: '3' } },
-                        { apiVersion: 'loykin.dev/v1alpha1', kind: 'DataBodyField', spec: { label: 'Errors', value: '47' } },
+                        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'DataBodyField', spec: { label: 'Services', value: '3' } },
+                        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'DataBodyField', spec: { label: 'Errors', value: '47' } },
                       ],
                     },
                   ],
@@ -246,14 +246,14 @@ export const metricsDashboardScenario: LoykinResource = {
           ],
         },
         {
-          apiVersion: 'loykin.dev/v1alpha1',
+          apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DataBodyTab',
           spec: { id: 'overview', label: 'Overview', count: scenarioMetricsRows.length },
           slots: [
             {
               items: [
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'TableView',
                   spec: {
                     data: { source: 'static', rows: scenarioMetricsRows },
@@ -268,7 +268,7 @@ export const metricsDashboardScenario: LoykinResource = {
                   },
                 },
                 {
-                  apiVersion: 'loykin.dev/v1alpha1',
+                  apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ChartView',
                   spec: {
                     chart: {

@@ -1,31 +1,31 @@
 {
-  "apiVersion": "loykin.dev/v1alpha1",
+  "apiVersion": "resourcekit.dev/v1alpha1",
   "kind": "DataBody",
   "metadata": { "name": "scenario-metrics-dashboard" },
   "spec": { "title": "Service metrics", "description": "Scenario dashboard with summary, table, and chart.", "defaultTab": "overview" },
   "slots": [
     {
       "name": "topBar",
-      "items": [{ "apiVersion": "loykin.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Metrics" } }]
+      "items": [{ "apiVersion": "resourcekit.dev/v1alpha1", "kind": "PageTopBar", "spec": { "left": "Metrics" } }]
     },
     {
       "items": [
         {
-          "apiVersion": "loykin.dev/v1alpha1",
+          "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "DataBodySummary",
           "spec": {},
           "slots": [
             {
               "items": [
                 {
-                  "apiVersion": "loykin.dev/v1alpha1",
+                  "apiVersion": "resourcekit.dev/v1alpha1",
                   "kind": "DataBodyGroup",
                   "spec": { "title": "Current status", "layout": "inline", "variant": "plain" },
                   "slots": [
                     {
                       "items": [
-                        { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Services", "value": "3" } },
-                        { "apiVersion": "loykin.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Errors", "value": "47" } }
+                        { "apiVersion": "resourcekit.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Services", "value": "3" } },
+                        { "apiVersion": "resourcekit.dev/v1alpha1", "kind": "DataBodyField", "spec": { "label": "Errors", "value": "47" } }
                       ]
                     }
                   ]
@@ -35,14 +35,14 @@
           ]
         },
         {
-          "apiVersion": "loykin.dev/v1alpha1",
+          "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "DataBodyTab",
           "spec": { "id": "overview", "label": "Overview", "count": 3 },
           "slots": [
             {
               "items": [
                 {
-                  "apiVersion": "loykin.dev/v1alpha1",
+                  "apiVersion": "resourcekit.dev/v1alpha1",
                   "kind": "TableView",
                   "spec": {
                     "data": {
@@ -61,7 +61,7 @@
                   }
                 },
                 {
-                  "apiVersion": "loykin.dev/v1alpha1",
+                  "apiVersion": "resourcekit.dev/v1alpha1",
                   "kind": "ChartView",
                   "spec": {
                     "chart": {
