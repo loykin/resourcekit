@@ -80,6 +80,45 @@ function withDataBindingRefs(schema: JsonSchema, hasDataBindingSchema: boolean):
 }
 
 /**
+ * A kind's own `specSchema` may ship its own `$defs` (e.g. an adapter that embeds a
+ * kit's own JSON Schema verbatim, refs and all — see chartkit's `ChartSpec`). Once that
+ * schema is nested inside the composed document, plain `#/$defs/X` refs would resolve
+ * against the *document's* root `$defs`, not the nested one — so lift each entry into
+ * the document's shared `defs` map under a namespaced key and rewrite the refs to match.
+ */
+function hoistSpecDefs(schema: JsonSchema, namespace: string, defs: Record<string, unknown>): JsonSchema {
+  const nested = schema.$defs
+  if (typeof nested !== 'object' || nested === null || Array.isArray(nested)) return schema
+
+  const rewriteRefs = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map((item) => rewriteRefs(item))
+    if (typeof value !== 'object' || value === null) return value
+
+    const object = value as Record<string, unknown>
+    const result: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(object)) {
+      result[key] = key === '$ref' && typeof item === 'string' && item.startsWith('#/$defs/')
+        ? `#/$defs/${namespace}__${item.slice('#/$defs/'.length)}`
+        : rewriteRefs(item)
+    }
+    return result
+  }
+
+  const rewritten = rewriteRefs(schema) as Record<string, unknown>
+  const rewrittenNested = rewritten.$defs as Record<string, unknown>
+  delete rewritten.$defs
+  for (const [name, def] of Object.entries(rewrittenNested)) {
+    defs[`${namespace}__${name}`] = def
+  }
+  return rewritten as JsonSchema
+}
+
+function embedSpecSchema(manifest: { apiVersion: string; kind: string; specSchema: JsonSchema }, hasDataBindingSchema: boolean, defs: Record<string, unknown>): JsonSchema {
+  const withBindings = withDataBindingRefs(manifest.specSchema, hasDataBindingSchema)
+  return hoistSpecDefs(withBindings, definitionKey(manifest.apiVersion, manifest.kind), defs)
+}
+
+/**
  * Generate the composed JSON Schema for a scoped registry. This is the schema
  * handed to MCP / AI structured output — never expose the full registry.
  *
@@ -136,7 +175,7 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
       apiVersion: { const: manifest.apiVersion },
       kind: { const: manifest.kind },
       metadata: metadataSchema,
-      spec: withDataBindingRefs(manifest.specSchema, hasDataBindingSchema),
+      spec: embedSpecSchema(manifest, hasDataBindingSchema, definitions),
     }
     const required = ['apiVersion', 'kind', 'spec']
 

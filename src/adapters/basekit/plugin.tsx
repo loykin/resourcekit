@@ -1,6 +1,6 @@
 import { FilterInput } from '@loykin/filter-input'
 import type { ComponentType } from 'react'
-import type { ResourceKitPlugin } from '../../types'
+import type { JsonSchema, ResourceKitPlugin } from '../../types'
 import type { KindRenderFn } from '../../react/types'
 import { variableName, withKindAliases } from '../internal/shared'
 
@@ -11,6 +11,88 @@ interface FilterInputSpec {
 }
 
 const KitFilterInput = FilterInput as ComponentType<Record<string, unknown>>
+
+// Mirrors `FilterInputConfig` from `@loykin/filter-input`'s src/types.ts. `dataSource.fetch`
+// and `display.formatLabel` are functions, not representable in JSON Schema, so are omitted.
+const filterInputConfigSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['key', 'type'],
+  properties: {
+    key: { type: 'string' },
+    label: { type: 'string' },
+    type: {
+      type: 'string',
+      enum: [
+        'text', 'textarea', 'number', 'boolean', 'select', 'multi-select', 'autocomplete',
+        'combobox', 'date', 'date-range', 'datetime', 'datetime-range', 'range', 'tag',
+      ],
+    },
+    placeholder: { type: 'string' },
+    options: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['label', 'value'],
+        properties: {
+          label: { type: 'string' },
+          value: { type: ['string', 'number', 'boolean'] },
+          disabled: { type: 'boolean' },
+          color: { type: 'string' },
+        },
+      },
+    },
+    dataSource: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type'],
+      properties: {
+        type: { type: 'string', enum: ['static', 'remote'] },
+        trigger: { type: 'string', enum: ['immediate', 'open'] },
+      },
+    },
+    behavior: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        searchable: { type: 'boolean' },
+        clearable: { type: 'boolean' },
+        disabled: { type: 'boolean' },
+        required: { type: 'boolean' },
+        closeOnSelect: { type: 'boolean' },
+        debounceMs: { type: 'number' },
+        minSearchLength: { type: 'number' },
+        allowCustomValue: { type: 'boolean' },
+        selectOnBlur: { type: 'boolean' },
+        showReload: { type: 'boolean' },
+      },
+    },
+    display: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        variant: { type: 'string', enum: ['text', 'tags', 'count', 'summary'] },
+        maxVisible: { type: 'number' },
+        overflow: { type: 'string', enum: ['count', 'collapse', 'tooltip'] },
+        removable: { type: 'boolean' },
+        size: { type: 'string', enum: ['sm', 'md', 'lg'] },
+        colorBy: { type: 'string', enum: ['none', 'value', 'option-meta'] },
+        emptyText: { type: 'string' },
+        summaryLabel: { type: 'string' },
+      },
+    },
+    validation: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        min: { type: 'number' },
+        max: { type: 'number' },
+        pattern: { type: 'string' },
+      },
+    },
+  },
+}
 
 export function createBaseKitPlugin(): ResourceKitPlugin<KindRenderFn> {
   return withKindAliases(
@@ -25,7 +107,7 @@ export function createBaseKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             additionalProperties: true,
             required: ['config'],
             properties: {
-              config: { type: 'object' },
+              config: filterInputConfigSchema,
               valueRef: { type: 'string' },
               value: {},
               events: { type: 'object' },

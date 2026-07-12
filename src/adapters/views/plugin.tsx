@@ -149,6 +149,16 @@ function JsonViewer({ spec, ctx }: { spec: JsonViewerSpec; ctx: RenderContext })
   return <pre className="overflow-auto p-4 text-xs">{JSON.stringify(value, null, 2)}</pre>
 }
 
+const fieldRefSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['field'],
+  properties: {
+    field: { type: 'string' },
+    label: { type: 'string' },
+  },
+}
+
 export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
   return {
     name: 'resource-view-adapter',
@@ -164,8 +174,8 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
             data: { type: 'object' },
             idField: { type: 'string' },
             selectedRef: { type: 'string' },
-            primary: { type: 'object' },
-            secondary: { type: 'array', items: { type: 'object' } },
+            primary: fieldRefSchema,
+            secondary: { type: 'array', items: fieldRefSchema },
             events: { type: 'object' },
           },
         },
@@ -181,7 +191,19 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
           properties: {
             data: { type: 'object' },
             valuePath: { type: 'string' },
-            fields: { type: 'array', items: { type: 'object' } },
+            fields: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['label', 'path'],
+                properties: {
+                  label: { type: 'string' },
+                  path: { type: 'string' },
+                  display: { const: 'badge' },
+                },
+              },
+            },
           },
         },
         render: (resource, ctx) => <ObjectFields spec={resource.spec as ObjectFieldsSpec} ctx={ctx} />,

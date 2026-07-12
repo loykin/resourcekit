@@ -705,6 +705,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         specSchema: {
           type: 'object',
           additionalProperties: true,
+          required: ['label'],
           properties: {
             label: { type: 'string' },
             variant: { type: 'string' },
@@ -721,6 +722,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         specSchema: {
           type: 'object',
           additionalProperties: true,
+          required: ['label'],
           properties: {
             label: { type: 'string' },
             value: { type: 'string' },
