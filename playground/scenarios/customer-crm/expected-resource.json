@@ -75,62 +75,38 @@
       "items": [
         {
           "apiVersion": "resourcekit.dev/v1alpha1",
-          "kind": "RecordScope",
-          "spec": {
-            "data": {
-              "source": "datasource",
-              "datasourceUid": "crm",
-              "query": { "id": "${customerId}" }
-            }
-          },
+          "kind": "DataBody",
+          "spec": { "title": "Customer detail", "description": "Selected customer profile and revenue trend." },
           "slots": [
             {
               "items": [
                 {
                   "apiVersion": "resourcekit.dev/v1alpha1",
-                  "kind": "DataBody",
-                  "spec": { "title": "Customer detail", "description": "Selected customer profile and revenue trend." },
-                  "slots": [
-                    {
-                      "items": [
-                        {
-                          "apiVersion": "resourcekit.dev/v1alpha1",
-                          "kind": "DataBodyGroup",
-                          "spec": { "title": "Profile", "layout": "inline", "variant": "plain" },
-                          "slots": [
-                            {
-                              "items": [
-                                {
-                                  "apiVersion": "resourcekit.dev/v1alpha1",
-                                  "kind": "ObjectFields",
-                                  "spec": {
-                                    "fields": [
-                                      { "label": "Name", "path": "name" },
-                                      { "label": "Status", "path": "status", "display": "badge" },
-                                      { "label": "Revenue", "path": "revenue" }
-                                    ]
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ,
-                        {
-                          "apiVersion": "resourcekit.dev/v1alpha1",
-                          "kind": "ChartView",
-                          "spec": {
-                            "chart": {
-                              "type": "bar",
-                              "height": 220,
-                              "categories": ["Active", "Prospect"],
-                              "series": [{ "label": "Revenue", "color": "#2563eb", "values": [140, 118] }]
-                            }
-                          }
-                        }
-                      ]
+                  "kind": "DetailView",
+                  "spec": {
+                    "data": {
+                      "source": "datasource",
+                      "datasourceUid": "crm",
+                      "query": { "id": "${customerId}" }
+                    },
+                    "fields": [
+                      { "field": "name", "label": "Name" },
+                      { "field": "status", "label": "Status", "display": "badge" },
+                      { "field": "revenue", "label": "Revenue" }
+                    ]
+                  }
+                },
+                {
+                  "apiVersion": "resourcekit.dev/v1alpha1",
+                  "kind": "ChartView",
+                  "spec": {
+                    "chart": {
+                      "type": "bar",
+                      "height": 220,
+                      "categories": ["Active", "Prospect"],
+                      "series": [{ "label": "Revenue", "color": "#2563eb", "values": [140, 118] }]
                     }
-                  ]
+                  }
                 }
               ]
             }

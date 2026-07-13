@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { getValueAtPath } from '../../path'
-import type { DataBinding, ResourceKitPlugin } from '../../types'
+import type { DataBinding, FieldSpec, ResourceKitPlugin, ViewStateSpec } from '../../types'
 import type { KindRenderFn, RenderContext } from '../../react/types'
 import { variableName } from '../internal/shared'
 
@@ -15,6 +16,12 @@ interface SelectableListSpec {
   selectedRef?: string
   primary: FieldRefSpec
   secondary?: FieldRefSpec[]
+}
+
+interface DetailViewSpec {
+  data?: DataBinding
+  fields: FieldSpec[]
+  state?: ViewStateSpec
 }
 
 interface ObjectFieldsSpec {
@@ -113,6 +120,57 @@ function SelectableList({ spec, ctx }: { spec: SelectableListSpec; ctx: RenderCo
   )
 }
 
+function renderFieldValue(value: unknown, field: FieldSpec): ReactNode {
+  if (value == null) return null
+  if (field.display === 'badge') {
+    return <span className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs">{String(value)}</span>
+  }
+  if (field.display === 'boolean') return value ? 'Yes' : 'No'
+  if (field.display === 'number' && typeof value === 'number') return value.toLocaleString()
+  if (field.display === 'date') {
+    const date = new Date(value as string | number)
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString()
+  }
+  return String(value)
+}
+
+const fieldAlignClass: Record<NonNullable<FieldSpec['align']>, string> = {
+  left: 'text-left',
+  center: 'text-center',
+  right: 'text-right',
+}
+
+/**
+ * A single record's fields bound directly to `data`, flattening what would
+ * otherwise be a RecordScope wrapping a DataBody wrapping ObjectFields.
+ * Use for the detail pane of a list/detail screen.
+ */
+/**
+ * Owns its own padding (unlike ObjectFields) since test.md §4.1's intended
+ * usage is directly inside a slot like ListDetail's `detail` with no
+ * DataBody/Panel wrapper providing chrome — it needs to look right standalone.
+ */
+function DetailView({ spec, ctx }: { spec: DetailViewSpec; ctx: RenderContext }) {
+  const { rows, error } = useRows(spec.data, ctx)
+  if (error) {
+    return <div className="resourcekit-state p-4">{spec.state?.errorMessage ?? (error instanceof Error ? error.message : 'Unable to load detail')}</div>
+  }
+  if (!rows) return <div className="resourcekit-state p-4">Loading detail...</div>
+  if (rows.length === 0) return <div className="resourcekit-state p-4">{spec.state?.emptyMessage ?? 'No data'}</div>
+
+  const record = rows[0]
+  return (
+    <dl className="grid gap-3 p-4 text-sm">
+      {spec.fields.map((field) => (
+        <div key={field.field} className={`grid grid-cols-[140px_1fr] gap-3 ${field.align ? fieldAlignClass[field.align] : ''}`}>
+          <dt className="text-muted-foreground">{field.label ?? field.field}</dt>
+          <dd className={field.emphasis === 'strong' ? 'font-semibold' : undefined}>{renderFieldValue(getValueAtPath(record, field.field), field)}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 function ObjectFields({ spec, ctx }: { spec: ObjectFieldsSpec; ctx: RenderContext }) {
   const { rows, error } = useRows(spec.data, ctx)
   if (error) return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load object'}</div>
@@ -159,10 +217,51 @@ const fieldRefSchema = {
   },
 }
 
+const fieldSpecSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['field'],
+  properties: {
+    field: { type: 'string' },
+    label: { type: 'string' },
+    display: { enum: ['text', 'number', 'date', 'badge', 'boolean'] },
+    format: { type: 'string' },
+    align: { enum: ['left', 'center', 'right'] },
+    emphasis: { enum: ['normal', 'strong'] },
+  },
+}
+
+const viewStateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    emptyMessage: { type: 'string' },
+    errorMessage: { type: 'string' },
+  },
+}
+
 export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
   return {
     name: 'resource-view-adapter',
     kinds: [
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DetailView',
+        level: ['leaf'],
+        description:
+          'A read-only field list for a single bound record, owning its own `data` binding directly (no RecordScope/DataBody/ObjectFields nesting required). Use for the detail pane of a ListDetail, or any standalone single-record detail screen.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['fields'],
+          properties: {
+            data: { type: 'object' },
+            fields: { type: 'array', items: fieldSpecSchema },
+            state: viewStateSchema,
+          },
+        },
+        render: (resource, ctx) => <DetailView spec={resource.spec as DetailViewSpec} ctx={ctx} />,
+      },
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'SelectableList',

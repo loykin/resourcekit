@@ -137,6 +137,31 @@ interface FormSpec {
   successMessage?: string
 }
 
+interface FormViewFieldSpec {
+  name: string
+  label?: string
+  type?: string
+  required?: boolean
+  placeholder?: string
+  defaultValue?: string
+  /** Dot-path into the nearest record scope — prefills the input, like InputControl.fieldRef. */
+  fieldRef?: string
+}
+
+interface FormViewSectionSpec {
+  id: string
+  label?: string
+  description?: string
+  fields: FormViewFieldSpec[]
+}
+
+interface FormViewSpec {
+  sections: FormViewSectionSpec[]
+  submit: SubmitSpec
+  submitLabel?: string
+  successMessage?: string
+}
+
 interface SheetSpec {
   /** Truthy variable value opens the sheet; closing clears the variable. */
   openVariable: string
@@ -243,6 +268,133 @@ function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
 }
 
 /**
+ * Flattened form kind: sections of named fields declared directly in `spec`,
+ * with no nested DataBodySection/DataBodyRow/InputControl tree required.
+ * Submits the same way as ResourceForm.
+ */
+function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string }>()
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries())
+        setBusy(true)
+        setMessage(undefined)
+        ctx.actions
+          .submit(spec.submit, payload)
+          .then(() => setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' }))
+          .catch((error: unknown) =>
+            setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Submit failed' }),
+          )
+          .finally(() => setBusy(false))
+      }}
+    >
+      {spec.sections.map((section) => (
+        <div key={section.id} className="border-b px-4 py-4 last:border-b-0">
+          {section.label && <h3 className="mb-1 text-sm font-medium">{section.label}</h3>}
+          {section.description && <p className="mb-3 text-xs text-muted-foreground">{section.description}</p>}
+          <div className="grid gap-3">
+            {section.fields.map((field) => {
+              const fieldValue = field.fieldRef !== undefined ? getValueAtPath(ctx.record, field.fieldRef) : undefined
+              const defaultValue = fieldValue == null ? field.defaultValue : String(fieldValue)
+              return (
+                <label key={field.name} className="grid gap-1 text-sm">
+                  {field.label && <span className="text-muted-foreground">{field.label}</span>}
+                  <KitInput
+                    name={field.name}
+                    type={field.type ?? 'text'}
+                    required={field.required}
+                    placeholder={field.placeholder}
+                    defaultValue={defaultValue}
+                  />
+                </label>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <KitButton type="submit" size="sm" disabled={busy}>
+          {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
+        </KitButton>
+        {message && (
+          <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+            {message.text}
+          </span>
+        )}
+      </div>
+    </form>
+  )
+}
+
+const submitSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['mutation'],
+  properties: {
+    action: { type: 'string' },
+    mutation: { type: 'object' },
+    onSuccess: {
+      type: 'array',
+      items: {
+        oneOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'variable'],
+            properties: {
+              kind: { const: 'setVariable' },
+              variable: { type: 'string' },
+              from: { type: 'string' },
+              value: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'event'],
+            properties: {
+              kind: { const: 'emit' },
+              event: { type: 'string' },
+            },
+          },
+        ],
+      },
+    },
+  },
+}
+
+const formViewFieldSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name'],
+  properties: {
+    name: { type: 'string' },
+    label: { type: 'string' },
+    type: { type: 'string' },
+    required: { type: 'boolean' },
+    placeholder: { type: 'string' },
+    defaultValue: { type: 'string' },
+    fieldRef: { type: 'string' },
+  },
+}
+
+const formViewSectionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'fields'],
+  properties: {
+    id: { type: 'string' },
+    label: { type: 'string' },
+    description: { type: 'string' },
+    fields: { type: 'array', items: formViewFieldSchema },
+  },
+}
+
+/**
  * Data-bound grid: resolves the binding through the runtime, infers columns,
  * then applies declarative ColumnHint presentation. Re-resolves when a
  * `${var}` referenced by the binding changes.
@@ -324,8 +476,9 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             detail: {
               min: 0,
               max: 1,
-              accepts: ['RecordScope', 'DataBody', 'Panel'],
-              description: 'The detail view for the currently selected record — typically RecordScope wrapping a DataBody.',
+              accepts: ['DetailView', 'RecordScope', 'DataBody', 'Panel'],
+              description:
+                'The detail view for the currently selected record — typically DetailView, or RecordScope wrapping a DataBody for more elaborate composition.',
             },
             emptyDetail: {
               min: 0,
@@ -481,11 +634,13 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
               'DataBodyBody',
               'ChartView',
               'ResourceForm',
+              'FormView',
+              'DetailView',
               'TableView',
               'Sheet',
             ],
             description:
-              'The body content — DataBodyGroup/DataBodySection/DataBodyTab/DataBodySummary to organize it, or content kinds directly.',
+              'The body content — DataBodyGroup/DataBodySection/DataBodyTab/DataBodySummary to organize it, or content kinds directly (e.g. DetailView, FormView, ChartView).',
           },
           slots: {
             topBar: {
@@ -939,42 +1094,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           additionalProperties: false,
           required: ['submit'],
           properties: {
-            submit: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['mutation'],
-              properties: {
-                action: { type: 'string' },
-                mutation: { type: 'object' },
-                onSuccess: {
-                  type: 'array',
-                  items: {
-                    oneOf: [
-                      {
-                        type: 'object',
-                        additionalProperties: false,
-                        required: ['kind', 'variable'],
-                        properties: {
-                          kind: { const: 'setVariable' },
-                          variable: { type: 'string' },
-                          from: { type: 'string' },
-                          value: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
-                        },
-                      },
-                      {
-                        type: 'object',
-                        additionalProperties: false,
-                        required: ['kind', 'event'],
-                        properties: {
-                          kind: { const: 'emit' },
-                          event: { type: 'string' },
-                        },
-                      },
-                    ],
-                  },
-                },
-              },
-            },
+            submit: submitSchema,
             submitLabel: { type: 'string' },
             successMessage: { type: 'string' },
           },
@@ -987,6 +1107,25 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           },
         },
         render: (resource, ctx) => <ResourceForm spec={resource.spec as FormSpec} ctx={ctx} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitFormView',
+        level: ['organism', 'template'],
+        description:
+          'A flattened form: sections of named input fields plus a submit binding, declared directly in `spec` with no nested DataBodySection/DataBodyRow/InputControl tree. Use for simple settings/edit forms — for per-field composition (badges, custom controls), use ResourceForm instead.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['sections', 'submit'],
+          properties: {
+            sections: { type: 'array', items: formViewSectionSchema },
+            submit: submitSchema,
+            submitLabel: { type: 'string' },
+            successMessage: { type: 'string' },
+          },
+        },
+        render: (resource, ctx) => <FormView spec={resource.spec as FormViewSpec} ctx={ctx} />,
       },
     ],
   },
@@ -1010,6 +1149,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     ['DesignKitSheet', 'Sheet'],
     ['DesignKitRecord', 'RecordScope'],
     ['DesignKitForm', 'ResourceForm'],
+    ['DesignKitFormView', 'FormView'],
   ],
   )
 }

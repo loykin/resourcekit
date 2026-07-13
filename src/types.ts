@@ -118,10 +118,24 @@ export interface StaticBinding {
   valuePath?: string
 }
 
+/**
+ * References a registered connection (see `ConnectionAdapter`/`RegisteredConnection`
+ * below) by UID instead of embedding a raw URL/DSN. `request` is opaque here —
+ * its shape is defined by the connection's adapter (`ConnectionAdapter.requestSchema`).
+ */
+export interface ConnectionBinding {
+  source: 'connection'
+  connection: string
+  request: unknown
+  /** Dot-path applied by the runtime after the resolver returns rows. */
+  valuePath?: string
+}
+
 export type DataBinding =
   | DatasourceBinding
   | RestBinding
   | StaticBinding
+  | ConnectionBinding
   | { source: string; [key: string]: unknown }
 
 export interface TimeRange {
@@ -183,6 +197,164 @@ export interface SubmitSpec {
   onSuccess?: SubmitEffect[]
 }
 
+// ─── Common spec fragments ───────────────────────────────────────────────────
+// Shared vocabulary reused across view kinds (DetailView, TableView, ...) so
+// field/filter/action syntax doesn't drift between them. See
+// docs design note test.md §3.2.
+
+export interface FieldSpec {
+  field: string
+  label?: string
+  display?: 'text' | 'number' | 'date' | 'badge' | 'boolean'
+  format?: string
+  align?: 'left' | 'center' | 'right'
+  emphasis?: 'normal' | 'strong'
+}
+
+export interface FilterSpec {
+  name: string
+  label?: string
+  type: 'text' | 'select' | 'date' | 'dateRange'
+  variable: string
+  options?: Array<{ label: string; value: string }>
+}
+
+export interface ActionSpec {
+  id: string
+  label: string
+  action?: string
+  mutation?: MutationBinding
+  confirm?: {
+    title: string
+    description?: string
+  }
+}
+
+/** Messages shown for a view's empty/error states; omitted fields fall back to the kind's default copy. */
+export interface ViewStateSpec {
+  emptyMessage?: string
+  errorMessage?: string
+}
+
+// ─── Connections ──────────────────────────────────────────────────────────────
+// See docs design note test.md §5. ResourceKit registers connection capability
+// and dispatches through it; it never owns credential storage, connection
+// pools, or query editing (test.md §5.1).
+
+/** Registration-time request/method restrictions; adapter-specific shape. */
+export interface ConnectionPolicy {
+  methods?: string[]
+  pathPrefixes?: string[]
+}
+
+/**
+ * Per-connection MCP exposure limits (test.md §9). Capability flags default to
+ * `true` for read operations (test/inspect/preview) and `false` for `mutate` —
+ * write access must be opted into explicitly.
+ */
+export interface ConnectionMcpPolicy {
+  test?: boolean
+  inspect?: boolean
+  preview?: boolean
+  mutate?: boolean
+  maxRows?: number
+  timeoutMs?: number
+  maxResponseBytes?: number
+}
+
+/** A registered connection instance, e.g. `crm-api`. `config` carries adapter-specific secrets/URLs and is never sent to MCP — see `ConnectionSummary`. */
+export interface RegisteredConnection<TConfig = unknown> {
+  uid: string
+  type: string
+  name: string
+  description?: string
+  config: TConfig
+  policy?: ConnectionPolicy
+  mcpPolicy?: ConnectionMcpPolicy
+}
+
+export interface ConnectionContext {
+  signal?: AbortSignal
+}
+
+export interface ConnectionTestResult {
+  ok: boolean
+  message?: string
+  latencyMs?: number
+}
+
+export interface ConnectionInspectRequest {
+  path?: string
+}
+
+export interface ConnectionInspection {
+  schema?: JsonSchema
+  fields?: Array<{ name: string; type?: string }>
+  namespaces?: string[]
+}
+
+export interface RequestValidationResult {
+  valid: boolean
+  issues?: string[]
+}
+
+/** A capped, masked sample of what a request would return — never the full result set (test.md §7). */
+export interface DataPreview {
+  schema: JsonSchema
+  rows: Record<string, unknown>[]
+  stats?: {
+    totalRows?: number
+    returnedRows: number
+    executionTimeMs?: number
+  }
+  truncated: boolean
+}
+
+/**
+ * A connection *type's* common request vocabulary and execution (rest,
+ * datasourcekit, graphql, ...). `resolve` is the render-time path; MCP-facing
+ * `test`/`inspect`/`validate`/`preview` are optional so adapters that don't
+ * support introspection can omit them (see `ConnectionSummary.capabilities`).
+ */
+export interface ConnectionAdapter<TConfig = unknown, TRequest = unknown> {
+  type: string
+  requestSchema: JsonSchema
+
+  test?(connection: RegisteredConnection<TConfig>, context: ConnectionContext): Promise<ConnectionTestResult>
+
+  inspect?(
+    connection: RegisteredConnection<TConfig>,
+    request: ConnectionInspectRequest,
+    context: ConnectionContext,
+  ): Promise<ConnectionInspection>
+
+  validate?(connection: RegisteredConnection<TConfig>, request: TRequest, context: ConnectionContext): Promise<RequestValidationResult>
+
+  preview?(connection: RegisteredConnection<TConfig>, request: TRequest, context: ConnectionContext): Promise<DataPreview>
+
+  resolve(connection: RegisteredConnection<TConfig>, request: TRequest, context: DataResolveContext): Promise<Record<string, unknown>[]>
+}
+
+/**
+ * The MCP/AI-facing view of a registered connection — `config` (base URL, DSN,
+ * credentials) is deliberately absent (test.md §5.3). `capabilities` is the
+ * effective intersection of adapter capability ∩ connection `mcpPolicy` ∩
+ * scope capabilities (test.md §6), computed by `ScopedRegistry.listConnections()`.
+ */
+export interface ConnectionSummary {
+  uid: string
+  type: string
+  name: string
+  description?: string
+  requestSchema: JsonSchema
+  capabilities: {
+    test: boolean
+    inspect: boolean
+    preview: boolean
+    mutate: boolean
+  }
+}
+
 // ─── Kind manifest ────────────────────────────────────────────────────────────
 
 /**
@@ -230,6 +402,8 @@ export interface ResourceKitPlugin<TRender = unknown> {
   kinds?: KindManifest<unknown, TRender>[]
   dataResolvers?: Record<string, DataResolver>
   mutationResolvers?: Record<string, MutationResolver>
+  /** Connection *type* adapters (rest, datasourcekit, ...) — not registered connection instances, see `ResourceRegistry.registerConnection`. */
+  connectionAdapters?: Record<string, ConnectionAdapter>
 }
 
 // ─── Scoped capabilities ──────────────────────────────────────────────────────
@@ -264,6 +438,16 @@ export interface ScopeOptions {
   }
   actions?: {
     allow?: string[]
+  }
+  /** Restricts which registered connections (test.md §5.2) this scope exposes, and the capability ceiling applied to all of them (test.md §6). */
+  connections?: {
+    allow?: string[]
+    capabilities?: {
+      test?: boolean
+      inspect?: boolean
+      preview?: boolean
+      mutate?: boolean
+    }
   }
   maxDepth?: number
   /**

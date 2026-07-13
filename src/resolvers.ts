@@ -1,4 +1,4 @@
-import type { DataResolver, RestBinding, StaticBinding } from './types'
+import type { ConnectionAdapter, ConnectionBinding, DataResolver, RegisteredConnection, RestBinding, StaticBinding } from './types'
 
 /**
  * Built-in resolvers. Only `rest` and `static` live in core — the
@@ -39,5 +39,31 @@ export const restResolver: DataResolver = async (binding, ctx) => {
   const json: unknown = await response.json()
   if (b.rowsPath) return asRows(getPath(json, b.rowsPath))
   if (Array.isArray(json)) return asRows(json)
-  return asRows(getPath(json, 'rows'))
+  const rows = getPath(json, 'rows')
+  if (rows !== undefined) return asRows(rows)
+  // A single-resource endpoint (e.g. GET /users/:id) returns the record
+  // itself, not wrapped in an array or a "rows" property — treat it as one row.
+  if (typeof json === 'object' && json !== null) return [json as Record<string, unknown>]
+  throw new Error('REST resolver expected rows to be an array of objects, a { rows: [...] } object, or a single object')
+}
+
+/**
+ * Bridges the `connection` DataBinding source to a registered
+ * `ConnectionAdapter.resolve()` — the render path still goes through the
+ * ordinary `registry.getDataResolver()` dispatch, it just looks the
+ * connection/adapter up first (test.md §5.2 decision: ConnectionAdapter is
+ * a separate contract, not a DataResolver replacement).
+ */
+export function createConnectionDataResolver(registry: {
+  getConnection(uid: string): RegisteredConnection | undefined
+  getConnectionAdapter(type: string): ConnectionAdapter | undefined
+}): DataResolver {
+  return async (binding, ctx) => {
+    const b = binding as ConnectionBinding
+    const connection = registry.getConnection(b.connection)
+    if (!connection) throw new Error(`Connection resolver: connection ${b.connection} is not registered`)
+    const adapter = registry.getConnectionAdapter(connection.type)
+    if (!adapter) throw new Error(`Connection resolver: no adapter registered for connection type ${connection.type}`)
+    return adapter.resolve(connection, b.request, ctx)
+  }
 }

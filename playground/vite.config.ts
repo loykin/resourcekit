@@ -1,11 +1,22 @@
 import { defineConfig } from 'vite'
+import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
+import { demoUsersMiddleware } from './server/demo-users-api'
+
+function demoUsersApiPlugin(): Plugin {
+  return {
+    name: 'demo-users-api',
+    configureServer(server) {
+      server.middlewares.use('/api/demo-users', demoUsersMiddleware)
+    },
+  }
+}
 
 export default defineConfig({
   base: process.env.BASE_PATH ?? '/',
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), demoUsersApiPlugin()],
   resolve: {
     alias: [
       { find: '@loykin/resourcekit/adapters/designkit', replacement: resolve(__dirname, '../src/adapters/designkit/index.ts') },

@@ -19,6 +19,7 @@ export type {
   DatasourceBinding,
   RestBinding,
   StaticBinding,
+  ConnectionBinding,
   TimeRange,
   DataResolveContext,
   DataResolver,
@@ -26,6 +27,21 @@ export type {
   MutationResolver,
   SubmitSpec,
   SubmitEffect,
+  FieldSpec,
+  FilterSpec,
+  ActionSpec,
+  ViewStateSpec,
+  ConnectionPolicy,
+  ConnectionMcpPolicy,
+  RegisteredConnection,
+  ConnectionContext,
+  ConnectionTestResult,
+  ConnectionInspectRequest,
+  ConnectionInspection,
+  RequestValidationResult,
+  DataPreview,
+  ConnectionAdapter,
+  ConnectionSummary,
   KindManifest,
   ResourceKitPlugin,
   ScopeOptions,
@@ -46,7 +62,9 @@ export { buildDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from
 export { createVariableEngine, scanVariableRefs, interpolate } from './variables'
 export type { VariableEngine } from './variables'
 
-export { restResolver, staticResolver } from './resolvers'
+export { restResolver, staticResolver, createConnectionDataResolver } from './resolvers'
+export { restConnectionAdapter } from './connectionAdapters'
+export type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
 
 export { getValueAtPath, coerceVariableValue } from './path'
 export { runSubmit } from './submit'

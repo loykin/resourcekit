@@ -26,10 +26,21 @@ A tiny in-memory REST API (`src/demo-api.ts`) starts alongside the server so
 a client can build a real selection-driven detail view: resourcekit's
 `static` data source is fixed, inline rows with no filtering step, so it
 can't follow a selection — that needs a source that can be parameterized
-per-request, e.g. `rest` with a `${variable}` in the url pointed at a real
-endpoint. The demo API's base URL (a random free port) is in the server's
-`instructions`, along with the request shapes (`GET /users`,
-`GET /users/:id`, `PATCH /users/:id`).
+per-request. Rather than pointing a raw `rest` binding at the demo API's URL
+directly, it's registered as a connection (uid `demo-users`, see test.md
+§5-7) — the server exposes it through the connection tools below, and
+resource documents reference it by uid, never the URL (`{"source":
+"connection", "connection": "demo-users", "request": {"path": "/users"}}`).
+
+A second connection, `demo-orders` (uid, type `sqlite`), runs against an
+in-memory `node:sqlite` database (`src/demo-db.ts`, no extra dependency) via
+a hand-written `sqliteConnectionAdapter` (`src/sqlite-connection-adapter.ts`)
+— resourcekit ships no SQL/DB adapter itself (that's DatasourceKit's job,
+not added to this repo yet, see test.md §11 step 9), so this is a worked
+example of writing your own `ConnectionAdapter` for whatever backend you
+actually have. Table/column names go through an allowlist + identifier
+regex (they can't be parameterized in SQL); only `where` values are bound
+query parameters.
 
 ## Tools
 
@@ -40,11 +51,22 @@ endpoint. The demo API's base URL (a random free port) is in the server's
   covers the rest — its candidates are envelope-only too).
 - `get_kind_spec_schema({ apiVersion, kind })` — get a specific kind's full
   spec JSON Schema, once you've picked it from a candidate list above.
+- `list_connections` / `get_connection({ uid })` — see what connections this
+  scope exposes (uid, type, request schema, capabilities) — never base
+  URLs or credentials.
+- `test_connection({ uid })` — check a connection is reachable.
+- `inspect_connection({ uid, path? })` — explore a connection's structure,
+  where the adapter supports it.
+- `validate_connection_request({ uid, request })` — check a candidate
+  request against the connection's registered policy.
+- `preview_connection({ uid, request })` — run a request through the same
+  execution path rendering would, capped to a small row sample.
 - `validate_document({ resource })` — structurally validate a finished
   document against the scope.
 
 The server's `instructions` field spells out the build → recurse → validate
-loop for the client.
+loop for the client, plus the connection-exploration flow (test.md §7:
+list → test → inspect → validate → preview → build → validate).
 
 ## Run it
 

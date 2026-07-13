@@ -28,7 +28,17 @@ import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { Braces, LayoutDashboard, Route, Sparkles } from 'lucide-react'
-import { createRegistry, nextStage, nextStageBatch, restResolver, singleKindSchema, staticResolver, validateResource } from '@loykin/resourcekit'
+import {
+  createConnectionDataResolver,
+  createRegistry,
+  nextStage,
+  nextStageBatch,
+  restConnectionAdapter,
+  restResolver,
+  singleKindSchema,
+  staticResolver,
+  validateResource,
+} from '@loykin/resourcekit'
 import type { DataResolver, JsonSchema, Resource, MutationResolver, ValidationResult } from '@loykin/resourcekit'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
@@ -61,16 +71,29 @@ const incidentRows = [
   { id: 'INC-1003', service: 'Search', severity: 'low' },
 ]
 
+const metricsRows = [
+  { service: 'API', p95: 181, errors: 12, status: 'healthy' },
+  { service: 'Billing', p95: 244, errors: 28, status: 'watch' },
+  { service: 'Search', p95: 132, errors: 7, status: 'healthy' },
+]
+
 function jsonDataUrl(value: unknown): string {
   return `data:application/json,${encodeURIComponent(JSON.stringify(value))}`
 }
 
 const playgroundDatasourceResolver: DataResolver = async (binding) => {
-  if (binding.source !== 'datasource' || binding.datasourceUid !== 'crm') return []
+  if (binding.source !== 'datasource') return []
   const query = typeof binding.query === 'object' && binding.query !== null ? (binding.query as Record<string, unknown>) : {}
-  const status = typeof query.status === 'string' ? query.status : undefined
-  const id = typeof query.id === 'string' ? query.id : undefined
-  return customerRows.filter((row) => (!status || row.status === status) && (!id || row.id === id))
+  if (binding.datasourceUid === 'crm') {
+    const status = typeof query.status === 'string' ? query.status : undefined
+    const id = typeof query.id === 'string' ? query.id : undefined
+    return customerRows.filter((row) => (!status || row.status === status) && (!id || row.id === id))
+  }
+  if (binding.datasourceUid === 'metrics') {
+    const service = typeof query.service === 'string' ? query.service : undefined
+    return metricsRows.filter((row) => !service || row.service === service)
+  }
+  return []
 }
 
 // In-memory CRUD backend — stands in for a real REST API or datasource so the
@@ -1213,8 +1236,100 @@ const userEditor: Resource = {
   ],
 }
 
+// Built via real MCP tool calls against examples/mcp-server's connection
+// tools (list_connections → test_connection → preview_connection →
+// list_root_templates → next_stage_batch → validate_document), driven by an
+// actual MCP client (SDK Client + stdio transport), not hand-written. Its
+// `data` bindings reference the "demo-users" connection registered above by
+// uid — the same ConnectionAdapter contract examples/mcp-server uses, just
+// against this playground's own same-origin demo API instead of a separate
+// process.
+const demoUsersConnectionPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'ListDetail',
+  metadata: { name: 'demo-users-page' },
+  spec: {
+    listWidth: 320,
+    selectionVariable: 'userId',
+    variables: [{ name: 'userId', type: 'string', default: '1', persist: 'url' }],
+  },
+  slots: [
+    {
+      name: 'topBar',
+      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'Users' } }],
+    },
+    {
+      name: 'list',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'SelectableList',
+          spec: {
+            data: { source: 'connection', connection: 'demo-users', request: { path: '/users' } },
+            idField: 'id',
+            selectedRef: 'variables.userId',
+            primary: { field: 'name' },
+            secondary: [{ field: 'role', label: 'Role' }],
+            events: { select: { kind: 'setVariable', variable: 'userId', from: 'row.id' } },
+          },
+        },
+      ],
+    },
+    {
+      name: 'detail',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DetailView',
+          spec: {
+            data: { source: 'connection', connection: 'demo-users', request: { path: '/users/${userId}' } },
+            fields: [
+              { field: 'name', label: 'Name' },
+              { field: 'email', label: 'Email' },
+              { field: 'role', label: 'Role', display: 'badge' },
+            ],
+          },
+        },
+      ],
+    },
+  ],
+}
+
+// Top 10 crypto by market cap via the real CoinGecko API — a genuinely
+// unfamiliar third-party connection, not one of our own demo backends.
+const coinMarketCapTop10: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'SelectableList',
+  metadata: { name: 'coin-market-cap-top10' },
+  spec: {
+    data: {
+      source: 'connection',
+      connection: 'coingecko',
+      request: { path: '/coins/markets', query: { vs_currency: 'usd', order: 'market_cap_desc', per_page: '10', page: '1' } },
+    },
+    idField: 'id',
+    primary: { field: 'name' },
+    secondary: [
+      { field: 'current_price', label: 'Price (USD)' },
+      { field: 'market_cap_rank', label: 'Rank' },
+    ],
+  },
+}
+
 const examples = [
   ...scenarioExamples,
+  {
+    id: 'demo-users-connection-page',
+    name: 'Connection model (MCP-built)',
+    description: 'ListDetail bound to a registered "demo-users" connection — document built live via MCP connection tools.',
+    resource: demoUsersConnectionPage,
+  },
+  {
+    id: 'coin-market-cap-top10',
+    name: 'Top 10 by market cap (real API)',
+    description: 'SelectableList bound to a real, unfamiliar third-party connection (CoinGecko) — not one of our own demo backends.',
+    resource: coinMarketCapTop10,
+  },
   {
     id: 'user-editor',
     name: 'User editor (CRUD)',
@@ -1286,10 +1401,45 @@ const examples = [
 const registry = createRegistry<KindRenderFn>()
 registry.use({
   name: 'playground-resolvers',
-  dataResolvers: { datasource: playgroundDatasourceResolver, rest: restResolver, static: staticResolver, memory: memoryDataResolver },
+  dataResolvers: {
+    datasource: playgroundDatasourceResolver,
+    rest: restResolver,
+    static: staticResolver,
+    memory: memoryDataResolver,
+    connection: createConnectionDataResolver(registry),
+  },
   mutationResolvers: { memory: memoryMutationResolver },
+  connectionAdapters: { rest: restConnectionAdapter },
 })
 registry.use(createPlaygroundResourceAdapters())
+
+// Same "demo-users" connection as examples/mcp-server, but backed by
+// vite.config.ts's demoUsersApiPlugin middleware (same origin, no separate
+// process/CORS needed) instead of a standalone http.Server — proves a
+// document built through the MCP server's connection tools renders here too,
+// since it's the exact same ConnectionAdapter contract either way.
+registry.registerConnection({
+  uid: 'demo-users',
+  type: 'rest',
+  name: 'Demo Users API',
+  description: 'In-memory demo REST API — GET /users, GET /users/:id, PATCH /users/:id.',
+  config: { baseUrl: `${window.location.origin}/api/demo-users` },
+  policy: { methods: ['GET', 'PATCH'], pathPrefixes: ['/users'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
+})
+
+// A real, unfamiliar third-party API (not one of ours) — proves the
+// connection model isn't specific to our own demo backends. Public, no key,
+// CORS-enabled for GET.
+registry.registerConnection({
+  uid: 'coingecko',
+  type: 'rest',
+  name: 'CoinGecko Markets API',
+  description: 'Public crypto market data — GET /coins/markets.',
+  config: { baseUrl: 'https://api.coingecko.com/api/v3' },
+  policy: { methods: ['GET'], pathPrefixes: ['/coins'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 10 },
+})
 
 const playgroundScope = registry.scope({
   apiVersions: ['resourcekit.dev/v1alpha1'],

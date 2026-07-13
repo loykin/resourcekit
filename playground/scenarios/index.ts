@@ -24,11 +24,11 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     seedData: { customers },
     expectedResource: customerCrmExpected as Resource,
     rubric: {
-      requiredKinds: ['ListDetail', 'PageTopBar', 'SelectableList', 'RecordScope', 'DataBody', 'DataBodyGroup', 'ObjectFields', 'ChartView', 'FilterControl'],
+      requiredKinds: ['ListDetail', 'PageTopBar', 'SelectableList', 'DataBody', 'DetailView', 'ChartView', 'FilterControl'],
       requiredVariables: ['customerId', 'status'],
       requiredEvents: ['select', 'change'],
       requiredBindings: [{ source: 'datasource', datasourceUid: 'crm' }],
-      requiredText: ['Customers', 'Customer detail', 'Profile', 'Status'],
+      requiredText: ['Customers', 'Customer detail', 'Status'],
       forbiddenKindPrefixes: ['DesignKit', 'GridKit', 'ChartKit', 'BaseKit'],
     },
   },
@@ -39,7 +39,7 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     seedData: { workspace },
     expectedResource: settingsFormExpected as Resource,
     rubric: {
-      requiredKinds: ['DataBody', 'PageTopBar', 'ResourceForm', 'DataBodySection', 'DataBodyRow', 'InputControl'],
+      requiredKinds: ['DataBody', 'PageTopBar', 'FormView'],
       requiredText: ['Workspace settings', 'Settings / Workspace', 'Save settings'],
       forbiddenKindPrefixes: ['DesignKit', 'GridKit', 'ChartKit', 'BaseKit'],
     },

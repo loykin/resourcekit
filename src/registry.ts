@@ -1,8 +1,11 @@
 import type {
   JsonSchema,
+  ConnectionAdapter,
+  ConnectionSummary,
   DataResolver,
   KindManifest,
   MutationResolver,
+  RegisteredConnection,
   ResourceKitPlugin,
   ScopeOptions,
 } from './types'
@@ -20,14 +23,25 @@ export interface ResourceRegistry<TRender = unknown> {
   listDataResolvers(): string[]
   getMutationResolver(target: string): MutationResolver | undefined
   listMutationResolvers(): string[]
+  /** Connection *type* adapters (rest, datasourcekit, ...), registered via `use()`. */
+  getConnectionAdapter(type: string): ConnectionAdapter | undefined
+  listConnectionAdapters(): ConnectionAdapter[]
+  /** Registers/updates one connection instance in place — no snapshot rebuild needed for hosts managing connections dynamically (test.md §5.2). */
+  registerConnection(connection: RegisteredConnection): void
+  unregisterConnection(uid: string): void
+  getConnection(uid: string): RegisteredConnection | undefined
+  listConnections(): RegisteredConnection[]
   /** Derive a restricted registry view for schema generation / MCP exposure. */
   scope(options: ScopeOptions): ScopedRegistry<TRender>
   /** Subscribe to registration changes (drives re-render of fallback nodes). */
   subscribe(listener: () => void): () => void
 }
 
-export interface ScopedRegistry<TRender = unknown> extends Omit<ResourceRegistry<TRender>, 'use' | 'scope'> {
+export interface ScopedRegistry<TRender = unknown>
+  extends Omit<ResourceRegistry<TRender>, 'use' | 'scope' | 'registerConnection' | 'unregisterConnection' | 'listConnections'> {
   readonly options: ScopeOptions
+  /** MCP-facing connection view — `config` (base URL, DSN, credentials) stripped, capabilities intersected from adapter ∩ connection.mcpPolicy ∩ scope (test.md §5.3, §6). */
+  listConnections(): ConnectionSummary[]
 }
 
 function kindKey(apiVersion: string, kind: string): string {
@@ -108,10 +122,45 @@ function kindAllowed(manifest: KindManifest, options: ScopeOptions): boolean {
   return apiVersionAllowed && included && !excluded
 }
 
+function connectionAllowed(uid: string, options: ScopeOptions): boolean {
+  return !options.connections?.allow || options.connections.allow.includes(uid)
+}
+
+const CONNECTION_READ_CAPABILITIES = ['test', 'inspect', 'preview'] as const
+
+function toConnectionSummary(
+  connection: RegisteredConnection,
+  adapter: ConnectionAdapter | undefined,
+  options: ScopeOptions,
+): ConnectionSummary | undefined {
+  if (!adapter) return undefined
+  const scopeCapabilities = options.connections?.capabilities
+
+  const capabilities = { test: false, inspect: false, preview: false, mutate: false }
+  for (const name of CONNECTION_READ_CAPABILITIES) {
+    const adapterHas = typeof adapter[name] === 'function'
+    const mcpAllowed = connection.mcpPolicy?.[name] ?? true
+    const scopeAllowed = scopeCapabilities?.[name] ?? true
+    capabilities[name] = adapterHas && mcpAllowed && scopeAllowed
+  }
+  capabilities.mutate = (connection.mcpPolicy?.mutate ?? false) && (scopeCapabilities?.mutate ?? false)
+
+  return {
+    uid: connection.uid,
+    type: connection.type,
+    name: connection.name,
+    description: connection.description,
+    requestSchema: adapter.requestSchema,
+    capabilities,
+  }
+}
+
 export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
   const kinds = new Map<string, KindManifest<unknown, TRender>>()
   const dataResolvers = new Map<string, DataResolver>()
   const mutationResolvers = new Map<string, MutationResolver>()
+  const connectionAdapters = new Map<string, ConnectionAdapter>()
+  const connections = new Map<string, RegisteredConnection>()
   const listeners = new Set<() => void>()
 
   const notify = () => listeners.forEach((l) => l())
@@ -127,6 +176,9 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
       for (const [target, resolver] of Object.entries(plugin.mutationResolvers ?? {})) {
         mutationResolvers.set(target, resolver)
       }
+      for (const [type, adapter] of Object.entries(plugin.connectionAdapters ?? {})) {
+        connectionAdapters.set(type, adapter)
+      }
       notify()
     },
     getKind: (apiVersion, kind) => kinds.get(kindKey(apiVersion, kind)),
@@ -135,6 +187,18 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
     listDataResolvers: () => [...dataResolvers.keys()],
     getMutationResolver: (target) => mutationResolvers.get(target),
     listMutationResolvers: () => [...mutationResolvers.keys()],
+    getConnectionAdapter: (type) => connectionAdapters.get(type),
+    listConnectionAdapters: () => [...connectionAdapters.values()],
+    registerConnection(connection) {
+      connections.set(connection.uid, connection)
+      notify()
+    },
+    unregisterConnection(uid) {
+      connections.delete(uid)
+      notify()
+    },
+    getConnection: (uid) => connections.get(uid),
+    listConnections: () => [...connections.values()],
     scope(options): ScopedRegistry<TRender> {
       const scoped: ScopedRegistry<TRender> = {
         options,
@@ -159,6 +223,23 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
         },
         listMutationResolvers() {
           return [...mutationResolvers.keys()]
+        },
+        getConnectionAdapter(type) {
+          return connectionAdapters.get(type)
+        },
+        listConnectionAdapters() {
+          return [...connectionAdapters.values()]
+        },
+        getConnection(uid) {
+          const connection = connections.get(uid)
+          if (!connection || !connectionAllowed(uid, options)) return undefined
+          return connection
+        },
+        listConnections() {
+          return [...connections.values()]
+            .filter((connection) => connectionAllowed(connection.uid, options))
+            .map((connection) => toConnectionSummary(connection, connectionAdapters.get(connection.type), options))
+            .filter((summary): summary is ConnectionSummary => summary !== undefined)
         },
         subscribe(listener) {
           listeners.add(listener)

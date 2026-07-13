@@ -47,8 +47,7 @@
                   "spec": {
                     "data": {
                       "source": "datasource",
-                      "datasourceUid": "metrics",
-                      "query": { "range": "${range}", "service": "${service}" }
+                      "datasourceUid": "metrics"
                     },
                     "columns": {
                       "service": { "label": "Service", "emphasis": "strong" },

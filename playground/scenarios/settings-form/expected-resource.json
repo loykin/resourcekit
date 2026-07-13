@@ -12,41 +12,23 @@
       "items": [
         {
           "apiVersion": "resourcekit.dev/v1alpha1",
-          "kind": "ResourceForm",
+          "kind": "FormView",
           "spec": {
             "submitLabel": "Save settings",
             "successMessage": "Settings saved",
-            "submit": { "action": "saveSettings", "mutation": { "target": "memory", "collection": "settings" } }
-          },
-          "slots": [
-            {
-              "items": [
-                {
-                  "apiVersion": "resourcekit.dev/v1alpha1",
-                  "kind": "DataBodySection",
-                  "spec": { "id": "general", "label": "General", "description": "Workspace identity" },
-                  "slots": [
-                    {
-                      "items": [
-                        {
-                          "apiVersion": "resourcekit.dev/v1alpha1",
-                          "kind": "DataBodyRow",
-                          "spec": { "label": "Name", "required": true },
-                          "slots": [{ "items": [{ "apiVersion": "resourcekit.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "name", "value": "Acme Operations" } }] }]
-                        },
-                        {
-                          "apiVersion": "resourcekit.dev/v1alpha1",
-                          "kind": "DataBodyRow",
-                          "spec": { "label": "Slug" },
-                          "slots": [{ "items": [{ "apiVersion": "resourcekit.dev/v1alpha1", "kind": "InputControl", "spec": { "name": "slug", "value": "acme-ops" } }] }]
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
+            "submit": { "action": "saveSettings", "mutation": { "target": "memory", "collection": "settings" } },
+            "sections": [
+              {
+                "id": "general",
+                "label": "General",
+                "description": "Workspace identity",
+                "fields": [
+                  { "name": "name", "label": "Name", "required": true, "defaultValue": "Acme Operations" },
+                  { "name": "slug", "label": "Slug", "defaultValue": "acme-ops" }
+                ]
+              }
+            ]
+          }
         }
       ]
     }
