@@ -39,7 +39,7 @@ import {
   staticResolver,
   validateResource,
 } from '@loykin/resourcekit'
-import type { DataResolver, JsonSchema, Resource, MutationResolver, ValidationResult } from '@loykin/resourcekit'
+import type { DataResolver, JsonSchema, Resource, MutationBinding, MutationResolver, ValidationResult } from '@loykin/resourcekit'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { publicKindNames } from '@loykin/resourcekit/adapters'
@@ -123,6 +123,23 @@ const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => 
   const row = { id: String(memoryUsers.length + 1), status: 'Pending', joined: new Date().toISOString().slice(0, 10), ...values }
   memoryUsers.push(row)
   return { ...row, version: String(Date.now()) }
+}
+
+// Same mutation mechanism examples/mcp-server uses (MutationBinding, not
+// ConnectionAdapter — writes stay on the existing SubmitSpec path; test.md
+// never gave ConnectionAdapter a mutate method, see §9's admin-vs-generation
+// MCP split). Proves a connection-bound *read* (DetailView) and a
+// mutation-bound *write* (FormView) against the same backend actually
+// round-trip together.
+const restMutationResolver: MutationResolver = async (rawBinding, payload) => {
+  const binding = rawBinding as Extract<MutationBinding, { target: 'rest' }>
+  const response = await fetch(binding.url, {
+    method: binding.method ?? 'PATCH',
+    headers: { 'content-type': 'application/json', ...binding.headers },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(`REST mutation failed: ${response.status} ${response.statusText}`)
+  return response.json()
 }
 
 const customerWorkspace: Resource = {
@@ -1316,6 +1333,45 @@ const coinMarketCapTop10: Resource = {
   },
 }
 
+// Connection-bound read (DetailView) next to a mutation-bound write
+// (FormView, target: 'rest' PATCH) against the *same* demo-users backend —
+// proves a write actually persists and the connection-bound read reflects
+// it (after a refetch; writes don't auto-invalidate reads with no shared
+// variable, see connectionWriteReadPage's own note below).
+const connectionWriteReadPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataBody',
+  metadata: { name: 'connection-write-read' },
+  spec: { title: 'Write path check', description: 'Edit the role below, save, then reload this page — the read above should show the new value.' },
+  slots: [
+    {
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DetailView',
+          spec: {
+            data: { source: 'connection', connection: 'demo-users', request: { path: '/users/2' } },
+            fields: [
+              { field: 'name', label: 'Name' },
+              { field: 'role', label: 'Role (read via connection)', display: 'badge' },
+            ],
+          },
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'FormView',
+          spec: {
+            submitLabel: 'Save role',
+            successMessage: 'Saved — reload the page to see the connection-bound read pick it up',
+            submit: { mutation: { target: 'rest', url: `${window.location.origin}/api/demo-users/users/2`, method: 'PATCH' } },
+            sections: [{ id: 'role', fields: [{ name: 'role', label: 'New role for Bob Martinez', required: true }] }],
+          },
+        },
+      ],
+    },
+  ],
+}
+
 const examples = [
   ...scenarioExamples,
   {
@@ -1329,6 +1385,12 @@ const examples = [
     name: 'Top 10 by market cap (real API)',
     description: 'SelectableList bound to a real, unfamiliar third-party connection (CoinGecko) — not one of our own demo backends.',
     resource: coinMarketCapTop10,
+  },
+  {
+    id: 'connection-write-read',
+    name: 'Connection read + REST write',
+    description: 'DetailView (connection-bound read) next to a FormView (mutation-bound write) against the same backend — proves writes persist and reads reflect them.',
+    resource: connectionWriteReadPage,
   },
   {
     id: 'user-editor',
@@ -1408,7 +1470,7 @@ registry.use({
     memory: memoryDataResolver,
     connection: createConnectionDataResolver(registry),
   },
-  mutationResolvers: { memory: memoryMutationResolver },
+  mutationResolvers: { memory: memoryMutationResolver, rest: restMutationResolver },
   connectionAdapters: { rest: restConnectionAdapter },
 })
 registry.use(createPlaygroundResourceAdapters())

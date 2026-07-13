@@ -27,7 +27,7 @@ import { createFirstPartyResourceAdapters, publicKindNames } from '@loykin/resou
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod/v4'
-import { startDemoApi } from './demo-api.js'
+import { DEMO_API_TOKEN, startDemoApi } from './demo-api.js'
 import { startDemoDb } from './demo-db.js'
 import { sqliteConnectionAdapter } from './sqlite-connection-adapter.js'
 
@@ -77,6 +77,20 @@ registry.registerConnection({
   config: { db: demoDb.db, tables: demoDb.tables },
   mcpPolicy: { test: true, inspect: true, preview: true, mutate: false, maxRows: 20 },
 })
+// A connection whose backend requires a secret — proves a connection can
+// carry a credential that MCP never sees (test.md §5.3). The token lives
+// only in `config.headers` here, server-side; list_connections/get_connection
+// only ever expose the ConnectionSummary shape (uid/type/name/requestSchema/
+// capabilities), never `config`.
+registry.registerConnection({
+  uid: 'secure-reports',
+  type: 'rest',
+  name: 'Secure Reports API',
+  description: 'Auth-gated demo REST API — GET /secure/reports requires a bearer token.',
+  config: { baseUrl: demoApi.baseUrl, headers: { authorization: `Bearer ${DEMO_API_TOKEN}` } },
+  policy: { methods: ['GET'], pathPrefixes: ['/secure'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
+})
 
 const scope = registry.scope({
   apiVersions: ['resourcekit.dev/v1alpha1'],
@@ -84,7 +98,7 @@ const scope = registry.scope({
   rootLevels: ['template'],
   maxDepth: 8,
   connections: {
-    allow: ['demo-users', 'demo-orders'],
+    allow: ['demo-users', 'demo-orders', 'secure-reports'],
     capabilities: { test: true, inspect: true, preview: true, mutate: false },
   },
 })

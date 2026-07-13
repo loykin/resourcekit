@@ -22,6 +22,18 @@ const users: DemoUser[] = [
   { id: '4', name: 'David Osei', email: 'david@example.com', role: 'Engineer' },
 ]
 
+/**
+ * Requires `Authorization: Bearer <DEMO_API_TOKEN>` — exists purely to prove
+ * a connection can carry a secret in its (never-MCP-visible) config.headers
+ * and actually authenticate, test.md §5.3.
+ */
+export const DEMO_API_TOKEN = 'demo-secret-token-xyz'
+
+const reports = [
+  { quarter: 'Q1', revenue: 482000, headcount: 34 },
+  { quarter: 'Q2', revenue: 511000, headcount: 37 },
+]
+
 export interface DemoApi {
   baseUrl: string
   close: () => void
@@ -37,6 +49,16 @@ export function startDemoApi(): Promise<DemoApi> {
 
       if (url.pathname === '/users' && req.method === 'GET') {
         res.end(JSON.stringify(users))
+        return
+      }
+
+      if (url.pathname === '/secure/reports' && req.method === 'GET') {
+        if (req.headers.authorization !== `Bearer ${DEMO_API_TOKEN}`) {
+          res.statusCode = 401
+          res.end(JSON.stringify({ error: 'unauthorized' }))
+          return
+        }
+        res.end(JSON.stringify(reports))
         return
       }
 
