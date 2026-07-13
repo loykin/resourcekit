@@ -1372,24 +1372,95 @@ const connectionWriteReadPage: Resource = {
   ],
 }
 
+// Built via a live MCP client session against examples/mcp-server's
+// "github" connection (test_connection → preview_connection ×2 →
+// next_stage_batch → get_kind_spec_schema → validate_document) — not
+// hand-written. `variables.repoFullName.default` is whatever repo the
+// GitHub API returned as most-recently-updated at build time; it may not
+// be "the" most recent by the time this renders, but it's a real repo.
+const githubOrgReposPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'ListDetail',
+  metadata: { name: 'github-org-repos' },
+  spec: {
+    listWidth: 320,
+    selectionVariable: 'repoFullName',
+    variables: [{ name: 'repoFullName', type: 'string', default: 'vercel/eve', persist: 'url' }],
+  },
+  slots: [
+    {
+      name: 'topBar',
+      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'PageTopBar', spec: { left: 'vercel repos' } }],
+    },
+    {
+      name: 'list',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'SelectableList',
+          spec: {
+            data: { source: 'connection', connection: 'github', request: { path: '/orgs/vercel/repos', query: { per_page: '10', sort: 'updated' } } },
+            idField: 'full_name',
+            selectedRef: 'variables.repoFullName',
+            primary: { field: 'name' },
+            secondary: [
+              { field: 'stargazers_count', label: 'Stars' },
+              { field: 'language', label: 'Language' },
+            ],
+            events: { select: { kind: 'setVariable', variable: 'repoFullName', from: 'row.full_name' } },
+          },
+        },
+      ],
+    },
+    {
+      name: 'detail',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DetailView',
+          spec: {
+            data: { source: 'connection', connection: 'github', request: { path: '/repos/${repoFullName}' } },
+            fields: [
+              { field: 'description', label: 'Description' },
+              { field: 'stargazers_count', label: 'Stars' },
+              { field: 'language', label: 'Language', display: 'badge' },
+              { field: 'open_issues_count', label: 'Open issues' },
+            ],
+          },
+        },
+      ],
+    },
+  ],
+}
+
 const examples = [
   ...scenarioExamples,
   {
     id: 'demo-users-connection-page',
-    name: 'Connection model (MCP-built)',
-    description: 'ListDetail bound to a registered "demo-users" connection — document built live via MCP connection tools.',
+    name: '[MCP-built] Demo users list/detail',
+    description:
+      'MCP-built: assembled from real list_connections/test_connection/preview_connection/next_stage_batch/get_kind_spec_schema calls against a live MCP server, then confirmed with validate_document.',
     resource: demoUsersConnectionPage,
   },
   {
     id: 'coin-market-cap-top10',
-    name: 'Top 10 by market cap (real API)',
-    description: 'SelectableList bound to a real, unfamiliar third-party connection (CoinGecko) — not one of our own demo backends.',
+    name: '[hand-written] Top 10 by market cap',
+    description:
+      'Hand-written, not built through MCP tool calls — only proves the connection/rendering path works against a real, unfamiliar third-party API (CoinGecko), not the MCP generation flow.',
     resource: coinMarketCapTop10,
   },
   {
+    id: 'github-org-repos',
+    name: '[MCP-built] GitHub org repos',
+    description:
+      'MCP-built: assembled from real test_connection/preview_connection/next_stage_batch/get_kind_spec_schema calls against a live MCP server and a real GitHub connection, then confirmed with validate_document.',
+    resource: githubOrgReposPage,
+  },
+  {
     id: 'connection-write-read',
-    name: 'Connection read + REST write',
-    description: 'DetailView (connection-bound read) next to a FormView (mutation-bound write) against the same backend — proves writes persist and reads reflect them.',
+    name: '[hand-written] Connection read + REST write',
+    description:
+      'Hand-written, not built through MCP tool calls — pairs a connection-bound read (DetailView) with a mutation-bound write (FormView) against the same backend to prove writes persist and reads reflect them.',
     resource: connectionWriteReadPage,
   },
   {
@@ -1500,6 +1571,21 @@ registry.registerConnection({
   description: 'Public crypto market data — GET /coins/markets.',
   config: { baseUrl: 'https://api.coingecko.com/api/v3' },
   policy: { methods: ['GET'], pathPrefixes: ['/coins'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 10 },
+})
+
+// Same connection uid/config as examples/mcp-server — the document below was
+// built there via a live MCP client tool-calling session (list_connections →
+// test_connection → preview_connection ×2 → list_root_templates →
+// next_stage_batch → get_kind_spec_schema → validate_document), not
+// hand-written, then copied here to render with the same live data.
+registry.registerConnection({
+  uid: 'github',
+  type: 'rest',
+  name: 'GitHub API',
+  description: 'Public GitHub REST API (read-only here) — GET /orgs/:org/repos, GET /repos/:owner/:repo.',
+  config: { baseUrl: 'https://api.github.com', headers: { accept: 'application/vnd.github+json' } },
+  policy: { methods: ['GET'], pathPrefixes: ['/orgs', '/repos'] },
   mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 10 },
 })
 

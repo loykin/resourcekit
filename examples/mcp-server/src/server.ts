@@ -91,6 +91,17 @@ registry.registerConnection({
   policy: { methods: ['GET'], pathPrefixes: ['/secure'] },
   mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
 })
+// A real, public third-party API — for building actual example documents
+// through this server's own tools, not just our demo backends.
+registry.registerConnection({
+  uid: 'github',
+  type: 'rest',
+  name: 'GitHub API',
+  description: 'Public GitHub REST API (read-only here) — GET /orgs/:org/repos, GET /repos/:owner/:repo.',
+  config: { baseUrl: 'https://api.github.com', headers: { accept: 'application/vnd.github+json' } },
+  policy: { methods: ['GET'], pathPrefixes: ['/orgs', '/repos'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 10 },
+})
 
 const scope = registry.scope({
   apiVersions: ['resourcekit.dev/v1alpha1'],
@@ -98,7 +109,7 @@ const scope = registry.scope({
   rootLevels: ['template'],
   maxDepth: 8,
   connections: {
-    allow: ['demo-users', 'demo-orders', 'secure-reports'],
+    allow: ['demo-users', 'demo-orders', 'secure-reports', 'github'],
     capabilities: { test: true, inspect: true, preview: true, mutate: false },
   },
 })
