@@ -18,7 +18,7 @@ export interface RenderContext {
     resolve: (binding: DataBinding) => Promise<Record<string, unknown>[]>
   }
   events: {
-    /** Routes through the kind's behavior policy (emit / action / setVariable). */
+    /** Routes through the kind's behavior policy. The runtime handles emit and setVariable. */
     emit: (event: string, payload?: unknown) => void
   }
   variables: {

@@ -36,18 +36,23 @@ pnpm test           # vitest run
 
 ## Architecture
 
-Two package entries:
+Public package entries:
 
 - `src/index.ts` (`.`) — **headless core**. No React imports anywhere under
   this entry. Types, registry/plugin host, validation, schema generation +
   scoping, variable engine, `rest`/`static` data resolvers.
 - `src/react/index.ts` (`./react`) — the only place React types may appear.
   Recursive `ResourceRenderer`, `RenderContext`, unknown-kind fallback.
+- `src/adapters/index.ts` (`./adapters`) — combined first-party kind adapters
+  and resource-view kinds.
+- `src/adapters/{designkit,gridkit,chartkit,basekit}/index.ts`
+  (`./adapters/*`) — per-kit adapter entries so consumers install only the
+  kit peers they use.
 
 Current state: the core engine (registry, validation, scoped schema
 generation, variable engine, resolvers) and the React renderer are
-implemented and unit-tested. Kind adapters live in `playground/` until they
-stabilize into per-kit `./resource` subpaths.
+implemented and unit-tested. First-party kind adapters ship from resourcekit
+adapter subpaths and are exercised by the playground and MCP server example.
 
 ## Hard Rules
 
@@ -70,8 +75,9 @@ stabilize into per-kit `./resource` subpaths.
 ## Conventions
 
 - No unnecessary comments — only add when the WHY is non-obvious.
-- Every exported public type/function goes through `src/index.ts` or
-  `src/react/index.ts`.
+- Every exported public type/function goes through `src/index.ts`,
+  `src/react/index.ts`, or an explicit `src/adapters/**/index.ts` package
+  entry.
 - Tests live next to sources as `*.test.ts`.
 - Record non-trivial design decisions (e.g. JSON Schema validator choice,
   `${var}` interpolation rules for string[]) in `docs/` as you make them.
