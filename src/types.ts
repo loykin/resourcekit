@@ -11,11 +11,24 @@ export type JsonSchema = Record<string, unknown>
 
 // ─── Resource envelope ────────────────────────────────────────────────────────
 
+export interface DataRef {
+  $data: string
+  path?: string
+}
+
+export interface VariableRef {
+  $variable: string
+}
+
+export type ValueBinding = DataRef | VariableRef
+
 export interface Resource<TSpec = unknown> {
   apiVersion: string
   kind: string
   metadata?: Metadata
   spec: TSpec
+  /** Runtime-owned inputs declared by the kind's `bindingPolicy`. */
+  bindings?: Record<string, ValueBinding>
   slots?: Slot[]
 }
 
@@ -67,11 +80,23 @@ export interface BehaviorPolicy {
   events?: Record<string, EventPolicy>
 }
 
+export interface BindingPort {
+  description: string
+  schema?: JsonSchema
+  required?: boolean
+  writable?: boolean
+}
+
+export interface BindingPolicy {
+  inputs: Record<string, BindingPort>
+}
+
 export type EventPolicy =
   | { kind: 'internal' }
   | { kind: 'emit'; event: string }
   | { kind: 'action'; action: string }
   | { kind: 'setVariable'; variable: string; from?: string }
+  | { kind: 'setData'; node: string; from?: string }
 
 // ─── Variables ────────────────────────────────────────────────────────────────
 
@@ -379,6 +404,7 @@ export interface KindManifest<TSpec = unknown, TRender = unknown> {
   specSchema: JsonSchema
   slotPolicy?: SlotPolicy
   behaviorPolicy?: BehaviorPolicy
+  bindingPolicy?: BindingPolicy
   /**
    * Composition levels this kind is valid at (see docs/kind-level-taxonomy.md).
    * Most kinds carry exactly one tag; a kind that is both a whole-page

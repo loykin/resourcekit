@@ -1,5 +1,7 @@
-import { createElement, Fragment, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
+import { createDataflowRuntime, isDataRef } from '../dataflow'
+import type { DataflowRuntime, DataRef, DataStore, ResourceDocument } from '../dataflow'
 import type { DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration } from '../types'
 import type { ResourceRegistry, ScopedRegistry } from '../registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../variables'
@@ -9,8 +11,10 @@ import { runSubmit } from '../submit'
 import type { KindRenderFn, RenderContext } from './types'
 
 export interface ResourceRendererProps {
-  resource: Resource
+  resource: Resource | ResourceDocument
   registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>
+  /** Optional physical store for an experimental ResourceDocument data graph. */
+  dataStore?: DataStore
   /** Rendered for unregistered (or not-yet-loaded) kinds. Defaults to null. */
   renderUnknownKind?: (resource: Resource) => ReactNode
   renderLoading?: () => ReactNode
@@ -21,17 +25,20 @@ export interface ResourceRendererProps {
    * analytics) without the document knowing the app.
    */
   onEvent?: (event: string, payload?: unknown) => void
+  onDataError?: (error: unknown, node: string) => void
 }
 
 interface Runtime {
   engine: VariableEngine
   dataCache: Map<string, Promise<Record<string, unknown>[]>>
   bindingRefs: Map<string, Set<string>>
+  dataflow?: DataflowRuntime
   subscribeVersion: (listener: () => void) => () => void
   getVersion: () => number
 }
 
-interface ResourceNodeProps extends ResourceRendererProps {
+interface ResourceNodeProps extends Omit<ResourceRendererProps, 'resource'> {
+  resource: Resource
   runtime: Runtime
   /** Nearest ancestor record scope, inherited by all descendants. */
   record?: Record<string, unknown>
@@ -74,8 +81,12 @@ function renderNodes(
 function resolveThroughRuntime(
   registry: ResourceRendererProps['registry'],
   runtime: Runtime,
-  binding: DataBinding,
+  binding: DataBinding | DataRef,
 ): Promise<Record<string, unknown>[]> {
+  if (isDataRef(binding)) {
+    if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
+    return runtime.dataflow.resolve(binding.$data).then((value) => asRuntimeRows(binding.path ? getValueAtPath(value, binding.path) : value))
+  }
   const refs = scanVariableRefs(binding)
   const key = JSON.stringify(binding)
   runtime.bindingRefs.set(key, refs)
@@ -89,6 +100,16 @@ function resolveThroughRuntime(
   const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() }).then((rows) => applyValuePath(rows, resolvedBinding))
   runtime.dataCache.set(key, promise)
   return promise
+}
+
+function asRuntimeRows(value: unknown): Record<string, unknown>[] {
+  if (value == null) return []
+  if (Array.isArray(value)) {
+    if (!value.every((item) => isRecord(item))) throw new Error('Data reference expected an array of objects')
+    return value
+  }
+  if (isRecord(value)) return [value]
+  return [{ value }]
 }
 
 function applyValuePath(rows: Record<string, unknown>[], binding: DataBinding): Record<string, unknown>[] {
@@ -121,35 +142,28 @@ function useRegistryVersion(registry: ResourceRendererProps['registry']): void {
 }
 
 function useLoadedRender(manifestRender: KindRenderFn | undefined, load: (() => Promise<KindRenderFn>) | undefined): KindRenderFn | undefined {
-  const [loaded, setLoaded] = useState<KindRenderFn | undefined>(() => manifestRender)
-  const [error, setError] = useState<unknown>()
+  const [loaded, setLoaded] = useState<{ loader: () => Promise<KindRenderFn>; render: KindRenderFn }>()
+  const [failure, setFailure] = useState<{ loader: () => Promise<KindRenderFn>; error: unknown }>()
 
-  if (error) throw error
+  if (load && failure?.loader === load) throw failure.error
 
   useEffect(() => {
     let active = true
-    if (manifestRender) {
-      setLoaded(() => manifestRender)
-      return
-    }
-    if (!load) {
-      setLoaded(undefined)
-      return
-    }
-    setLoaded(undefined)
+    if (manifestRender || !load) return
     load()
       .then((render) => {
-        if (active) setLoaded(() => render)
+        if (active) setLoaded({ loader: load, render })
       })
       .catch((nextError: unknown) => {
-        if (active) setError(nextError)
+        if (active) setFailure({ loader: load, error: nextError })
       })
     return () => {
       active = false
     }
   }, [load, manifestRender])
 
-  return loaded
+  if (manifestRender) return manifestRender
+  return load && loaded?.loader === load ? loaded.render : undefined
 }
 
 function renderKindNode(
@@ -190,13 +204,56 @@ function renderKindNode(
         entries: (name?: string) => slotEntries.get(name) ?? [],
       },
       data: {
-        resolve: (binding: DataBinding) => resolveThroughRuntime(registry, runtime, binding),
+        resolve: (binding) => resolveThroughRuntime(registry, runtime, binding),
+        read: (ref) => {
+          if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${ref.$data} requires a ResourceDocument data graph`))
+          return runtime.dataflow.resolve(ref.$data).then((value) => ref.path ? getValueAtPath(value, ref.path) : value)
+        },
+        set: (node, value) => {
+          if (!runtime.dataflow) return Promise.reject(new Error(`Data node ${node} requires a ResourceDocument data graph`))
+          return runtime.dataflow.setState(node, value)
+        },
+        revision: runtime.getVersion(),
+      },
+      bindings: {
+        has: (name) => resource.bindings?.[name] !== undefined,
+        read: (name) => {
+          const binding = resource.bindings?.[name]
+          if (!binding) return Promise.resolve(undefined)
+          if (isDataRef(binding)) {
+            if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
+            return runtime.dataflow.resolve(binding.$data).then((value) => binding.path ? getValueAtPath(value, binding.path) : value)
+          }
+          return Promise.resolve(runtime.engine.get(binding.$variable))
+        },
+        write: (name, value) => {
+          const port = manifest.bindingPolicy?.inputs[name]
+          if (!port?.writable) return Promise.reject(new Error(`Binding ${name} on kind ${resource.kind} is not writable`))
+          const binding = resource.bindings?.[name]
+          if (!binding) return Promise.reject(new Error(`Binding ${name} is not connected`))
+          if (isDataRef(binding)) {
+            if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
+            return runtime.dataflow.setState(binding.$data, value)
+          }
+          runtime.engine.set(binding.$variable, coerceVariableValue(value))
+          return Promise.resolve()
+        },
+        revision: runtime.getVersion(),
       },
       events: {
         emit: (event: string, payload?: unknown) => {
           const policy = eventPolicy(resource, manifest.behaviorPolicy?.events?.[event], event)
           if (policy?.kind === 'setVariable') {
             runtime.engine.set(policy.variable, coerceVariableValue(getValueAtPath(payload, policy.from)))
+          }
+          if (policy?.kind === 'setData') {
+            if (!runtime.dataflow) {
+              props.onDataError?.(new Error(`Data node ${policy.node} requires a ResourceDocument data graph`), policy.node)
+            } else {
+              void runtime.dataflow
+                .setState(policy.node, getValueAtPath(payload, policy.from))
+                .catch((error: unknown) => props.onDataError?.(error, policy.node))
+            }
           }
           if (policy?.kind === 'emit') {
             props.onEvent?.(policy.event, payload)
@@ -309,9 +366,13 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
  * component props.
  */
 export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
+  const document = isResourceDocument(props.resource) ? props.resource : undefined
+  const resource: Resource = document ? document.resource : props.resource as Resource
+  const onDataError = props.onDataError
+  const dataflowUses = useRef(new WeakMap<DataflowRuntime, { count: number }>())
   const runtime = useMemo<Runtime>(() => {
     const engine = createVariableEngine()
-    engine.declare(collectVariables(props.resource))
+    engine.declare(collectVariables(resource))
     const dataCache = new Map<string, Promise<Record<string, unknown>[]>>()
     const bindingRefs = new Map<string, Set<string>>()
     const listeners = new Set<() => void>()
@@ -322,16 +383,59 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
       return () => listeners.delete(listener)
     }
 
+    const notify = () => {
+      version++
+      for (const listener of listeners) listener()
+    }
+
     engine.subscribe((changed) => {
       for (const [key, refs] of bindingRefs.entries()) {
         if ([...changed].some((name) => refs.has(name))) dataCache.delete(key)
       }
-      version++
-      for (const listener of listeners) listener()
+      notify()
     })
 
-    return { engine, dataCache, bindingRefs, subscribeVersion, getVersion: () => version }
-  }, [props.resource])
+    const dataflow = document?.data
+      ? createDataflowRuntime({
+          graph: document.data,
+          store: props.dataStore,
+          resolve: async (binding, context) => {
+            const resolved = interpolate(binding, engine.snapshot())
+            if (resolved.unresolved.size > 0) return []
+            const resolvedBinding = resolved.value as DataBinding
+            const resolver = props.registry.getDataResolver(resolvedBinding.source)
+            if (!resolver) throw new Error(`data resolver ${resolvedBinding.source} is not registered`)
+            const rows = await resolver(resolvedBinding, { variables: engine.snapshot(), signal: context.signal })
+            return applyValuePath(rows, resolvedBinding)
+          },
+        })
+      : undefined
 
-  return createElement(ResourceNode, { ...props, runtime })
+    dataflow?.subscribe((_id, snapshot) => {
+      if (snapshot.status !== 'pending') notify()
+    })
+
+    return { engine, dataCache, bindingRefs, dataflow, subscribeVersion, getVersion: () => version }
+  }, [props.dataStore, props.registry, document, resource])
+
+  useEffect(() => {
+    const dataflow = runtime.dataflow
+    if (!dataflow) return
+    const usage = dataflowUses.current.get(dataflow) ?? { count: 0 }
+    usage.count++
+    dataflowUses.current.set(dataflow, usage)
+    void dataflow.start().catch((error: unknown) => onDataError?.(error, 'dataGraph'))
+    return () => {
+      usage.count--
+      void Promise.resolve().then(() => {
+        if (usage.count === 0) dataflow.dispose()
+      })
+    }
+  }, [onDataError, runtime])
+
+  return createElement(ResourceNode, { ...props, resource, runtime })
+}
+
+function isResourceDocument(value: Resource | ResourceDocument): value is ResourceDocument {
+  return 'resource' in value
 }

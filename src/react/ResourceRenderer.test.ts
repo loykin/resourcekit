@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { createRegistry } from '../registry'
+import type { ResourceDocument } from '../dataflow'
 import type { DataResolver, Resource } from '../types'
 import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
@@ -166,5 +167,120 @@ describe('ResourceRenderer', () => {
     await expect(captured?.data.resolve({ source: 'static', rows: [], valuePath: 'payload.customer' })).resolves.toEqual([
       { id: 'c1', name: 'Ada' },
     ])
+  })
+
+  it('renders a ResourceDocument and resolves inline data references through existing resolvers', async () => {
+    let captured: RenderContext | undefined
+    const resolver: DataResolver = vi.fn(async (binding) => {
+      const request = (binding as { request: { cluster: string } }).request
+      return [{ cluster: request.cluster, cpu: 72 }]
+    })
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      dataResolvers: { metrics: resolver },
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+
+    const document: ResourceDocument = {
+      data: {
+        nodes: {
+          selectedCluster: { kind: 'state', initialValue: 'cluster-a' },
+          metrics: {
+            kind: 'resolve',
+            binding: { source: 'metrics', request: { cluster: { $data: 'selectedCluster' } } },
+          },
+        },
+      },
+      resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} },
+    }
+
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: document, registry }))
+
+    await expect(captured?.data.resolve({ $data: 'metrics' })).resolves.toEqual([{ cluster: 'cluster-a', cpu: 72 }])
+    await captured?.data.set('selectedCluster', 'cluster-b')
+    await expect(captured?.data.resolve({ $data: 'metrics' })).resolves.toEqual([{ cluster: 'cluster-b', cpu: 72 }])
+    expect(resolver).toHaveBeenCalledTimes(2)
+  })
+
+  it('publishes a resource event payload into a document state node', async () => {
+    let captured: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          behaviorPolicy: { events: { select: { kind: 'setData', node: 'selection', from: 'row' } } },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+    const document: ResourceDocument = {
+      data: { nodes: { selection: { kind: 'state' } } },
+      resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} },
+    }
+
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: document, registry }))
+    captured?.events.emit('select', { row: { id: 'cluster-a' } })
+
+    await vi.waitFor(async () => {
+      await expect(captured?.data.resolve({ $data: 'selection' })).resolves.toEqual([{ id: 'cluster-a' }])
+    })
+  })
+
+  it('exposes kind-declared bindings through the central document store', async () => {
+    let captured: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'ControlledProbe',
+          specSchema: { type: 'object' },
+          bindingPolicy: {
+            inputs: {
+              selected: { description: 'Selected ID', writable: true },
+              rows: { description: 'Read-only rows' },
+            },
+          },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+    const document: ResourceDocument = {
+      data: { nodes: { selected: { kind: 'state', initialValue: 'a' }, rows: { kind: 'state', initialValue: [{ id: 'a' }] } } },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'ControlledProbe',
+        bindings: { selected: { $data: 'selected' }, rows: { $data: 'rows' } },
+        spec: {},
+      },
+    }
+
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: document, registry }))
+    await expect(captured?.bindings.read('selected')).resolves.toBe('a')
+    await captured?.bindings.write('selected', 'b')
+    await expect(captured?.bindings.read('selected')).resolves.toBe('b')
+    await expect(captured?.bindings.write('rows', [])).rejects.toThrow('not writable')
   })
 })

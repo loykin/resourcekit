@@ -1,16 +1,31 @@
 import { FilterInput } from '@loykin/filter-input'
 import type { ComponentType } from 'react'
 import type { JsonSchema, ResourceKitPlugin } from '../../types'
-import type { KindRenderFn } from '../../react/types'
-import { variableName, withKindAliases } from '../internal/shared'
+import type { KindRenderFn, RenderContext } from '../../react/types'
+import { useBindingValue } from '../internal/bindings'
+import { withKindAliases } from '../internal/shared'
 
 interface FilterInputSpec {
   config: unknown
-  valueRef?: string
   value?: unknown
 }
 
 const KitFilterInput = FilterInput as ComponentType<Record<string, unknown>>
+
+function FilterControlNode({ spec, ctx }: { spec: FilterInputSpec; ctx: RenderContext }) {
+  const value = useBindingValue(ctx, 'value', spec.value)
+  return (
+    <div className="min-w-[14rem] max-w-full shrink-0 overflow-visible">
+      <KitFilterInput
+        className="w-full"
+        classNames={{ row: 'flex-nowrap', control: 'min-w-0', clearButton: 'shrink-0' }}
+        config={spec.config}
+        value={value}
+        onChange={(nextValue: unknown) => ctx.events.emit('change', { value: nextValue })}
+      />
+    </div>
+  )
+}
 
 // Mirrors `FilterInputConfig` from `@loykin/filter-input`'s src/types.ts. `dataSource.fetch`
 // and `display.formatLabel` are functions, not representable in JSON Schema, so are omitted.
@@ -103,33 +118,25 @@ export function createBaseKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'BaseKitFilterInput',
           level: ['leaf'],
-          description: 'A single filter control (select/date/text/etc., per `config`) for narrowing a bound list/table via a variable.',
+          description: 'A single filter control (select/date/text/etc., per `config`) whose current value comes from the `value` binding.',
           specSchema: {
             type: 'object',
             additionalProperties: true,
             required: ['config'],
             properties: {
               config: filterInputConfigSchema,
-              valueRef: { type: 'string' },
               value: {},
               events: { type: 'object' },
             },
           },
+          bindingPolicy: {
+            inputs: {
+              value: { description: 'Current filter value; bind to shared document state.' },
+            },
+          },
           render: (resource, ctx) => {
             const spec = resource.spec as FilterInputSpec
-            const variable = variableName(spec.valueRef)
-            const value = variable ? ctx.variables.get(variable) : spec.value
-            return (
-              <div className="min-w-[14rem] max-w-full shrink-0 overflow-visible">
-                <KitFilterInput
-                  className="w-full"
-                  classNames={{ row: 'flex-nowrap', control: 'min-w-0', clearButton: 'shrink-0' }}
-                  config={spec.config}
-                  value={value}
-                  onChange={(nextValue: unknown) => ctx.events.emit('change', { value: nextValue })}
-                />
-              </div>
-            )
+            return <FilterControlNode spec={spec} ctx={ctx} />
           },
         },
       ],

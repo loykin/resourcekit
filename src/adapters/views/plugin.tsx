@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { getValueAtPath } from '../../path'
 import type { DataBinding, FieldSpec, ResourceKitPlugin, ViewStateSpec } from '../../types'
 import type { KindRenderFn, RenderContext } from '../../react/types'
-import { variableName } from '../internal/shared'
+import { useBindingValue } from '../internal/bindings'
 
 interface FieldRefSpec {
   field: string
@@ -13,7 +13,6 @@ interface FieldRefSpec {
 interface SelectableListSpec {
   data: DataBinding
   idField?: string
-  selectedRef?: string
   primary: FieldRefSpec
   secondary?: FieldRefSpec[]
 }
@@ -68,7 +67,7 @@ function useRows(binding: DataBinding | undefined, ctx: RenderContext) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bindingKey, recordKey, refFingerprint])
+  }, [bindingKey, recordKey, refFingerprint, ctx.data.revision])
 
   return { rows, error }
 }
@@ -80,8 +79,7 @@ function textAt(row: Record<string, unknown>, field: string): string {
 
 function SelectableList({ spec, ctx }: { spec: SelectableListSpec; ctx: RenderContext }) {
   const { rows, error } = useRows(spec.data, ctx)
-  const selectedVariable = variableName(spec.selectedRef)
-  const selected = selectedVariable ? ctx.variables.get(selectedVariable) : undefined
+  const selected = useBindingValue(ctx, 'selected')
   const idField = spec.idField ?? 'id'
 
   if (error) return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load list'}</div>
@@ -267,7 +265,7 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'SelectableList',
         level: ['leaf'],
         description:
-          'A vertical list of selectable rows bound to `data`, highlighting the row matching `selectedRef` and emitting a `select` event with the row on click. Use for the list pane of a list/detail screen.',
+          'A vertical list of selectable rows bound to `data`, highlighting the row matching the `selected` binding and emitting a `select` event with the row on click. Use for the list pane of a list/detail screen.',
         specSchema: {
           type: 'object',
           additionalProperties: true,
@@ -275,10 +273,14 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
           properties: {
             data: { type: 'object' },
             idField: { type: 'string' },
-            selectedRef: { type: 'string' },
             primary: fieldRefSchema,
             secondary: { type: 'array', items: fieldRefSchema },
             events: { type: 'object' },
+          },
+        },
+        bindingPolicy: {
+          inputs: {
+            selected: { description: 'Currently selected row ID; bind to shared document state.', schema: { type: 'string' } },
           },
         },
         render: (resource, ctx) => <SelectableList spec={resource.spec as SelectableListSpec} ctx={ctx} />,

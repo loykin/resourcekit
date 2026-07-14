@@ -43,7 +43,8 @@ describe('flattened list/detail and form views (test.md §4)', () => {
     const doc: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'ListDetail',
-      spec: { title: 'Customers', selectionVariable: 'customerId' },
+      bindings: { selection: { $variable: 'customerId' } },
+      spec: { title: 'Customers', variables: [{ name: 'customerId', default: '1' }] },
       slots: [
         {
           name: 'list',

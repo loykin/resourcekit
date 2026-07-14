@@ -39,7 +39,7 @@ import {
   staticResolver,
   validateResource,
 } from '@loykin/resourcekit'
-import type { DataResolver, JsonSchema, Resource, MutationBinding, MutationResolver, ValidationResult } from '@loykin/resourcekit'
+import type { DataResolver, JsonSchema, Resource, ResourceDocument, MutationBinding, MutationResolver, ValidationResult } from '@loykin/resourcekit'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { publicKindNames } from '@loykin/resourcekit/adapters'
@@ -148,9 +148,9 @@ const customerWorkspace: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'customers' },
+  bindings: { selection: { $variable: 'customerId' } },
   spec: {
     listWidth: 360,
-    selectionVariable: 'customerId',
     variables: [
       { name: 'customerId', type: 'string', default: '1', persist: 'url' },
       { name: 'status', type: 'string', default: 'active' },
@@ -171,8 +171,8 @@ const customerWorkspace: Resource = {
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'FilterControl',
+                  bindings: { value: { $variable: 'status' } },
                   spec: {
-                    valueRef: 'variables.status',
                     config: {
                       key: 'status',
                       type: 'select',
@@ -200,13 +200,13 @@ const customerWorkspace: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
+          bindings: { selected: { $variable: 'customerId' } },
           spec: {
             data: {
               source: 'static',
               rows: customerRows,
             },
             idField: 'id',
-            selectedRef: 'variables.customerId',
             primary: { field: 'name' },
             secondary: [
               { field: 'status', label: 'Status' },
@@ -394,7 +394,7 @@ const chartGallery: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
   metadata: { name: 'chart-gallery' },
-  spec: { leftWidth: 360, rightWidth: 360 },
+  spec: { leftPaneWidth: 360, rightPaneWidth: 360 },
   slots: [
     {
       name: 'topBar',
@@ -543,7 +543,7 @@ const workbenchTemplate: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
   metadata: { name: 'operations-workbench' },
-  spec: { leftWidth: 320, rightWidth: 340 },
+  spec: { leftPaneWidth: 320, rightPaneWidth: 340 },
   slots: [
     {
       name: 'topBar',
@@ -703,9 +703,9 @@ const fromValueBinding: Resource = {
                         {
                           apiVersion: 'resourcekit.dev/v1alpha1',
                           kind: 'DataBodyField',
+                          bindings: { value: { $variable: 'selectedPlan' } },
                           spec: {
                             label: 'variables.selectedPlan',
-                            valueRef: 'variables.selectedPlan',
                             description: 'Updated by click payload path from: "value".',
                           },
                         },
@@ -763,9 +763,9 @@ const fromRowBinding: Resource = {
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DataBodyField',
+                  bindings: { value: { $variable: 'ticketId' } },
                   spec: {
                     label: 'variables.ticketId',
-                    valueRef: 'variables.ticketId',
                     description: 'Updated by TableView rowSelect payload path from: "row.id".',
                   },
                 },
@@ -870,8 +870,8 @@ const datasourceDataTable: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'FilterControl',
+          bindings: { value: { $variable: 'status' } },
           spec: {
-            valueRef: 'variables.status',
             config: {
               key: 'status',
               type: 'select',
@@ -989,7 +989,8 @@ const userManagement: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'Sheet',
-          spec: { openVariable: 'createOpen', title: 'Add member', width: 440 },
+          bindings: { open: { $variable: 'createOpen' } },
+          spec: { title: 'Add member', width: 440 },
           slots: [
             {
               items: [
@@ -1092,9 +1093,9 @@ const userEditor: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'user-editor' },
+  bindings: { selection: { $variable: 'userId' } },
   spec: {
     listWidth: 380,
-    selectionVariable: 'userId',
     variables: [
       { name: 'userId', type: 'string', default: '1' },
       { name: 'usersVersion', type: 'string', default: '0' },
@@ -1107,10 +1108,10 @@ const userEditor: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
+          bindings: { selected: { $variable: 'userId' } },
           spec: {
             data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
             idField: 'id',
-            selectedRef: 'variables.userId',
             primary: { field: 'name' },
             secondary: [
               { field: 'email' },
@@ -1267,9 +1268,9 @@ const demoUsersConnectionPage: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'demo-users-page' },
+  bindings: { selection: { $variable: 'userId' } },
   spec: {
     listWidth: 320,
-    selectionVariable: 'userId',
     variables: [{ name: 'userId', type: 'string', default: '1', persist: 'url' }],
   },
   slots: [
@@ -1283,10 +1284,10 @@ const demoUsersConnectionPage: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
+          bindings: { selected: { $variable: 'userId' } },
           spec: {
             data: { source: 'connection', connection: 'demo-users', request: { path: '/users' } },
             idField: 'id',
-            selectedRef: 'variables.userId',
             primary: { field: 'name' },
             secondary: [{ field: 'role', label: 'Role' }],
             events: { select: { kind: 'setVariable', variable: 'userId', from: 'row.id' } },
@@ -1374,7 +1375,7 @@ const connectionWriteReadPage: Resource = {
   ],
 }
 
-const dynamicDatasourceKitPage: Resource = {
+const dynamicDatasourceKitResource: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
   metadata: { name: 'dynamic-datasourcekit-metrics' },
@@ -1383,10 +1384,6 @@ const dynamicDatasourceKitPage: Resource = {
     rightPaneWidth: 340,
     bottomPaneHeight: 260,
     resizable: true,
-    variables: [
-      { name: 'region', type: 'string', default: 'us-east' },
-      { name: 'selectedHost', type: 'string', default: 'web-1' },
-    ],
   },
   slots: [
     {
@@ -1404,19 +1401,11 @@ const dynamicDatasourceKitPage: Resource = {
       items: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
-          kind: 'FilterControl',
+          kind: 'ActionButton',
           spec: {
-            valueRef: 'variables.region',
-            config: {
-              key: 'region',
-              type: 'select',
-              label: 'Region',
-              options: [
-                { label: 'US East', value: 'us-east' },
-                { label: 'US West', value: 'us-west' },
-              ],
-            },
-            events: { change: { kind: 'setVariable', variable: 'region', from: 'value' } },
+            label: 'Show US West',
+            value: 'us-west',
+            events: { click: { kind: 'setData', node: 'region', from: 'value' } },
           },
         },
       ],
@@ -1434,20 +1423,16 @@ const dynamicDatasourceKitPage: Resource = {
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'SelectableList',
+                  bindings: { selected: { $data: 'selectedHost' } },
                   spec: {
-                    data: {
-                      source: 'connection',
-                      connection: 'demo-metrics-dynamic',
-                      request: { metric: 'cpuPercent', region: '${region}' },
-                    },
+                    data: { $data: 'hostCpu' },
                     idField: 'host',
-                    selectedRef: 'variables.selectedHost',
                     primary: { field: 'host' },
                     secondary: [
                       { field: 'region', label: 'Region' },
                       { field: 'cpuPercent', label: 'CPU %' },
                     ],
-                    events: { select: { kind: 'setVariable', variable: 'selectedHost', from: 'row.host' } },
+                    events: { select: { kind: 'setData', node: 'selectedHost', from: 'row.host' } },
                   },
                 },
               ],
@@ -1469,11 +1454,7 @@ const dynamicDatasourceKitPage: Resource = {
               region: { label: 'Region' },
               cpuPercent: { label: 'CPU %', type: 'number', align: 'right' },
             },
-            data: {
-              source: 'connection',
-              connection: 'demo-metrics-dynamic',
-              request: { metric: 'cpuPercent', region: '${region}' },
-            },
+            data: { $data: 'hostCpu' },
           },
         },
       ],
@@ -1492,11 +1473,7 @@ const dynamicDatasourceKitPage: Resource = {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DetailView',
                   spec: {
-                    data: {
-                      source: 'connection',
-                      connection: 'demo-metrics-dynamic',
-                      request: { metric: 'memoryPercent', host: '${selectedHost}' },
-                    },
+                    data: { $data: 'hostMemory' },
                     fields: [
                       { field: 'host', label: 'Host', emphasis: 'strong' },
                       { field: 'region', label: 'Region', display: 'badge' },
@@ -1554,6 +1531,32 @@ const dynamicDatasourceKitPage: Resource = {
   ],
 }
 
+const dynamicDatasourceKitPage: ResourceDocument = {
+  data: {
+    nodes: {
+      region: { kind: 'state', initialValue: 'us-east', lifecycle: 'page' },
+      selectedHost: { kind: 'state', initialValue: 'web-1', lifecycle: 'page' },
+      hostCpu: {
+        kind: 'resolve',
+        binding: {
+          source: 'connection',
+          connection: 'demo-metrics-dynamic',
+          request: { metric: 'cpuPercent', region: { $data: 'region' } },
+        },
+      },
+      hostMemory: {
+        kind: 'resolve',
+        binding: {
+          source: 'connection',
+          connection: 'demo-metrics-dynamic',
+          request: { metric: 'memoryPercent', host: { $data: 'selectedHost' } },
+        },
+      },
+    },
+  },
+  resource: dynamicDatasourceKitResource,
+}
+
 // Built via a live MCP client session against examples/mcp-server's
 // "github" connection (test_connection → preview_connection ×2 →
 // next_stage_batch → get_kind_spec_schema → validate_document) — not
@@ -1564,9 +1567,9 @@ const githubOrgReposPage: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
   metadata: { name: 'github-org-repos' },
+  bindings: { selection: { $variable: 'repoFullName' } },
   spec: {
     listWidth: 320,
-    selectionVariable: 'repoFullName',
     variables: [{ name: 'repoFullName', type: 'string', default: 'vercel/eve', persist: 'url' }],
   },
   slots: [
@@ -1580,10 +1583,10 @@ const githubOrgReposPage: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'SelectableList',
+          bindings: { selected: { $variable: 'repoFullName' } },
           spec: {
             data: { source: 'connection', connection: 'github', request: { path: '/orgs/vercel/repos', query: { per_page: '10', sort: 'updated' } } },
             idField: 'full_name',
-            selectedRef: 'variables.repoFullName',
             primary: { field: 'name' },
             secondary: [
               { field: 'stargazers_count', label: 'Stars' },
@@ -2499,6 +2502,10 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
+function isPlaygroundDocument(value: Resource | ResourceDocument): value is ResourceDocument {
+  return 'resource' in value
+}
+
 function JsonEditor({ value, onChange, readOnly = false }: { value: string; onChange?: (value: string) => void; readOnly?: boolean }) {
   return (
     <CodeMirror
@@ -3074,7 +3081,7 @@ export function App() {
 
   const [view, setView] = useState<'runtime' | 'step-by-step'>('runtime')
   const [selectedExampleId, setSelectedExampleId] = useState<(typeof examples)[number]['id']>(() => initialExample().id)
-  const [resource, setResource] = useState<Resource>(() => initialExample().resource)
+  const [resource, setResource] = useState<Resource | ResourceDocument>(() => initialExample().resource)
   const [loadError, setLoadError] = useState<string>()
   const [jsonSheetOpen, setJsonSheetOpen] = useState(false)
   const [aiTraceSheetOpen, setAiTraceSheetOpen] = useState(false)
@@ -3090,6 +3097,7 @@ export function App() {
   }
 
   const resourceJson = useMemo(() => prettyJson(resource), [resource])
+  const rootResource = isPlaygroundDocument(resource) ? resource.resource : resource
 
   // The real nextStage/nextStageBatch trace for whatever resource is loaded —
   // not a one-shot "here's the whole schema, generate a document" dump (that
@@ -3101,12 +3109,12 @@ export function App() {
     // runtime examples are intentionally smaller fragments (e.g. a bare Panel),
     // not whole-page templates, and are still valid roots in this tab's own scope.
     const stage = nextStage(playgroundScope, {})
-    if (stage.fixed) return { onlyOption: true as const, ok: stage.fixed.kind === resource.kind, candidateKinds: [stage.fixed.kind] }
+    if (stage.fixed) return { onlyOption: true as const, ok: stage.fixed.kind === rootResource.kind, candidateKinds: [stage.fixed.kind] }
     const defs = (stage.schema?.$defs ?? {}) as Record<string, JsonSchema>
     const candidateKinds = (stage.schema ? stepCandidatesFromOneOf((stage.schema.oneOf as JsonSchema[]) ?? [], defs) : []).map((c) => c.kind)
-    return { onlyOption: false as const, ok: candidateKinds.includes(resource.kind), candidateKinds }
-  }, [resource.kind])
-  const aiTraceChecks = useMemo(() => replayResource(resource), [resource])
+    return { onlyOption: false as const, ok: candidateKinds.includes(rootResource.kind), candidateKinds }
+  }, [rootResource.kind])
+  const aiTraceChecks = useMemo(() => replayResource(rootResource), [rootResource])
 
   useEffect(() => {
     const onPopState = () => {
@@ -3245,10 +3253,10 @@ export function App() {
                         {aiTraceRoot.onlyOption
                           ? `root: only ${aiTraceRoot.candidateKinds[0]} is a valid root here — no choice needed`
                           : !aiTraceRoot.ok
-                            ? `root: ${resource.kind} is NOT a valid root per the rule engine (valid options: ${aiTraceRoot.candidateKinds.join(', ') || '(none)'})`
+                            ? `root: ${rootResource.kind} is NOT a valid root per the rule engine (valid options: ${aiTraceRoot.candidateKinds.join(', ') || '(none)'})`
                             : aiTraceRoot.candidateKinds.length > 8
-                              ? `root: chose ${resource.kind} (valid — this scope has no root restriction, so any of the ${aiTraceRoot.candidateKinds.length} registered kinds qualify)`
-                              : `root: chose ${resource.kind} (valid — one of ${aiTraceRoot.candidateKinds.join(', ')})`}
+                              ? `root: chose ${rootResource.kind} (valid — this scope has no root restriction, so any of the ${aiTraceRoot.candidateKinds.length} registered kinds qualify)`
+                              : `root: chose ${rootResource.kind} (valid — one of ${aiTraceRoot.candidateKinds.join(', ')})`}
                       </p>
                       {aiTraceChecks.length > 0 ? (
                         <ol className="rk-workflow-call-log">

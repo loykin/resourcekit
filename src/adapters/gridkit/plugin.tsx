@@ -108,7 +108,7 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bindingKey, refFingerprint])
+  }, [bindingKey, refFingerprint, ctx.data.revision])
 
   const columns = useMemo(() => {
     if (!rows) return []

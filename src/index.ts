@@ -6,12 +6,17 @@
 
 export type {
   JsonSchema,
+  DataRef,
+  VariableRef,
+  ValueBinding,
   Resource,
   Metadata,
   Slot,
   SlotPolicy,
   SlotRule,
   BehaviorPolicy,
+  BindingPort,
+  BindingPolicy,
   EventPolicy,
   VariableDeclaration,
   VariableValue,
@@ -57,8 +62,8 @@ export type {
 export { createRegistry } from './registry'
 export type { ResourceRegistry, ScopedRegistry } from './registry'
 
-export { validateResource } from './validation'
-export { buildDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './schema'
+export { validateResource, validateResourceDocument } from './validation'
+export { buildDocumentSchema, buildResourceDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './schema'
 
 export { createVariableEngine, scanVariableRefs, interpolate } from './variables'
 export type { VariableEngine } from './variables'
@@ -70,3 +75,28 @@ export type { RestConnectionConfig, RestConnectionRequest } from './connectionAd
 export { getValueAtPath, coerceVariableValue } from './path'
 export { runSubmit } from './submit'
 export type { SubmitRuntime } from './submit'
+
+export {
+  createDataflowRuntime,
+  createMemoryDataStore,
+  isDataRef,
+  scanDataRefs,
+  resolveDataRefs,
+  validateDataGraph,
+  DataGraphValidationError,
+} from './dataflow'
+export type {
+  StateDataNode,
+  ResolveDataNode,
+  DataNode,
+  DataGraphSpec,
+  ResourceDocument,
+  DataStatus,
+  DataSnapshot,
+  DataStore,
+  DataGraphIssue,
+  DataGraphValidationResult,
+  DataNodeResolveContext,
+  CreateDataflowRuntimeOptions,
+  DataflowRuntime,
+} from './dataflow'

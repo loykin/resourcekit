@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { DataRef } from '../dataflow'
 import type { DataBinding, Resource, SubmitSpec } from '../types'
 
 /**
@@ -15,7 +16,19 @@ export interface RenderContext {
   slots: SlotAccessor
   data: {
     /** Interpolates the binding and dispatches it to the registered resolver. */
-    resolve: (binding: DataBinding) => Promise<Record<string, unknown>[]>
+    resolve: (binding: DataBinding | DataRef) => Promise<Record<string, unknown>[]>
+    /** Reads a data node without coercing its value into rows. */
+    read: (ref: DataRef) => Promise<unknown>
+    /** Writes a document-scoped state node. Rejects when no graph or writable node exists. */
+    set: (node: string, value: unknown) => Promise<void>
+    /** Changes when a document data snapshot settles; adapters use it to refresh DataRef consumers. */
+    revision: number
+  }
+  bindings: {
+    has: (name: string) => boolean
+    read: (name: string) => Promise<unknown>
+    write: (name: string, value: unknown) => Promise<void>
+    revision: number
   }
   events: {
     /** Routes through the kind's behavior policy. The runtime handles emit and setVariable. */

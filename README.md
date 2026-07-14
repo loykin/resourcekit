@@ -32,7 +32,7 @@ do not need them, and applications can install only the adapters they use.
 
 | Import | Purpose |
 | --- | --- |
-| `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, resolvers, connections, and submit runtime |
+| `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, document dataflow, resolvers, connections, and submit runtime |
 | `@loykin/resourcekit/react` | `ResourceRenderer` and React render contracts |
 | `@loykin/resourcekit/adapters/designkit` | designkit kinds |
 | `@loykin/resourcekit/adapters/gridkit` | gridkit kinds |
@@ -123,6 +123,15 @@ using kinds or capabilities that the application did not expose.
 Every node uses a Kubernetes-like envelope:
 
 ```ts
+interface DataRef {
+  $data: string
+  path?: string
+}
+
+interface VariableRef {
+  $variable: string
+}
+
 interface Resource<TSpec = unknown> {
   apiVersion: string
   kind: string
@@ -132,6 +141,7 @@ interface Resource<TSpec = unknown> {
     annotations?: Record<string, string>
   }
   spec: TSpec
+  bindings?: Record<string, DataRef | VariableRef>
   slots?: Array<{
     name?: string
     items: Resource[]
@@ -141,6 +151,8 @@ interface Resource<TSpec = unknown> {
 
 - `apiVersion` and `kind` select a registered kind manifest.
 - `spec` belongs exclusively to that kind and is checked against its schema.
+- `bindings` connects kind-declared ports to document data nodes or flat
+  variables. Adapters access those values only through the runtime context.
 - `slots` belong to the parent. Omit `name` for the default slot.
 - Each parent's `SlotPolicy` controls accepted child kinds and cardinality.
 - A leaf kind has no slot policy and must not contain `slots`.
@@ -231,13 +243,15 @@ if (!result.valid) {
 ```
 
 Validation checks the common envelope, registered kinds, kind spec schemas,
-slot policies, required slots, scoped capabilities, variable references,
-resolver registration, and datasource/action allowlists. Validate every
+binding ports, slot policies, required slots, scoped capabilities, variable
+references, resolver registration, and datasource/action allowlists. For a
+`ResourceDocument`, `validateResourceDocument` additionally checks its data
+graph, references, cycles, and writable-state targets. Validate every
 AI-produced document before rendering it.
 
 Never give an AI/MCP client a schema built from the unrestricted registry.
 
-## Data bindings
+## Resolver bindings
 
 A kind that owns a `spec.data` field asks the runtime to dispatch its binding
 by the `source` discriminator.
@@ -283,7 +297,7 @@ registry.use({
 must come from a datasourcekit adapter package or the host application; it is
 not bundled in resourcekit core.
 
-## Variables and events
+## Resource bindings, variables, and events
 
 Variables are one flat page scope with `string | string[]` values. A variable
 can be transient or synchronized to a URL query parameter.
@@ -301,30 +315,119 @@ can be transient or synchronized to a URL query parameter.
 }
 ```
 
-Use `${customerId}` inside interpolated binding strings. Fields that identify
-a variable itself, such as `selectedRef` or `valueRef`, use
-`variables.customerId`.
-
-A selectable kind can update the variable through an event policy:
+Use `${customerId}` inside interpolated resolver and mutation binding strings.
+For a kind-controlled value, connect the kind's named binding port with a
+structural `VariableRef`:
 
 ```json
 {
-  "selectedRef": "variables.customerId",
-  "events": {
-    "select": {
-      "kind": "setVariable",
-      "variable": "customerId",
-      "from": "row.id"
+  "bindings": {
+    "selected": { "$variable": "customerId" }
+  }
+}
+```
+
+The kind manifest declares which ports exist and whether each port is
+writable. For example:
+
+```ts
+bindingPolicy: {
+  inputs: {
+    selected: {
+      description: 'Currently selected row ID.',
+      schema: { type: 'string' },
+    },
+  },
+}
+```
+
+A selectable kind can update the same variable through an event policy:
+
+```json
+{
+  "bindings": {
+    "selected": { "$variable": "customerId" }
+  },
+  "spec": {
+    "events": {
+      "select": {
+        "kind": "setVariable",
+        "variable": "customerId",
+        "from": "row.id"
+      }
     }
   }
 }
 ```
 
-The current React runtime applies `setVariable` policies and forwards `emit`
-policies through `ResourceRenderer`'s `onEvent` callback. `internal` behavior
-stays inside the kind. `action` is currently schema/validation vocabulary;
-use submit/mutation dispatch or an emitted host event when an action must
-execute.
+The React runtime applies `setVariable` and `setData` policies and forwards
+`emit` policies through `ResourceRenderer`'s `onEvent` callback. A writable
+port dispatches through `ctx.bindings.write`; adapters never own a parallel
+integration store. `internal` behavior stays inside the kind. `action` is
+currently schema/validation vocabulary; use submit/mutation dispatch or an
+emitted host event when an action must execute.
+
+## Document dataflow
+
+`ResourceDocument` adds one document-scoped reactive store and data graph
+around the existing root resource. `state` nodes retain values; `resolve`
+nodes dispatch registered resolver bindings. Structural `{ "$data": "..." }`
+references define consumers and dependency edges.
+
+```ts
+import {
+  buildResourceDocumentSchema,
+  validateResourceDocument,
+} from '@loykin/resourcekit'
+import type { ResourceDocument } from '@loykin/resourcekit'
+
+const document: ResourceDocument = {
+  data: {
+    nodes: {
+      selectedCluster: { kind: 'state', initialValue: 'us-east' },
+      selectedHost: { kind: 'state' },
+      metrics: {
+        kind: 'resolve',
+        binding: {
+          source: 'connection',
+          connection: 'metrics',
+          request: {
+            operation: 'metrics',
+            cluster: { $data: 'selectedCluster' },
+          },
+        },
+      },
+    },
+  },
+  resource: {
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'SelectableList',
+    bindings: {
+      selected: { $data: 'selectedHost' },
+    },
+    spec: {
+      data: { $data: 'metrics' },
+      primary: { field: 'name' },
+      events: {
+        select: { kind: 'setData', node: 'selectedHost', from: 'row.id' },
+      },
+    },
+  },
+}
+
+const schema = buildResourceDocumentSchema(scope)
+const validation = validateResourceDocument(document, scope)
+```
+
+`ResourceRenderer` accepts either a bare `Resource` or a `ResourceDocument`.
+Its default store is in memory; hosts can provide a `DataStore` through the
+`dataStore` prop to change physical persistence without changing document or
+adapter contracts. Same-microtask writes are batched, downstream resolves use
+latest-wins cancellation, and fan-in nodes observe a coherent propagation
+wave.
+
+The dataflow API is currently experimental. The v1 node vocabulary is limited
+to `state` and `resolve`; there is no general transform DSL.
 
 ## Mutations and submit
 
@@ -452,6 +555,7 @@ of sending one large recursive schema to a model:
 
 ```ts
 import {
+  buildResourceDocumentSchema,
   nextStage,
   nextStageBatch,
   singleKindSchema,
@@ -464,6 +568,7 @@ const slots = nextStageBatch(scope, {
 })
 const kindSchema = singleKindSchema(scope, apiVersion, kind)
 const validation = validateResource(resource, scope)
+const documentSchema = buildResourceDocumentSchema(scope)
 ```
 
 The orchestration loop is intentionally owned by the caller:

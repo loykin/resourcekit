@@ -17,11 +17,11 @@ import {
 import { getValueAtPath } from '../../path'
 import type { ResourceKitPlugin, SubmitSpec } from '../../types'
 import type { KindRenderFn, RenderContext } from '../../react/types'
-import { variableName, withKindAliases } from '../internal/shared'
+import { useBindingValue } from '../internal/bindings'
+import { withKindAliases } from '../internal/shared'
 
 interface ListDetailSpec {
   listWidth?: number
-  selectionVariable?: string
 }
 
 interface WorkbenchSpec {
@@ -38,10 +38,6 @@ interface WorkbenchSpec {
   leftPaneCollapsed?: boolean
   rightPaneCollapsed?: boolean
   bottomPaneCollapsed?: boolean
-  /** @deprecated Use leftPaneWidth. */
-  leftWidth?: number
-  /** @deprecated Use rightPaneWidth. */
-  rightWidth?: number
 }
 
 interface DataBodySpec {
@@ -95,7 +91,6 @@ interface DataBodyFieldSpec {
   label: string
   description?: string
   value?: string
-  valueRef?: string
   /** Dot-path into the nearest record scope (ctx.record). */
   fieldRef?: string
 }
@@ -126,7 +121,6 @@ interface InputSpec {
   placeholder?: string
   type?: string
   value?: string
-  valueRef?: string
   /** Dot-path into the nearest record scope — prefills the input. */
   fieldRef?: string
 }
@@ -163,8 +157,6 @@ interface FormViewSpec {
 }
 
 interface SheetSpec {
-  /** Truthy variable value opens the sheet; closing clears the variable. */
-  openVariable: string
   title?: string
   side?: 'left' | 'right' | 'top' | 'bottom'
   width?: number
@@ -225,6 +217,83 @@ function dataBodyChildren(ctx: RenderContext): ReactNode {
     }
     return node
   })
+}
+
+function ListDetailNode({ spec, ctx }: { spec: ListDetailSpec; ctx: RenderContext }) {
+  const selection = useBindingValue(ctx, 'selection')
+  const hasSelectionSource = ctx.bindings.has('selection')
+  const emptyDetail = ctx.slots.one('emptyDetail')
+  const clearSelection = hasSelectionSource
+    ? () => {
+        void ctx.bindings.write('selection', undefined)
+      }
+    : undefined
+
+  return (
+    <KitListDetail
+      topBar={ctx.slots.one('topBar')}
+      list={ctx.slots.requiredOne('list')}
+      detail={emptyDetail && !selection ? undefined : ctx.slots.one('detail')}
+      emptyDetail={emptyDetail}
+      listWidth={spec.listWidth}
+      onBack={clearSelection}
+    />
+  )
+}
+
+function DataBodyFieldNode({ spec, ctx }: { spec: DataBodyFieldSpec; ctx: RenderContext }) {
+  const boundValue = useBindingValue(ctx, 'value', spec.value)
+  const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+  const value = fieldValue ?? boundValue
+  return (
+    <KitDataBodyField label={spec.label} description={spec.description}>
+      {ctx.slots.children() ?? (value == null ? null : String(value))}
+    </KitDataBodyField>
+  )
+}
+
+function InputNode({ spec, ctx }: { spec: InputSpec; ctx: RenderContext }) {
+  const boundValue = useBindingValue(ctx, 'value', spec.value)
+  const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+  const raw = fieldValue ?? boundValue
+  const value = raw == null ? undefined : String(raw)
+  return (
+    <KitInput
+      key={`${spec.name ?? ''}:${value ?? ''}`}
+      aria-label={spec.name ?? spec.placeholder}
+      className="w-full min-w-[16rem]"
+      defaultValue={value}
+      name={spec.name}
+      placeholder={spec.placeholder}
+      style={{ minWidth: 256, width: '100%' }}
+      type={spec.type ?? 'text'}
+    />
+  )
+}
+
+function SheetNode({ spec, ctx }: { spec: SheetSpec; ctx: RenderContext }) {
+  const open = Boolean(useBindingValue(ctx, 'open'))
+  if (!open) return null
+  return (
+    <Sheet
+      open
+      onOpenChange={(next) => {
+        if (next) return
+        void ctx.bindings.write('open', undefined)
+      }}
+    >
+      <SheetContent
+        side={spec.side ?? 'right'}
+        style={spec.width ? { width: spec.width, maxWidth: spec.width } : undefined}
+        className="flex flex-col gap-0 p-0"
+      >
+        <SheetHeader className="border-b px-4 py-3">
+          <SheetTitle className="text-sm font-semibold">{spec.title}</SheetTitle>
+        </SheetHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">{ctx.slots.children()}</div>
+      </SheetContent>
+    </Sheet>
+  )
 }
 
 /**
@@ -454,7 +523,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           additionalProperties: true,
           properties: {
             listWidth: { type: 'number' },
-            selectionVariable: { type: 'string' },
             variables: { type: 'array' },
           },
         },
@@ -488,21 +556,18 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             },
           },
         },
+        bindingPolicy: {
+          inputs: {
+            selection: {
+              description: 'Currently selected record ID shared by the list and detail composition.',
+              schema: { type: 'string' },
+              writable: true,
+            },
+          },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as ListDetailSpec
-          const selectionVariable = spec.selectionVariable ?? (ctx.variables.get('customerId') === undefined ? undefined : 'customerId')
-          const hasSelection = selectionVariable ? Boolean(ctx.variables.get(selectionVariable)) : true
-          const emptyDetail = ctx.slots.one('emptyDetail')
-          return (
-            <KitListDetail
-              topBar={ctx.slots.one('topBar')}
-              list={ctx.slots.requiredOne('list')}
-              detail={emptyDetail && !hasSelection ? undefined : ctx.slots.one('detail')}
-              emptyDetail={emptyDetail}
-              listWidth={spec.listWidth}
-              onBack={selectionVariable ? () => ctx.variables.set(selectionVariable, undefined) : undefined}
-            />
-          )
+          return <ListDetailNode spec={spec} ctx={ctx} />
         },
       },
       {
@@ -528,8 +593,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             leftPaneCollapsed: { type: 'boolean' },
             rightPaneCollapsed: { type: 'boolean' },
             bottomPaneCollapsed: { type: 'boolean' },
-            leftWidth: { type: 'number', deprecated: true },
-            rightWidth: { type: 'number', deprecated: true },
           },
         },
         slotPolicy: {
@@ -590,8 +653,8 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
               mainPane={ctx.slots.requiredOne('mainPane')}
               rightPane={ctx.slots.one('rightPane')}
               bottomPane={ctx.slots.one('bottomPane')}
-              leftPaneWidth={spec.leftPaneWidth ?? spec.leftWidth}
-              rightPaneWidth={spec.rightPaneWidth ?? spec.rightWidth}
+              leftPaneWidth={spec.leftPaneWidth}
+              rightPaneWidth={spec.rightPaneWidth}
               bottomPaneHeight={spec.bottomPaneHeight}
               minLeftPaneWidth={spec.minLeftPaneWidth}
               maxLeftPaneWidth={spec.maxLeftPaneWidth}
@@ -852,7 +915,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitDataBodyField',
         level: ['organism'],
         description:
-          'A read-only labeled value display (label + value), for showing data rather than collecting it. Set at most one of value/valueRef/fieldRef.',
+          'A read-only labeled value display (label + value), for showing data rather than collecting it. Use bindings.value for shared runtime state, or value/fieldRef for local literals and record scope.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -861,7 +924,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             label: { type: 'string' },
             description: { type: 'string' },
             value: { type: 'string', description: 'A literal value to display.' },
-            valueRef: { type: 'string', description: 'Display the value of this page variable, e.g. "variables.status".' },
             fieldRef: { type: 'string', description: 'Display this dot-path from the nearest record scope (e.g. inside a RecordScope).' },
           },
         },
@@ -872,16 +934,14 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             description: 'Optional override content instead of the plain text value, e.g. a Badge.',
           },
         },
+        bindingPolicy: {
+          inputs: {
+            value: { description: 'Value displayed by this field.', schema: {} },
+          },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as DataBodyFieldSpec
-          const variable = variableName(spec.valueRef)
-          const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
-          const value = fieldValue ?? (variable ? ctx.variables.get(variable) : spec.value)
-          return (
-            <KitDataBodyField label={spec.label} description={spec.description}>
-              {ctx.slots.children() ?? (value == null ? null : String(value))}
-            </KitDataBodyField>
-          )
+          return <DataBodyFieldNode spec={spec} ctx={ctx} />
         },
       },
       {
@@ -983,7 +1043,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitInput',
         level: ['leaf'],
         description:
-          'A text input control. Set at most one of value/valueRef/fieldRef to prefill it. Standalone inputs update immediately — for a group of inputs submitted together, wrap them in DesignKitForm instead.',
+          'A text input control. Use bindings.value for shared runtime state, or value/fieldRef for a literal or record-scoped prefill. For a group of inputs submitted together, wrap them in DesignKitForm.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -992,28 +1052,17 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             placeholder: { type: 'string' },
             type: { type: 'string' },
             value: { type: 'string', description: 'A literal prefill value.' },
-            valueRef: { type: 'string', description: 'Prefill from this page variable, e.g. "variables.status".' },
             fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
+          },
+        },
+        bindingPolicy: {
+          inputs: {
+            value: { description: 'Current input value.', schema: {} },
           },
         },
         render: (resource, ctx) => {
           const spec = resource.spec as InputSpec
-          const variable = variableName(spec.valueRef)
-          const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
-          const raw = fieldValue ?? (variable ? ctx.variables.get(variable) : spec.value)
-          const value = raw == null ? undefined : String(raw)
-          return (
-            <KitInput
-              key={`${spec.name ?? ''}:${value ?? ''}`}
-              aria-label={spec.name ?? spec.placeholder}
-              className="w-full min-w-[16rem]"
-              defaultValue={value}
-              name={spec.name}
-              placeholder={spec.placeholder}
-              style={{ minWidth: 256, width: '100%' }}
-              type={spec.type ?? 'text'}
-            />
-          )
+          return <InputNode spec={spec} ctx={ctx} />
         },
       },
       {
@@ -1021,13 +1070,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitSheet',
         level: ['organism'],
         description:
-          'A slide-in overlay panel (drawer/modal), shown while `openVariable` is truthy and closed by clearing it. Use for secondary/transient content (e.g. a create/edit form triggered from a button) — not root-eligible, always attached to a triggering page.',
+          'A slide-in overlay panel (drawer/modal), shown while its writable `open` binding is truthy and closed by clearing that binding. Use for secondary/transient content (e.g. a create/edit form triggered from a button) — not root-eligible, always attached to a triggering page.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
-          required: ['openVariable'],
           properties: {
-            openVariable: { type: 'string', description: 'Page variable that controls open/closed state; truthy opens the sheet.' },
             title: { type: 'string' },
             side: { enum: ['left', 'right', 'top', 'bottom'] },
             width: { type: 'number' },
@@ -1036,26 +1083,14 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: { min: 0, accepts: ['ResourceForm'], description: "The sheet's content." },
         },
+        bindingPolicy: {
+          inputs: {
+            open: { description: 'Whether the sheet is open.', schema: { type: 'boolean' }, writable: true },
+          },
+        },
         render: (resource, ctx) => {
           const spec = resource.spec as SheetSpec
-          const open = Boolean(ctx.variables.get(spec.openVariable))
-          // Unmount entirely when closed — the variable is the single source
-          // of truth, so we skip the exit animation rather than track it.
-          if (!open) return null
-          return (
-            <Sheet open onOpenChange={(next) => !next && ctx.variables.set(spec.openVariable, undefined)}>
-              <SheetContent
-                side={spec.side ?? 'right'}
-                style={spec.width ? { width: spec.width, maxWidth: spec.width } : undefined}
-                className="flex flex-col gap-0 p-0"
-              >
-                <SheetHeader className="border-b px-4 py-3">
-                  <SheetTitle className="text-sm font-semibold">{spec.title}</SheetTitle>
-                </SheetHeader>
-                <div className="min-h-0 flex-1 overflow-y-auto">{ctx.slots.children()}</div>
-              </SheetContent>
-            </Sheet>
-          )
+          return <SheetNode spec={spec} ctx={ctx} />
         },
       },
       {
@@ -1088,7 +1123,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitForm',
         level: ['organism'],
         description:
-          "A native form: collects its input controls' values on submit and dispatches them through the declarative `submit` mutation. Form state stays local until submit — inputs inside it are not wired to page variables. Use when inputs should be submitted together as one action, unlike an individual InputControl bound via valueRef, which updates immediately.",
+          "A native form: collects its input controls' values on submit and dispatches them through the declarative `submit` mutation. Form state stays local until submit. Use when inputs should be submitted together as one action, unlike an individual InputControl connected through bindings.value.",
         specSchema: {
           type: 'object',
           additionalProperties: false,

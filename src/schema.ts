@@ -18,6 +18,29 @@ function definitionKey(apiVersion: string, kind: string): string {
   return `${apiVersion.replace(/[^A-Za-z0-9_]/g, '_')}__${kind.replace(/[^A-Za-z0-9_]/g, '_')}`
 }
 
+function bindingsSchema(manifest: KindManifest): JsonSchema | undefined {
+  const ports = manifest.bindingPolicy?.inputs
+  if (!ports || Object.keys(ports).length === 0) return undefined
+  const required = Object.entries(ports)
+    .filter(([, port]) => port.required)
+    .map(([name]) => name)
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: Object.fromEntries(
+      Object.entries(ports).map(([name, port]) => [
+        name,
+        { $ref: '#/$defs/valueBinding', description: port.description },
+      ]),
+    ),
+    ...(required.length > 0 ? { required } : {}),
+  }
+}
+
+function hasRequiredBindings(manifest: KindManifest): boolean {
+  return Object.values(manifest.bindingPolicy?.inputs ?? {}).some((port) => port.required)
+}
+
 function dataBindingSchemas(sources: string[]): JsonSchema[] {
   return sources.map((source) => {
     if (source === 'static') {
@@ -120,6 +143,16 @@ const eventPolicySchema: JsonSchema = {
         from: { type: 'string', description: 'Dot-path into the event payload, e.g. "row.id" for a row-select event.' },
       },
     },
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['kind', 'node'],
+      properties: {
+        kind: { const: 'setData' },
+        node: { type: 'string', description: 'Writable state node in the enclosing ResourceDocument data graph.' },
+        from: { type: 'string', description: 'Dot-path into the event payload. Omit to publish the complete payload.' },
+      },
+    },
   ],
 }
 
@@ -182,6 +215,22 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
 function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry): WellKnownRefOptions {
   defs.eventPolicy = eventPolicySchema
   defs.variableDeclaration = variableDeclarationSchema
+  defs.dataRef = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['$data'],
+    properties: {
+      $data: { type: 'string' },
+      path: { type: 'string' },
+    },
+  }
+  defs.variableRef = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['$variable'],
+    properties: { $variable: { type: 'string' } },
+  }
+  defs.valueBinding = { oneOf: [{ $ref: '#/$defs/dataRef' }, { $ref: '#/$defs/variableRef' }] }
 
   const dataSchemas = dataBindingSchemas(scoped.listDataResolvers())
   const hasDataBindingSchema = dataSchemas.length > 0
@@ -213,15 +262,17 @@ function resolveCandidates(manifests: KindManifest[], accepts?: string[], accept
 
 /** Envelope + spec schema for one kind, deliberately without `slots` — used by `nextStage` where children are resolved by a later call. */
 function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOptions, defs: Record<string, unknown>): JsonSchema {
+  const bindings = bindingsSchema(manifest)
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['apiVersion', 'kind', 'spec'],
+    required: ['apiVersion', 'kind', 'spec', ...(hasRequiredBindings(manifest) ? ['bindings'] : [])],
     properties: {
       apiVersion: { const: manifest.apiVersion },
       kind: { const: manifest.kind },
       metadata: metadataSchema,
       spec: embedSpecSchema(manifest, refOptions, defs),
+      ...(bindings ? { bindings } : {}),
     },
     ...(manifest.description ? { description: manifest.description } : {}),
   }
@@ -359,7 +410,10 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
       metadata: metadataSchema,
       spec: embedSpecSchema(manifest, refOptions, definitions),
     }
+    const bindings = bindingsSchema(manifest)
+    if (bindings) properties.bindings = bindings
     const required = ['apiVersion', 'kind', 'spec']
+    if (hasRequiredBindings(manifest)) required.push('bindings')
 
     if (manifest.slotPolicy) {
       const slotBranches: JsonSchema[] = []
@@ -403,6 +457,78 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $ref: '#/$defs/resource',
     $defs: definitions,
+  }
+}
+
+/**
+ * Experimental AI-facing schema for a root resource plus document-scoped
+ * state/resolve nodes. The existing document definitions are reused so kind,
+ * slot and scope constraints cannot drift from `buildDocumentSchema`.
+ */
+export function buildResourceDocumentSchema(scoped: ScopedRegistry): JsonSchema {
+  const resourceSchema = buildDocumentSchema(scoped)
+  const defs = structuredClone((resourceSchema.$defs ?? {}) as Record<string, unknown>)
+  const executableDataBinding = defs.dataBinding
+
+  defs.dataRef = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['$data'],
+    properties: {
+      $data: { type: 'string', description: 'ID of a node in this document data graph.' },
+      path: { type: 'string', description: 'Optional dot-path into the referenced node value.' },
+    },
+  }
+
+  if (executableDataBinding) {
+    defs.executableDataBinding = executableDataBinding
+    defs.dataBinding = { oneOf: [{ $ref: '#/$defs/executableDataBinding' }, { $ref: '#/$defs/dataRef' }] }
+  }
+
+  defs.stateDataNode = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['kind'],
+    properties: {
+      kind: { const: 'state' },
+      initialValue: {},
+      lifecycle: { enum: ['ephemeral', 'page', 'session', 'persistent'] },
+    },
+  }
+  defs.resolveDataNode = executableDataBinding
+    ? {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'binding'],
+        properties: {
+          kind: { const: 'resolve' },
+          binding: { $ref: '#/$defs/executableDataBinding' },
+        },
+      }
+    : false
+  defs.dataGraph = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['nodes'],
+    properties: {
+      nodes: {
+        type: 'object',
+        propertyNames: { pattern: '^[A-Za-z_][A-Za-z0-9_/-]*$' },
+        additionalProperties: { oneOf: [{ $ref: '#/$defs/stateDataNode' }, { $ref: '#/$defs/resolveDataNode' }] },
+      },
+    },
+  }
+
+  return {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object',
+    additionalProperties: false,
+    required: ['resource'],
+    properties: {
+      data: { $ref: '#/$defs/dataGraph' },
+      resource: { $ref: '#/$defs/resource' },
+    },
+    $defs: defs,
   }
 }
 

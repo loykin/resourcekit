@@ -1,5 +1,7 @@
 import Ajv from 'ajv'
 import type { ErrorObject } from 'ajv'
+import { isDataRef, scanDataRefs, validateDataGraph } from './dataflow'
+import type { ResourceDocument } from './dataflow'
 import { scanVariableRefs } from './variables'
 import type { Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
 import type { ResourceRegistry, ScopedRegistry } from './registry'
@@ -36,8 +38,36 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   if (typeof resource.kind !== 'string') addIssue(issues, `${path}/kind`, 'kind must be a string')
   if (!('spec' in resource)) addIssue(issues, `${path}/spec`, 'spec is required')
   if ('metadata' in resource && !isRecord(resource.metadata)) addIssue(issues, `${path}/metadata`, 'metadata must be an object')
+  if ('bindings' in resource && !isRecord(resource.bindings)) addIssue(issues, `${path}/bindings`, 'bindings must be an object')
   if ('slots' in resource && !Array.isArray(resource.slots)) addIssue(issues, `${path}/slots`, 'slots must be an array')
   return typeof resource.apiVersion === 'string' && typeof resource.kind === 'string' && 'spec' in resource
+}
+
+function validateBindings(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
+  const manifest = registry.getKind(resource.apiVersion, resource.kind)
+  if (!manifest) return
+  const bindings = resource.bindings ?? {}
+  const ports = manifest.bindingPolicy?.inputs ?? {}
+  const variableAllow = scopedOptions(registry)?.variables?.allow
+
+  for (const [name, value] of Object.entries(bindings)) {
+    if (!(name in ports)) {
+      addIssue(issues, `${path}/bindings/${name}`, `binding ${name} is not declared by kind ${resource.kind}`)
+      continue
+    }
+    if (isDataRef(value)) continue
+    if (isRecord(value) && typeof value.$variable === 'string' && Object.keys(value).length === 1) {
+      if (variableAllow && !variableAllow.includes(value.$variable)) {
+        addIssue(issues, `${path}/bindings/${name}/$variable`, `variable ${value.$variable} is not allowed in this scope`)
+      }
+      continue
+    }
+    addIssue(issues, `${path}/bindings/${name}`, 'binding must be a data or variable reference')
+  }
+
+  for (const [name, port] of Object.entries(ports)) {
+    if (port.required && !(name in bindings)) addIssue(issues, `${path}/bindings/${name}`, `binding ${name} is required`)
+  }
 }
 
 function validateSpec(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
@@ -225,6 +255,7 @@ export function validateResource(
         addIssue(issues, `${path}/kind`, `kind ${current.kind} is not an allowed root level`)
       }
       validateSpec(current, registry, path, issues)
+      validateBindings(current, registry, path, issues)
       validateSlots(current, registry, path, issues)
       validateDatasourceAndActions(current, registry, path, issues)
     }
@@ -235,5 +266,74 @@ export function validateResource(
   }
 
   visit(resource, '', 0)
+  return { valid: issues.length === 0, issues }
+}
+
+/** Layered validation for the experimental ResourceDocument data graph plus its root resource. */
+export function validateResourceDocument(
+  document: ResourceDocument,
+  registry: ResourceRegistry | ScopedRegistry,
+): ValidationResult {
+  const resourceValidation = validateResource(document.resource, registry)
+  const issues = [...resourceValidation.issues]
+  const graph = document.data
+  if (!graph) return { valid: issues.length === 0, issues }
+
+  for (const issue of validateDataGraph(graph).issues) {
+    addIssue(issues, `/${issue.path.split('.').join('/')}`, issue.message)
+  }
+
+  const options = scopedOptions(registry)
+  for (const [id, node] of Object.entries(graph.nodes)) {
+    if (node.kind !== 'resolve') continue
+    if (!registry.getDataResolver(node.binding.source)) {
+      addIssue(issues, `/data/nodes/${id}/binding/source`, `data resolver ${node.binding.source} is not registered`)
+    }
+    if (
+      node.binding.source === 'datasource' &&
+      options?.datasources?.allow &&
+      'datasourceUid' in node.binding &&
+      typeof node.binding.datasourceUid === 'string' &&
+      !options.datasources.allow.includes(node.binding.datasourceUid)
+    ) {
+      addIssue(issues, `/data/nodes/${id}/binding/datasourceUid`, `datasource ${node.binding.datasourceUid} is not allowed in this scope`)
+    }
+    if (
+      node.binding.source === 'connection' &&
+      options?.connections?.allow &&
+      'connection' in node.binding &&
+      typeof node.binding.connection === 'string' &&
+      !options.connections.allow.includes(node.binding.connection)
+    ) {
+      addIssue(issues, `/data/nodes/${id}/binding/connection`, `connection ${node.binding.connection} is not allowed in this scope`)
+    }
+  }
+
+  for (const ref of scanDataRefs(document.resource)) {
+    if (!(ref.$data in graph.nodes)) addIssue(issues, '/resource', `referenced data node ${ref.$data} does not exist`)
+  }
+
+  const visitPolicies = (value: unknown, path: string) => {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visitPolicies(item, `${path}/${index}`))
+      return
+    }
+    if (!isRecord(value)) return
+    if (typeof value.apiVersion === 'string' && typeof value.kind === 'string' && isRecord(value.bindings)) {
+      const manifest = registry.getKind(value.apiVersion, value.kind)
+      for (const [name, binding] of Object.entries(value.bindings)) {
+        if (!manifest?.bindingPolicy?.inputs[name]?.writable || !isDataRef(binding)) continue
+        if (graph.nodes[binding.$data]?.kind !== 'state') {
+          addIssue(issues, `${path}/bindings/${name}`, `writable binding ${name} must reference a state node`)
+        }
+      }
+    }
+    if (value.kind === 'setData' && typeof value.node === 'string' && graph.nodes[value.node]?.kind !== 'state') {
+      addIssue(issues, `${path}/node`, `data node ${value.node} is not writable state`)
+    }
+    Object.entries(value).forEach(([key, item]) => visitPolicies(item, `${path}/${key}`))
+  }
+  visitPolicies(document.resource, '/resource')
+
   return { valid: issues.length === 0, issues }
 }
