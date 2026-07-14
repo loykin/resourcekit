@@ -1,6 +1,7 @@
 import type {
   JsonSchema,
   ConnectionAdapter,
+  ConnectionProvider,
   ConnectionSummary,
   DataResolver,
   KindManifest,
@@ -29,8 +30,10 @@ export interface ResourceRegistry<TRender = unknown> {
   /** Registers/updates one connection instance in place — no snapshot rebuild needed for hosts managing connections dynamically (test.md §5.2). */
   registerConnection(connection: RegisteredConnection): void
   unregisterConnection(uid: string): void
-  getConnection(uid: string): RegisteredConnection | undefined
-  listConnections(): RegisteredConnection[]
+  /** Registers a dynamic connection source (test.md §12) — consulted after the static map on lookup/list. Pass `undefined` to clear. */
+  setConnectionProvider(provider: ConnectionProvider | undefined): void
+  getConnection(uid: string): Promise<RegisteredConnection | undefined>
+  listConnections(): Promise<RegisteredConnection[]>
   /** Derive a restricted registry view for schema generation / MCP exposure. */
   scope(options: ScopeOptions): ScopedRegistry<TRender>
   /** Subscribe to registration changes (drives re-render of fallback nodes). */
@@ -38,10 +41,13 @@ export interface ResourceRegistry<TRender = unknown> {
 }
 
 export interface ScopedRegistry<TRender = unknown>
-  extends Omit<ResourceRegistry<TRender>, 'use' | 'scope' | 'registerConnection' | 'unregisterConnection' | 'listConnections'> {
+  extends Omit<
+    ResourceRegistry<TRender>,
+    'use' | 'scope' | 'registerConnection' | 'unregisterConnection' | 'setConnectionProvider' | 'listConnections'
+  > {
   readonly options: ScopeOptions
   /** MCP-facing connection view — `config` (base URL, DSN, credentials) stripped, capabilities intersected from adapter ∩ connection.mcpPolicy ∩ scope (test.md §5.3, §6). */
-  listConnections(): ConnectionSummary[]
+  listConnections(): Promise<ConnectionSummary[]>
 }
 
 function kindKey(apiVersion: string, kind: string): string {
@@ -161,9 +167,26 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
   const mutationResolvers = new Map<string, MutationResolver>()
   const connectionAdapters = new Map<string, ConnectionAdapter>()
   const connections = new Map<string, RegisteredConnection>()
+  let connectionProvider: ConnectionProvider | undefined
   const listeners = new Set<() => void>()
 
   const notify = () => listeners.forEach((l) => l())
+
+  async function resolveConnection(uid: string): Promise<RegisteredConnection | undefined> {
+    return connections.get(uid) ?? (await connectionProvider?.getConnection(uid))
+  }
+
+  async function resolveAllConnections(): Promise<RegisteredConnection[]> {
+    const merged = new Map<string, RegisteredConnection>()
+    for (const connection of (await connectionProvider?.listConnections()) ?? []) {
+      merged.set(connection.uid, connection)
+    }
+    // Static registrations win on uid collision with the provider.
+    for (const connection of connections.values()) {
+      merged.set(connection.uid, connection)
+    }
+    return [...merged.values()]
+  }
 
   return {
     use(plugin) {
@@ -197,8 +220,12 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
       connections.delete(uid)
       notify()
     },
-    getConnection: (uid) => connections.get(uid),
-    listConnections: () => [...connections.values()],
+    setConnectionProvider(provider) {
+      connectionProvider = provider
+      notify()
+    },
+    getConnection: resolveConnection,
+    listConnections: resolveAllConnections,
     scope(options): ScopedRegistry<TRender> {
       const scoped: ScopedRegistry<TRender> = {
         options,
@@ -230,13 +257,13 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
         listConnectionAdapters() {
           return [...connectionAdapters.values()]
         },
-        getConnection(uid) {
-          const connection = connections.get(uid)
-          if (!connection || !connectionAllowed(uid, options)) return undefined
-          return connection
+        async getConnection(uid) {
+          if (!connectionAllowed(uid, options)) return undefined
+          return resolveConnection(uid)
         },
-        listConnections() {
-          return [...connections.values()]
+        async listConnections() {
+          const all = await resolveAllConnections()
+          return all
             .filter((connection) => connectionAllowed(connection.uid, options))
             .map((connection) => toConnectionSummary(connection, connectionAdapters.get(connection.type), options))
             .filter((summary): summary is ConnectionSummary => summary !== undefined)

@@ -55,12 +55,12 @@ export const restResolver: DataResolver = async (binding, ctx) => {
  * a separate contract, not a DataResolver replacement).
  */
 export function createConnectionDataResolver(registry: {
-  getConnection(uid: string): RegisteredConnection | undefined
+  getConnection(uid: string): Promise<RegisteredConnection | undefined>
   getConnectionAdapter(type: string): ConnectionAdapter | undefined
 }): DataResolver {
   return async (binding, ctx) => {
     const b = binding as ConnectionBinding
-    const connection = registry.getConnection(b.connection)
+    const connection = await registry.getConnection(b.connection)
     if (!connection) throw new Error(`Connection resolver: connection ${b.connection} is not registered`)
     const adapter = registry.getConnectionAdapter(connection.type)
     if (!adapter) throw new Error(`Connection resolver: no adapter registered for connection type ${connection.type}`)

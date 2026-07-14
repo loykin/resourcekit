@@ -38,6 +38,7 @@ do not need them, and applications can install only the adapters they use.
 | `@loykin/resourcekit/adapters/gridkit` | gridkit kinds |
 | `@loykin/resourcekit/adapters/chartkit` | chartkit kinds |
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
+| `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionAdapter` bridging registered connections to `@loykin/datasourcekit` |
 | `@loykin/resourcekit/adapters` | All first-party adapters plus resource views; use when all required kit peers are installed |
 
 ## Quick start
@@ -404,6 +405,45 @@ Documents use only the UID and adapter-specific request:
 `ScopedRegistry.listConnections()` returns redacted `ConnectionSummary`
 objects: metadata, request schema, and effective capabilities. It never returns
 the connection's private `config`.
+
+`registry.registerConnection(...)` covers connections known at boot time. A
+host that keeps its own connections in a database can additionally register a
+`ConnectionProvider` — the registry checks its static map first, then falls
+back to the provider on lookup:
+
+```ts
+registry.setConnectionProvider({
+  async getConnection(uid) {
+    return loadConnectionFromDatabase(uid)
+  },
+  async listConnections() {
+    return listConnectionsFromDatabase()
+  },
+})
+```
+
+`@loykin/resourcekit/adapters/datasourcekit` ships a second connection
+adapter type, bridging a registered connection to a
+[`@loykin/datasourcekit`](https://www.npmjs.com/package/@loykin/datasourcekit)
+`DatasourceManager` instance (`test` → `healthCheck`, `inspect` →
+`listNamespaces`/`listFields`, `validate` → `validateQuery`, `preview`/
+`resolve` → `query`):
+
+```ts
+import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapters/datasourcekit'
+
+registry.use({
+  name: 'datasourcekit-connections',
+  connectionAdapters: { datasourcekit: createDatasourceKitConnectionAdapter(manager) },
+})
+
+registry.registerConnection({
+  uid: 'metrics-main',
+  type: 'datasourcekit',
+  name: 'Metrics',
+  config: { datasourceUid: 'metrics-main', datasourceType: 'postgres' },
+})
+```
 
 ## AI/MCP staged generation
 

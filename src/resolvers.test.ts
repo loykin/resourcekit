@@ -51,7 +51,7 @@ describe('createConnectionDataResolver', () => {
     const resolve = vi.fn().mockResolvedValue([{ id: '1' }])
     const adapter: ConnectionAdapter = { type: 'rest', requestSchema: { type: 'object' }, resolve }
     const registry = {
-      getConnection: (uid: string) => (uid === 'crm-api' ? connection : undefined),
+      getConnection: async (uid: string) => (uid === 'crm-api' ? connection : undefined),
       getConnectionAdapter: (type: string) => (type === 'rest' ? adapter : undefined),
     }
 
@@ -62,7 +62,7 @@ describe('createConnectionDataResolver', () => {
   })
 
   it('throws when the connection or its adapter is not registered', async () => {
-    const registry = { getConnection: () => undefined, getConnectionAdapter: () => undefined }
+    const registry = { getConnection: async () => undefined, getConnectionAdapter: () => undefined }
     const resolver = createConnectionDataResolver(registry)
     await expect(resolver({ source: 'connection', connection: 'missing', request: {} }, { variables: {} })).rejects.toThrow(/not registered/)
   })

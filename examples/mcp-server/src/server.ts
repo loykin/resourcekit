@@ -24,15 +24,19 @@ import {
   validateResource,
 } from '@loykin/resourcekit'
 import { createFirstPartyResourceAdapters, publicKindNames } from '@loykin/resourcekit/adapters'
+import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapters/datasourcekit'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as z from 'zod/v4'
+import { createConnectionStore } from './connection-store.js'
 import { DEMO_API_TOKEN, startDemoApi } from './demo-api.js'
 import { startDemoDb } from './demo-db.js'
+import { DATASOURCE_TYPE, DATASOURCE_UID, startDemoDatasourceKit } from './demo-datasourcekit.js'
 import { sqliteConnectionAdapter } from './sqlite-connection-adapter.js'
 
 const demoApi = await startDemoApi()
 const demoDb = startDemoDb()
+const demoDatasourceKit = startDemoDatasourceKit()
 
 const restMutationResolver: MutationResolver = async (binding, payload) => {
   const b = binding as Extract<MutationBinding, { target: 'rest' }>
@@ -50,7 +54,7 @@ registry.use({
   name: 'mcp-server-example-resolvers',
   dataResolvers: { static: staticResolver, rest: restResolver, connection: createConnectionDataResolver(registry) },
   mutationResolvers: { rest: restMutationResolver },
-  connectionAdapters: { rest: restConnectionAdapter, sqlite: sqliteConnectionAdapter },
+  connectionAdapters: { rest: restConnectionAdapter, sqlite: sqliteConnectionAdapter, datasourcekit: createDatasourceKitConnectionAdapter(demoDatasourceKit) },
 })
 registry.use(createFirstPartyResourceAdapters())
 
@@ -103,13 +107,45 @@ registry.registerConnection({
   mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 10 },
 })
 
+// A third adapter type, backed by the real published `@loykin/datasourcekit`
+// (test.md §8.2, §11 step 9) instead of a hand-written ConnectionAdapter —
+// `demo-datasourcekit.ts` implements the `DatasourceManagerBackend` contract
+// DatasourceKit expects any real backend to expose. inspect_connection here
+// lists namespaces (no path) or a namespace's fields (path: "metrics");
+// preview/resolve go through DatasourceManager.instances.query.
+registry.registerConnection({
+  uid: 'demo-metrics',
+  type: 'datasourcekit',
+  name: 'Demo Metrics (DatasourceKit)',
+  description: 'In-memory demo metrics via a DatasourceKit-backed connection — fields host, region, cpuPercent, memoryPercent, request shape { metric: "cpuPercent" | "memoryPercent", region? }.',
+  config: { datasourceUid: DATASOURCE_UID, datasourceType: DATASOURCE_TYPE },
+  mcpPolicy: { test: true, inspect: true, preview: true, mutate: false, maxRows: 20 },
+})
+
+// A connection sourced from a ConnectionProvider instead of
+// registerConnection — stands in for a host that keeps its own connections
+// in a database and looks them up dynamically rather than baking them into
+// server boot code (test.md §12). Same backend as demo-users; what differs
+// is only how the registry finds it.
+const connectionStore = createConnectionStore()
+registry.setConnectionProvider(connectionStore.provider)
+connectionStore.add({
+  uid: 'demo-users-dynamic',
+  type: 'rest',
+  name: 'Demo Users API (provider-backed)',
+  description: 'Same backend as demo-users, but sourced from a ConnectionProvider — proves connections can be discovered dynamically instead of only registered at server boot.',
+  config: { baseUrl: demoApi.baseUrl },
+  policy: { methods: ['GET'], pathPrefixes: ['/users'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
+})
+
 const scope = registry.scope({
   apiVersions: ['resourcekit.dev/v1alpha1'],
   kinds: { include: publicKindNames(registry) },
   rootLevels: ['template'],
   maxDepth: 8,
   connections: {
-    allow: ['demo-users', 'demo-orders', 'secure-reports', 'github'],
+    allow: ['demo-users', 'demo-users-dynamic', 'demo-orders', 'demo-metrics', 'secure-reports', 'github'],
     capabilities: { test: true, inspect: true, preview: true, mutate: false },
   },
 })
@@ -138,11 +174,12 @@ Variable interpolation: a page variable declared in some ancestor's spec.variabl
 
 Data source constraint: a "static" data binding is fixed, inline rows baked into the document — it cannot be filtered by a variable, because there's no filtering step at all, it just returns those exact rows every time. If you're building a selection-driven detail view (e.g. DetailView whose content should follow whichever row is selected in a sibling list), its data binding needs a source that can actually be parameterized per-request.
 
-Connections (test.md §5-7): rather than hardcoding a URL/DSN into a data binding, call list_connections to see what's registered. This example registers two, on two different adapter types — proving the contract isn't REST-specific:
+Connections (test.md §5-7): rather than hardcoding a URL/DSN into a data binding, call list_connections to see what's registered. This example registers connections on three different adapter types — proving the contract isn't REST-specific:
   "demo-users" (type "rest")   -> GET /users, GET /users/:id, PATCH /users/:id. Each user has: id, name, email, role.
   "demo-orders" (type "sqlite") -> table "orders" (id, customer, amount, status), via a request shape { table, where?, limit? }. inspect_connection on this one lists tables (no path) or a table's columns (path: "orders").
-Before binding to either, call test_connection to confirm it's reachable, validate_connection_request to check a candidate request against its policy, and preview_connection to see a capped, real sample of what it returns — never the full result set. Once you're confident, use it in a resource document as a data binding, e.g.: { "source": "connection", "connection": "demo-orders", "request": { "table": "orders", "where": { "status": "paid" } } } — never embed the connection's real base URL/DSN, which MCP never sees.
-Use "demo-users" for a SelectableList/DetailView (id can be a \${variable}) or a FormView's submit.mutation (target: "rest"); use "demo-orders" for a TableView/ChartView needing simple table+filter data.`,
+  "demo-metrics" (type "datasourcekit", backed by the real @loykin/datasourcekit package) -> fields host, region, cpuPercent, memoryPercent, via a request shape { metric: "cpuPercent" | "memoryPercent", region? }. inspect_connection lists namespaces (no path) or a namespace's fields (path: "metrics").
+Before binding to any of them, call test_connection to confirm it's reachable, validate_connection_request to check a candidate request against its policy, and preview_connection to see a capped, real sample of what it returns — never the full result set. Once you're confident, use it in a resource document as a data binding, e.g.: { "source": "connection", "connection": "demo-orders", "request": { "table": "orders", "where": { "status": "paid" } } } — never embed the connection's real base URL/DSN, which MCP never sees.
+Use "demo-users" for a SelectableList/DetailView (id can be a \${variable}) or a FormView's submit.mutation (target: "rest"); use "demo-orders" or "demo-metrics" for a TableView/ChartView needing simple table+filter data.`,
   },
 )
 
@@ -194,13 +231,13 @@ server.registerTool(
   },
 )
 
-function connectionSummary(uid: string) {
-  return scope.listConnections().find((connection) => connection.uid === uid)
+async function connectionSummary(uid: string) {
+  return (await scope.listConnections()).find((connection) => connection.uid === uid)
 }
 
 /** Resolves the render-time connection + adapter for a uid this scope has already allowed (i.e. `connectionSummary(uid)` returned something). */
-function connectionAndAdapter(uid: string) {
-  const connection = scope.getConnection(uid)
+async function connectionAndAdapter(uid: string) {
+  const connection = await scope.getConnection(uid)
   const adapter = connection ? scope.getConnectionAdapter(connection.type) : undefined
   return connection && adapter ? { connection, adapter } : undefined
 }
@@ -213,7 +250,7 @@ server.registerTool(
       'Lists registered connections this MCP scope can see — uid, type, name/description, request schema, and which of test/inspect/preview/mutate are actually usable here. Never includes base URLs, DSNs, or credentials (test.md §5.3) — those stay server-side. Use a uid from here with test_connection/validate_connection_request/preview_connection before binding to it in a document.',
     inputSchema: {},
   },
-  async () => ({ content: [{ type: 'text', text: JSON.stringify(scope.listConnections(), null, 2) }] }),
+  async () => ({ content: [{ type: 'text', text: JSON.stringify(await scope.listConnections(), null, 2) }] }),
 )
 
 server.registerTool(
@@ -224,7 +261,7 @@ server.registerTool(
     inputSchema: { uid: z.string().describe('Connection uid, e.g. "demo-users".') },
   },
   async ({ uid }) => {
-    const summary = connectionSummary(uid)
+    const summary = await connectionSummary(uid)
     return { content: [{ type: 'text', text: summary ? JSON.stringify(summary, null, 2) : `Unknown or not-exposed connection: ${uid}` }] }
   },
 )
@@ -237,9 +274,9 @@ server.registerTool(
     inputSchema: { uid: z.string() },
   },
   async ({ uid }) => {
-    const summary = connectionSummary(uid)
+    const summary = await connectionSummary(uid)
     if (!summary?.capabilities.test) return { content: [{ type: 'text', text: `Connection ${uid} does not expose test in this scope.` }] }
-    const resolved = connectionAndAdapter(uid)
+    const resolved = await connectionAndAdapter(uid)
     const result = await resolved?.adapter.test?.(resolved.connection, {})
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
   },
@@ -253,9 +290,9 @@ server.registerTool(
     inputSchema: { uid: z.string(), path: z.string().optional().describe('Adapter-specific sub-path to inspect, e.g. a table/namespace name.') },
   },
   async ({ uid, path }) => {
-    const summary = connectionSummary(uid)
+    const summary = await connectionSummary(uid)
     if (!summary?.capabilities.inspect) return { content: [{ type: 'text', text: `Connection ${uid} does not expose inspect in this scope.` }] }
-    const resolved = connectionAndAdapter(uid)
+    const resolved = await connectionAndAdapter(uid)
     const result = await resolved?.adapter.inspect?.(resolved.connection, { path }, {})
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
   },
@@ -269,7 +306,7 @@ server.registerTool(
     inputSchema: { uid: z.string(), request: z.unknown().describe("Adapter-specific request, e.g. REST's { method?, path, query?, body?, rowsPath? }.") },
   },
   async ({ uid, request }) => {
-    const resolved = connectionAndAdapter(uid)
+    const resolved = await connectionAndAdapter(uid)
     if (!resolved) return { content: [{ type: 'text', text: `Unknown or not-exposed connection: ${uid}` }] }
     const result = await resolved.adapter.validate?.(resolved.connection, request, {})
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
@@ -285,9 +322,9 @@ server.registerTool(
     inputSchema: { uid: z.string(), request: z.unknown() },
   },
   async ({ uid, request }) => {
-    const summary = connectionSummary(uid)
+    const summary = await connectionSummary(uid)
     if (!summary?.capabilities.preview) return { content: [{ type: 'text', text: `Connection ${uid} does not expose preview in this scope.` }] }
-    const resolved = connectionAndAdapter(uid)
+    const resolved = await connectionAndAdapter(uid)
     try {
       const result = await resolved?.adapter.preview?.(resolved.connection, request, {})
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }

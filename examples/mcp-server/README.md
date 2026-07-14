@@ -35,12 +35,29 @@ resource documents reference it by uid, never the URL (`{"source":
 A second connection, `demo-orders` (uid, type `sqlite`), runs against an
 in-memory `node:sqlite` database (`src/demo-db.ts`, no extra dependency) via
 a hand-written `sqliteConnectionAdapter` (`src/sqlite-connection-adapter.ts`)
-— resourcekit ships no SQL/DB adapter itself (that's DatasourceKit's job,
-not added to this repo yet, see test.md §11 step 9), so this is a worked
-example of writing your own `ConnectionAdapter` for whatever backend you
-actually have. Table/column names go through an allowlist + identifier
-regex (they can't be parameterized in SQL); only `where` values are bound
-query parameters.
+— this is a worked example of writing your own `ConnectionAdapter` for
+whatever backend you actually have. Table/column names go through an
+allowlist + identifier regex (they can't be parameterized in SQL); only
+`where` values are bound query parameters.
+
+A third connection, `demo-metrics` (uid, type `datasourcekit`), goes through
+`@loykin/resourcekit/adapters/datasourcekit`'s `createDatasourceKitConnectionAdapter`
+against the real published `@loykin/datasourcekit` package (test.md §8.2,
+§11 step 9) — `src/demo-datasourcekit.ts` implements the
+`DatasourceManagerBackend` contract DatasourceKit expects any real backend
+to expose (types/instances/query/healthCheck/validateQuery/listNamespaces/listFields),
+backing a small in-memory host-metrics dataset. Unlike the REST and SQLite
+adapters, this one ships from resourcekit itself (not hand-written here) —
+`@loykin/datasourcekit` is an optional peer dependency, isolated to its own
+`./adapters/datasourcekit` subpath so core stays dependency-free.
+
+`demo-users-dynamic` (`src/connection-store.ts`) is the same backend as
+`demo-users` again, but registered through `registry.setConnectionProvider`
+instead of `registerConnection` — it stands in for a host that keeps its own
+connections in a database and looks them up on demand rather than baking
+them into server boot code (test.md §12). `list_connections`/`get_connection`
+don't distinguish the two sources; the registry checks its static map first
+and falls back to the provider.
 
 ## Tools
 

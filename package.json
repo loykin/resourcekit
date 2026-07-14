@@ -41,6 +41,11 @@
       "types": "./dist/adapters/basekit.d.ts",
       "import": "./dist/adapters/basekit.js",
       "require": "./dist/adapters/basekit.cjs"
+    },
+    "./adapters/datasourcekit": {
+      "types": "./dist/adapters/datasourcekit.d.ts",
+      "import": "./dist/adapters/datasourcekit.js",
+      "require": "./dist/adapters/datasourcekit.cjs"
     }
   },
   "files": [
@@ -60,6 +65,7 @@
   },
   "peerDependencies": {
     "@loykin/chartkit": "*",
+    "@loykin/datasourcekit": "*",
     "@loykin/designkit": "*",
     "@loykin/filter-input": "*",
     "@loykin/gridkit": "*",
@@ -68,6 +74,9 @@
   },
   "peerDependenciesMeta": {
     "@loykin/chartkit": {
+      "optional": true
+    },
+    "@loykin/datasourcekit": {
       "optional": true
     },
     "@loykin/designkit": {
@@ -89,6 +98,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@loykin/chartkit": "0.0.1-dev.0",
+    "@loykin/datasourcekit": "^0.0.3",
     "@loykin/designkit": "0.0.1-dev.6",
     "@loykin/filter-input": "0.0.1-dev.0",
     "@loykin/gridkit": "^0.2.0",

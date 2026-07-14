@@ -277,6 +277,17 @@ export interface ConnectionContext {
   signal?: AbortSignal
 }
 
+/**
+ * Optional dynamic source of registered connections (test.md §12) — for hosts
+ * that store connections in a database/API instead of pushing them into the
+ * registry's static map via `registerConnection`. The registry checks its
+ * static map first, then falls back to this provider.
+ */
+export interface ConnectionProvider {
+  getConnection(uid: string): Promise<RegisteredConnection | undefined>
+  listConnections(): Promise<RegisteredConnection[]>
+}
+
 export interface ConnectionTestResult {
   ok: boolean
   message?: string

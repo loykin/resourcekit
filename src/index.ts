@@ -34,6 +34,7 @@ export type {
   ConnectionPolicy,
   ConnectionMcpPolicy,
   RegisteredConnection,
+  ConnectionProvider,
   ConnectionContext,
   ConnectionTestResult,
   ConnectionInspectRequest,

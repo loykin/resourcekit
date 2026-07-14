@@ -24,6 +24,9 @@ importers:
       '@loykin/chartkit':
         specifier: 0.0.1-dev.0
         version: 0.0.1-dev.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(uplot@1.6.32)
+      '@loykin/datasourcekit':
+        specifier: ^0.0.3
+        version: 0.0.3
       '@loykin/designkit':
         specifier: 0.0.1-dev.6
         version: 0.0.1-dev.6(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
@@ -78,6 +81,9 @@ importers:
       '@loykin/chartkit':
         specifier: 0.0.1-dev.0
         version: 0.0.1-dev.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(uplot@1.6.32)
+      '@loykin/datasourcekit':
+        specifier: ^0.0.3
+        version: 0.0.3
       '@loykin/designkit':
         specifier: 0.0.1-dev.6
         version: 0.0.1-dev.6(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
@@ -768,6 +774,9 @@ packages:
       react: ^19.0.0
       react-dom: ^19.0.0
       uplot: ^1.6.0
+
+  '@loykin/datasourcekit@0.0.3':
+    resolution: {integrity: sha512-t/b3fn/xfT0kI1kWgs1eYi7GjAvo3Q9ts9QX5yoNnGDsUaqD5Be7ojes+wx//IKUpoYxxWDfxpvBw1qO2Zoguw==}
 
   '@loykin/designkit@0.0.1-dev.6':
     resolution: {integrity: sha512-ijWIaOOYjlu1hR/7Uq6bTUz+2znkwwqigs8e4jDY+W3RzzGJM+KRkAiJ4v8LAPfHjbL59jPyVtQ+Tt0P1mm9EQ==}
@@ -3086,6 +3095,8 @@ snapshots:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
       uplot: 1.6.32
+
+  '@loykin/datasourcekit@0.0.3': {}
 
   '@loykin/designkit@0.0.1-dev.6(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))':
     dependencies:

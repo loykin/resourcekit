@@ -10,6 +10,7 @@
   "dependencies": {
     "@loykin/resourcekit": "workspace:*",
     "@loykin/chartkit": "0.0.1-dev.0",
+    "@loykin/datasourcekit": "^0.0.3",
     "@loykin/designkit": "0.0.1-dev.6",
     "@loykin/filter-input": "0.0.1-dev.0",
     "@loykin/gridkit": "^0.2.0",

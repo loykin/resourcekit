@@ -118,7 +118,7 @@ describe('createRegistry', () => {
     expect(registry.getKind('resourcekit.dev/v1alpha1', 'Panel')?.slotPolicy?.slots).toHaveProperty('aside')
   })
 
-  it('registers, looks up, and unregisters connections dynamically without recreating the registry', () => {
+  it('registers, looks up, and unregisters connections dynamically without recreating the registry', async () => {
     const registry = createRegistry()
     registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
 
@@ -126,16 +126,16 @@ describe('createRegistry', () => {
     registry.subscribe(() => notified++)
 
     registry.registerConnection(testConnection())
-    expect(registry.getConnection('crm-api')).toEqual(testConnection())
-    expect(registry.listConnections()).toHaveLength(1)
+    expect(await registry.getConnection('crm-api')).toEqual(testConnection())
+    expect(await registry.listConnections()).toHaveLength(1)
     expect(notified).toBe(1)
 
     registry.unregisterConnection('crm-api')
-    expect(registry.getConnection('crm-api')).toBeUndefined()
+    expect(await registry.getConnection('crm-api')).toBeUndefined()
     expect(notified).toBe(2)
   })
 
-  it('scopes connections to an allowlist and strips config while computing capabilities', () => {
+  it('scopes connections to an allowlist and strips config while computing capabilities', async () => {
     const registry = createRegistry()
     registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
     registry.registerConnection(testConnection())
@@ -145,7 +145,7 @@ describe('createRegistry', () => {
       connections: { allow: ['crm-api'], capabilities: { test: true, inspect: true, preview: false, mutate: false } },
     })
 
-    const summaries = scoped.listConnections()
+    const summaries = await scoped.listConnections()
     expect(summaries).toHaveLength(1)
     expect(summaries[0]).toEqual({
       uid: 'crm-api',
@@ -159,7 +159,32 @@ describe('createRegistry', () => {
     expect(summaries[0]).not.toHaveProperty('config')
 
     // the render path still gets the full connection (with config) for allowed UIDs, scoped by allowlist only
-    expect(scoped.getConnection('crm-api')?.config).toEqual({ baseUrl: 'https://api.example.com/crm', token: 'secret-token' })
-    expect(scoped.getConnection('metrics-main')).toBeUndefined()
+    expect((await scoped.getConnection('crm-api'))?.config).toEqual({ baseUrl: 'https://api.example.com/crm', token: 'secret-token' })
+    expect(await scoped.getConnection('metrics-main')).toBeUndefined()
+  })
+
+  it('falls back to a ConnectionProvider when a uid is not statically registered, merging list results', async () => {
+    const registry = createRegistry()
+    registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
+    registry.registerConnection(testConnection())
+
+    const provided = testConnection({ uid: 'metrics-main', name: 'Metrics (provided)' })
+    registry.setConnectionProvider({
+      getConnection: async (uid) => (uid === provided.uid ? provided : undefined),
+      listConnections: async () => [provided],
+    })
+
+    expect(await registry.getConnection('metrics-main')).toEqual(provided)
+    expect(await registry.listConnections()).toHaveLength(2)
+
+    // static registration still wins on uid collision with the provider
+    registry.setConnectionProvider({
+      getConnection: async (uid) => (uid === 'crm-api' ? testConnection({ name: 'CRM API (from provider)' }) : undefined),
+      listConnections: async () => [testConnection({ name: 'CRM API (from provider)' })],
+    })
+    expect(await registry.getConnection('crm-api')).toEqual(testConnection())
+
+    registry.setConnectionProvider(undefined)
+    expect(await registry.getConnection('metrics-main')).toBeUndefined()
   })
 })
