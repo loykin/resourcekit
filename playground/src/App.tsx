@@ -43,6 +43,8 @@ import type { DataResolver, JsonSchema, Resource, MutationBinding, MutationResol
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { publicKindNames } from '@loykin/resourcekit/adapters'
+import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapters/datasourcekit'
+import { createPlaygroundConnectionProvider, createPlaygroundDatasourceManager } from './demoDatasourceKit'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
 import { scenarioExamples } from './scenarios'
 
@@ -1372,6 +1374,39 @@ const connectionWriteReadPage: Resource = {
   ],
 }
 
+const dynamicDatasourceKitPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataBody',
+  metadata: { name: 'dynamic-datasourcekit-metrics' },
+  spec: {
+    title: 'Dynamic DatasourceKit metrics',
+    description: 'Runs entirely in the browser: ConnectionProvider lookup → DatasourceKit connection adapter → in-memory backend.',
+  },
+  slots: [
+    {
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'TableView',
+          spec: {
+            title: 'Host CPU',
+            columns: {
+              host: { label: 'Host', emphasis: 'strong' },
+              region: { label: 'Region' },
+              cpuPercent: { label: 'CPU %', type: 'number', align: 'right' },
+            },
+            data: {
+              source: 'connection',
+              connection: 'demo-metrics-dynamic',
+              request: { metric: 'cpuPercent' },
+            },
+          },
+        },
+      ],
+    },
+  ],
+}
+
 // Built via a live MCP client session against examples/mcp-server's
 // "github" connection (test_connection → preview_connection ×2 →
 // next_stage_batch → get_kind_spec_schema → validate_document) — not
@@ -1464,6 +1499,12 @@ const examples = [
     resource: connectionWriteReadPage,
   },
   {
+    id: 'dynamic-datasourcekit-metrics',
+    name: 'Dynamic DatasourceKit metrics',
+    description: 'Static-hosting-safe demo of a provider-backed DatasourceKit connection running entirely in the browser.',
+    resource: dynamicDatasourceKitPage,
+  },
+  {
     id: 'user-editor',
     name: 'User editor (CRUD)',
     description: 'Row select → record fetch → form prefill → mutation → list refetch.',
@@ -1532,6 +1573,7 @@ const examples = [
 ] as const
 
 const registry = createRegistry<KindRenderFn>()
+const playgroundDatasourceManager = createPlaygroundDatasourceManager()
 registry.use({
   name: 'playground-resolvers',
   dataResolvers: {
@@ -1542,9 +1584,10 @@ registry.use({
     connection: createConnectionDataResolver(registry),
   },
   mutationResolvers: { memory: memoryMutationResolver, rest: restMutationResolver },
-  connectionAdapters: { rest: restConnectionAdapter },
+  connectionAdapters: { rest: restConnectionAdapter, datasourcekit: createDatasourceKitConnectionAdapter(playgroundDatasourceManager) },
 })
 registry.use(createPlaygroundResourceAdapters())
+registry.setConnectionProvider(createPlaygroundConnectionProvider())
 
 // Same "demo-users" connection as examples/mcp-server, but backed by
 // vite.config.ts's demoUsersApiPlugin middleware (same origin, no separate

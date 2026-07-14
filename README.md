@@ -1,8 +1,8 @@
 # @loykin/resourcekit
 
-Declarative resource runtime for Loykin kits. An AI/MCP client produces a
-scoped JSON resource document; the application validates it and renders it
-with its own design system.
+Declarative resource runtime for AI/MCP-generated UI. An AI/MCP client
+produces a scoped JSON resource document; the application validates it and
+renders it with its own design system.
 
 resourcekit owns the document runtime: kind lookup, recursive slot rendering,
 validation, variables, and data/mutation dispatch. Kind plugins own their
@@ -164,7 +164,7 @@ registry.use({
 })
 ```
 
-For applications that have all Loykin kit peers installed:
+For applications that have all first-party kit peers installed:
 
 ```ts
 import {
