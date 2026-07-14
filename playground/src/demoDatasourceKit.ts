@@ -13,6 +13,7 @@ interface MetricRow {
 interface MetricsQuery {
   metric: 'cpuPercent' | 'memoryPercent'
   region?: string
+  host?: string
 }
 
 const DATASOURCE_UID = 'playground-metrics-main'
@@ -30,7 +31,7 @@ function isMetric(value: unknown): value is MetricsQuery['metric'] {
 }
 
 function runQuery(query: MetricsQuery): QueryResult {
-  const rows = metrics.filter((row) => !query.region || row.region === query.region)
+  const rows = metrics.filter((row) => (!query.region || row.region === query.region) && (!query.host || row.host === query.host))
   return {
     frames: [
       tableRowsToFrame({

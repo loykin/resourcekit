@@ -1376,14 +1376,88 @@ const connectionWriteReadPage: Resource = {
 
 const dynamicDatasourceKitPage: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
-  kind: 'DataBody',
+  kind: 'Workbench',
   metadata: { name: 'dynamic-datasourcekit-metrics' },
   spec: {
-    title: 'Dynamic DatasourceKit metrics',
-    description: 'Runs entirely in the browser: ConnectionProvider lookup → DatasourceKit connection adapter → in-memory backend.',
+    leftPaneWidth: 280,
+    rightPaneWidth: 340,
+    bottomPaneHeight: 260,
+    resizable: true,
+    variables: [
+      { name: 'region', type: 'string', default: 'us-east' },
+      { name: 'selectedHost', type: 'string', default: 'web-1' },
+    ],
   },
   slots: [
     {
+      name: 'topBar',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'PageTopBar',
+          spec: { left: 'Infrastructure metrics' },
+        },
+      ],
+    },
+    {
+      name: 'headerRight',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'FilterControl',
+          spec: {
+            valueRef: 'variables.region',
+            config: {
+              key: 'region',
+              type: 'select',
+              label: 'Region',
+              options: [
+                { label: 'US East', value: 'us-east' },
+                { label: 'US West', value: 'us-west' },
+              ],
+            },
+            events: { change: { kind: 'setVariable', variable: 'region', from: 'value' } },
+          },
+        },
+      ],
+    },
+    {
+      name: 'leftPane',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          spec: { title: 'Hosts', eyebrow: 'Provider-backed connection' },
+          slots: [
+            {
+              items: [
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'SelectableList',
+                  spec: {
+                    data: {
+                      source: 'connection',
+                      connection: 'demo-metrics-dynamic',
+                      request: { metric: 'cpuPercent', region: '${region}' },
+                    },
+                    idField: 'host',
+                    selectedRef: 'variables.selectedHost',
+                    primary: { field: 'host' },
+                    secondary: [
+                      { field: 'region', label: 'Region' },
+                      { field: 'cpuPercent', label: 'CPU %' },
+                    ],
+                    events: { select: { kind: 'setVariable', variable: 'selectedHost', from: 'row.host' } },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'mainPane',
       items: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -1398,7 +1472,80 @@ const dynamicDatasourceKitPage: Resource = {
             data: {
               source: 'connection',
               connection: 'demo-metrics-dynamic',
-              request: { metric: 'cpuPercent' },
+              request: { metric: 'cpuPercent', region: '${region}' },
+            },
+          },
+        },
+      ],
+    },
+    {
+      name: 'rightPane',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          spec: { title: 'Host inspector', eyebrow: 'Selection-driven detail' },
+          slots: [
+            {
+              items: [
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'DetailView',
+                  spec: {
+                    data: {
+                      source: 'connection',
+                      connection: 'demo-metrics-dynamic',
+                      request: { metric: 'memoryPercent', host: '${selectedHost}' },
+                    },
+                    fields: [
+                      { field: 'host', label: 'Host', emphasis: 'strong' },
+                      { field: 'region', label: 'Region', display: 'badge' },
+                      { field: 'memoryPercent', label: 'Memory %', display: 'number', align: 'right' },
+                    ],
+                  },
+                },
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'FormView',
+                  spec: {
+                    sections: [
+                      {
+                        id: 'alert',
+                        label: 'Alert policy',
+                        description: 'Static-hosting-safe in-memory mutation demo.',
+                        fields: [
+                          { name: 'threshold', label: 'CPU alert threshold', type: 'number', required: true, defaultValue: '80' },
+                          { name: 'owner', label: 'On-call owner', required: true, defaultValue: 'Platform team' },
+                        ],
+                      },
+                    ],
+                    submit: { mutation: { target: 'memory', collection: 'settings' } },
+                    submitLabel: 'Save policy',
+                    successMessage: 'Alert policy saved in memory',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      name: 'bottomPane',
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'ChartView',
+          spec: {
+            chart: {
+              type: 'bar',
+              height: 220,
+              categories: ['web-1', 'web-2', 'db-1', 'db-2'],
+              series: [
+                { label: 'CPU %', color: '#2563eb', values: [42, 77, 88, 35] },
+                { label: 'Memory %', color: '#14b8a6', values: [61, 55, 90, 48] },
+              ],
+              thresholds: [{ value: 80, color: '#ef4444', label: 'Alert threshold' }],
             },
           },
         },
