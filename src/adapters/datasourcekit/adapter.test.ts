@@ -107,9 +107,11 @@ describe('createDatasourceKitConnectionAdapter', () => {
     await expect(adapter.resolve(testConnection(), {}, { variables: {} })).resolves.toEqual([])
   })
 
-  it('preview() caps rows to mcpPolicy.maxRows and reports truncated', async () => {
+  it('preview() requests maxRows + 1, caps rows to mcpPolicy.maxRows, and reports truncated', async () => {
     const frame = tableRowsToFrame({
       columns: [{ name: 'host', type: 'string' }],
+      // Exactly maxRows(2) + 1: what a backend that honors the options hint
+      // and caps its own response would return when more rows really exist.
       rows: [['web-1'], ['web-2'], ['web-3']],
     })
     const query = vi.fn().mockResolvedValue({ frames: [frame], stats: { executionTimeMs: 5 } })
@@ -117,20 +119,34 @@ describe('createDatasourceKitConnectionAdapter', () => {
     const adapter = createDatasourceKitConnectionAdapter(manager)
 
     const preview = await adapter.preview?.(testConnection({ mcpPolicy: { maxRows: 2 } }), {}, {})
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({ options: { maxRows: 3 } }), expect.anything())
     expect(preview?.rows).toEqual([{ host: 'web-1' }, { host: 'web-2' }])
     expect(preview?.truncated).toBe(true)
     expect(preview?.stats).toEqual({ returnedRows: 2, executionTimeMs: 5 })
     expect(preview?.schema).toEqual({ type: 'object', properties: { host: { type: 'string' } } })
   })
 
-  it('preview() returns every row untruncated when no maxRows policy is set', async () => {
+  it('preview() reports untruncated when the backend has nothing past the cap', async () => {
     const frame = tableRowsToFrame({ columns: [{ name: 'host', type: 'string' }], rows: [['web-1'], ['web-2']] })
     const query = vi.fn().mockResolvedValue({ frames: [frame] })
     const manager = fakeManager({ query })
     const adapter = createDatasourceKitConnectionAdapter(manager)
 
-    const preview = await adapter.preview?.(testConnection(), {}, {})
+    const preview = await adapter.preview?.(testConnection({ mcpPolicy: { maxRows: 5 } }), {}, {})
     expect(preview?.rows).toHaveLength(2)
     expect(preview?.truncated).toBe(false)
+  })
+
+  it('preview() applies a default cap of 20 when no mcpPolicy.maxRows is set', async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => [`web-${i}`])
+    const frame = tableRowsToFrame({ columns: [{ name: 'host', type: 'string' }], rows })
+    const query = vi.fn().mockResolvedValue({ frames: [frame] })
+    const manager = fakeManager({ query })
+    const adapter = createDatasourceKitConnectionAdapter(manager)
+
+    const preview = await adapter.preview?.(testConnection(), {}, {})
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({ options: { maxRows: 21 } }), expect.anything())
+    expect(preview?.rows).toHaveLength(20)
+    expect(preview?.truncated).toBe(true)
   })
 })

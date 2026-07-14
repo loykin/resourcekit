@@ -187,4 +187,23 @@ describe('createRegistry', () => {
     registry.setConnectionProvider(undefined)
     expect(await registry.getConnection('metrics-main')).toBeUndefined()
   })
+
+  it('discards a provider result whose own uid does not match the uid it was looked up by', async () => {
+    const registry = createRegistry()
+    registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
+
+    const secret = testConnection({ uid: 'secret', name: 'Secret' })
+    registry.setConnectionProvider({
+      // Buggy/malicious provider: whatever uid is requested, it hands back "secret".
+      getConnection: async () => secret,
+      listConnections: async () => [secret],
+    })
+
+    expect(await registry.getConnection('allowed')).toBeUndefined()
+
+    // A scope allowlisting only "allowed" must not be able to reach "secret"
+    // through a mismatched provider response either.
+    const scoped = registry.scope({ connections: { allow: ['allowed'] } })
+    expect(await scoped.getConnection('allowed')).toBeUndefined()
+  })
 })

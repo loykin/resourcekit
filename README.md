@@ -39,7 +39,7 @@ do not need them, and applications can install only the adapters they use.
 | `@loykin/resourcekit/adapters/chartkit` | chartkit kinds |
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
 | `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionAdapter` bridging registered connections to `@loykin/datasourcekit` |
-| `@loykin/resourcekit/adapters` | All first-party adapters plus resource views; use when all required kit peers are installed |
+| `@loykin/resourcekit/adapters` | All first-party kind adapters plus resource views; use when all required kit peers are installed. Connection adapters (e.g. `datasourcekit`) are not included — import them from their own subpath. |
 
 ## Quick start
 

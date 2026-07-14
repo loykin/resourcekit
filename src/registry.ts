@@ -173,7 +173,14 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
   const notify = () => listeners.forEach((l) => l())
 
   async function resolveConnection(uid: string): Promise<RegisteredConnection | undefined> {
-    return connections.get(uid) ?? (await connectionProvider?.getConnection(uid))
+    const stored = connections.get(uid)
+    if (stored) return stored
+    const provided = await connectionProvider?.getConnection(uid)
+    // A provider returning a connection whose own `uid` doesn't match the
+    // uid it was looked up by would let a caller who only checked the
+    // requested uid against an allowlist (e.g. scope's connectionAllowed)
+    // receive a different, possibly disallowed connection's config/adapter.
+    return provided && provided.uid === uid ? provided : undefined
   }
 
   async function resolveAllConnections(): Promise<RegisteredConnection[]> {

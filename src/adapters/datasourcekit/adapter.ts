@@ -98,25 +98,29 @@ export function createDatasourceKitConnectionAdapter(manager: DatasourceManager)
 
     async preview(connection, request, context) {
       const start = Date.now()
-      const maxRows = connection.mcpPolicy?.maxRows
+      const maxRows = connection.mcpPolicy?.maxRows ?? 20
+      // Ask for one row past the cap: a backend that honors the hint and
+      // caps its own response to exactly maxRows would otherwise make
+      // `rows.length < table.rows.length` false even when more rows exist.
       const result = await manager.instances.query(
         {
           id: `resourcekit-preview-${++requestCounter}`,
           datasourceUid: connection.config.datasourceUid,
           datasourceType: connection.config.datasourceType,
           query: request,
-          options: maxRows === undefined ? undefined : { maxRows },
+          options: { maxRows: maxRows + 1 },
         },
         toDatasourceContext(context),
       )
       const frame = result.frames[0]
       const table = frame ? tableFromFrame(frame) : { columns: [], rows: [] }
-      const rows = maxRows === undefined ? table.rows : table.rows.slice(0, maxRows)
+      const truncated = table.rows.length > maxRows
+      const rows = truncated ? table.rows.slice(0, maxRows) : table.rows
       return {
         schema: columnsToSchema(table.columns),
         rows,
         stats: { returnedRows: rows.length, executionTimeMs: result.stats?.executionTimeMs ?? Date.now() - start },
-        truncated: rows.length < table.rows.length,
+        truncated,
       }
     },
 
