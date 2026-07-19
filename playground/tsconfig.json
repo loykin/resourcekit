@@ -10,7 +10,17 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@loykin/resourcekit": ["../src/index.ts"],
+      "@loykin/resourcekit/react": ["../src/react/index.ts"],
+      "@loykin/resourcekit/adapters": ["../src/adapters/index.ts"],
+      "@loykin/resourcekit/adapters/designkit": ["../src/adapters/designkit/index.ts"],
+      "@loykin/resourcekit/adapters/gridkit": ["../src/adapters/gridkit/index.ts"],
+      "@loykin/resourcekit/adapters/chartkit": ["../src/adapters/chartkit/index.ts"],
+      "@loykin/resourcekit/adapters/basekit": ["../src/adapters/basekit/index.ts"],
+      "@loykin/resourcekit/adapters/datasourcekit": ["../src/adapters/datasourcekit/index.ts"]
+    }
   },
   "include": ["src", "server"]
 }
