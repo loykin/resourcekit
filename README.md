@@ -519,32 +519,40 @@ through the table's normal `spec.events` policy map.
 
 ```json
 {
-  "columns": {
-    "name": { "label": "Name" },
-    "actions": {
-      "label": "",
-      "display": "actions",
-      "items": [
-        {
-          "id": "delete",
-          "label": "Delete",
-          "variant": "destructive",
-          "disabledWhen": { "field": "role", "equals": "Admin" },
-          "submit": {
-            "action": "users.delete",
-            "mutation": {
-              "target": "rest",
-              "url": "/api/users/${payload.id}",
-              "method": "DELETE"
-            },
-            "confirm": { "title": "Delete ${payload.name}?" }
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "GridKitTable",
+  "spec": {
+    "data": { "$data": "users" },
+    "columns": {
+      "name": { "label": "Name" },
+      "actions": {
+        "label": "",
+        "display": "actions",
+        "items": [
+          {
+            "id": "delete",
+            "label": "Delete",
+            "variant": "destructive",
+            "disabledWhen": { "field": "role", "equals": "Admin" },
+            "submit": {
+              "action": "users.delete",
+              "mutation": {
+                "target": "rest",
+                "url": "/api/users/${payload.id}",
+                "method": "DELETE"
+              },
+              "confirm": { "title": "Delete ${payload.name}?" }
+            }
           }
-        }
-      ]
+        ]
+      }
     }
   }
 }
 ```
+
+`data` is required on every `GridKitTable` spec, same as any other data-bound
+kind — `columns` (and its `actions` entry) is the part this section adds.
 
 `hideWhen` and `disabledWhen` compare a dot-path field from the row with an
 `equals` value. These are presentation rules, not authorization; mutation
