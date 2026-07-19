@@ -416,6 +416,38 @@ describe('createDataflowRuntime', () => {
       expect(await runtime.resolve('b')).toEqual({ y: 2 })
     })
 
+    it('preserves real call order when a same-tick setState and setStatePath target the same node (patch after set)', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { draft: { kind: 'state', initialValue: { command: 'old', name: 'old-name' } } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+
+      // setState first, setStatePath second, same tick — the patch must win
+      // for 'name' since it was called after the reset.
+      const first = runtime.setState('draft', { command: 'default', name: 'default' })
+      const second = runtime.setStatePath('draft', 'name', 'typed-value')
+      await Promise.all([first, second])
+
+      expect(await runtime.resolve('draft')).toEqual({ command: 'default', name: 'typed-value' })
+    })
+
+    it('preserves real call order when a same-tick setStatePath and setState target the same node (set after patch)', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { draft: { kind: 'state', initialValue: { command: 'old', name: 'old-name' } } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+
+      // setStatePath first, setState second, same tick — the later whole-value
+      // set must win completely, not have the earlier patch survive on top.
+      const first = runtime.setStatePath('draft', 'name', 'typed-value')
+      const second = runtime.setState('draft', { command: 'reset', name: 'default' })
+      await Promise.all([first, second])
+
+      expect(await runtime.resolve('draft')).toEqual({ command: 'reset', name: 'default' })
+    })
+
     it('rejects an empty path', async () => {
       const runtime = createDataflowRuntime({
         graph: { nodes: { draft: { kind: 'state', initialValue: {} } } },

@@ -46,6 +46,15 @@ interface ResourceNodeProps extends Omit<ResourceRendererProps, 'resource'> {
 
 const emptyRows = Promise.resolve<Record<string, unknown>[]>([])
 
+function dataflowRequiredMessage(label: string): string {
+  return `${label} requires a ResourceDocument data graph`
+}
+
+/** A `$data`/dataflow-node access with no `document.data` graph — the caller still returns a promise, never throws synchronously. */
+function missingDataflow(label: string): Promise<never> {
+  return Promise.reject(new Error(dataflowRequiredMessage(label)))
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -84,7 +93,7 @@ function resolveThroughRuntime(
   binding: DataBinding | DataRef,
 ): Promise<Record<string, unknown>[]> {
   if (isDataRef(binding)) {
-    if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
+    if (!runtime.dataflow) return missingDataflow(`Data reference ${binding.$data}`)
     return runtime.dataflow.resolve(binding.$data).then((value) => asRuntimeRows(binding.path ? getValueAtPath(value, binding.path) : value))
   }
   const refs = scanVariableRefs(binding)
@@ -244,11 +253,11 @@ function renderKindNode(
       data: {
         resolve: (binding) => resolveThroughRuntime(registry, runtime, binding),
         read: (ref) => {
-          if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${ref.$data} requires a ResourceDocument data graph`))
+          if (!runtime.dataflow) return missingDataflow(`Data reference ${ref.$data}`)
           return runtime.dataflow.resolve(ref.$data).then((value) => ref.path ? getValueAtPath(value, ref.path) : value)
         },
         set: (node, value) => {
-          if (!runtime.dataflow) return Promise.reject(new Error(`Data node ${node} requires a ResourceDocument data graph`))
+          if (!runtime.dataflow) return missingDataflow(`Data node ${node}`)
           return runtime.dataflow.setState(node, value)
         },
         revision: nodeVersion,
@@ -259,7 +268,7 @@ function renderKindNode(
           const binding = resource.bindings?.[name]
           if (!binding) return Promise.resolve(undefined)
           if (isDataRef(binding)) {
-            if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
+            if (!runtime.dataflow) return missingDataflow(`Data reference ${binding.$data}`)
             return runtime.dataflow.resolve(binding.$data).then((value) => binding.path ? getValueAtPath(value, binding.path) : value)
           }
           return Promise.resolve(runtime.engine.get(binding.$variable))
@@ -270,7 +279,7 @@ function renderKindNode(
           const binding = resource.bindings?.[name]
           if (!binding) return Promise.reject(new Error(`Binding ${name} is not connected`))
           if (isDataRef(binding)) {
-            if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
+            if (!runtime.dataflow) return missingDataflow(`Data reference ${binding.$data}`)
             return binding.path ? runtime.dataflow.setStatePath(binding.$data, binding.path, value) : runtime.dataflow.setState(binding.$data, value)
           }
           runtime.engine.set(binding.$variable, coerceVariableValue(value))
@@ -286,7 +295,7 @@ function renderKindNode(
           }
           if (policy?.kind === 'setData') {
             if (!runtime.dataflow) {
-              props.onDataError?.(new Error(`Data node ${policy.node} requires a ResourceDocument data graph`), policy.node)
+              props.onDataError?.(new Error(dataflowRequiredMessage(`Data node ${policy.node}`)), policy.node)
             } else {
               void runtime.dataflow
                 .setState(policy.node, getValueAtPath(payload, policy.from))
@@ -354,7 +363,12 @@ function RecordScopeNode(props: RecordScopeNodeProps): ReactNode {
   const bindingKey = JSON.stringify(binding ?? null)
   const refs = useMemo(() => scanVariableRefs(binding), [bindingKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const fingerprint = [...refs].map((name) => JSON.stringify(runtime.engine.get(name) ?? null)).join('|')
-  const stateKey = `${bindingKey}::${fingerprint}`
+  // props.nodeVersion (already scoped to this resource's own $data
+  // dependencies by useNodeVersion) must factor into staleness too — a
+  // binding that's a pure $data ref with no ${var} refs has a permanently
+  // constant bindingKey/fingerprint, so without this the record would never
+  // refetch when the dataflow node it reads changes.
+  const stateKey = `${bindingKey}::${fingerprint}::${props.nodeVersion}`
   const unresolved = binding ? interpolate(binding, runtime.engine.snapshot()).unresolved.size > 0 : false
 
   const [state, setState] = useState<{ key: string; record: Record<string, unknown> | undefined } | null>(null)

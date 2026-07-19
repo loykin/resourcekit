@@ -14,6 +14,7 @@ import type {
   SelectedExamples,
 } from './types'
 import { validateResource } from './validation'
+import { listExampleEntries } from './examples'
 
 /**
  * Plugin host. Registration is runtime data, not build-time wiring: plugins
@@ -273,16 +274,15 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
           return [...patternExamples.values()]
         },
         selectExamples() {
+          const entries = listExampleEntries(scoped)
           const kindExamples: SelectedExamples['kindExamples'] = []
-          for (const manifest of kinds.values()) {
+          for (const { manifest, example } of entries.kindExamples) {
             if (!kindAllowed(manifest, options)) continue
-            for (const example of manifest.examples ?? []) {
-              if (validateResource(example.resource, scoped).valid) {
-                kindExamples.push({ apiVersion: manifest.apiVersion, kind: manifest.kind, description: example.description, resource: example.resource })
-              }
+            if (validateResource(example.resource, scoped).valid) {
+              kindExamples.push({ apiVersion: manifest.apiVersion, kind: manifest.kind, description: example.description, resource: example.resource })
             }
           }
-          const filteredPatternExamples = [...patternExamples.values()].filter((example) => validateResource(example.resource, scoped).valid)
+          const filteredPatternExamples = entries.patternExamples.filter((example) => validateResource(example.resource, scoped).valid)
           return { kindExamples, patternExamples: filteredPatternExamples }
         },
         getDataResolver(source) {

@@ -65,6 +65,14 @@ function applyLocked(resource: Resource, locked: Map<string, Resource>, previous
  * locked node whose name no longer appears anywhere in `next` (the LLM
  * dropped that whole branch) is also not reinserted — there is no defined
  * position for it without a patch/insert contract, see item 5 (deferred).
+ *
+ * A standalone host-facing primitive, like `setValueAtPath`/
+ * `canonicalizeJson` — a host's own regeneration loop calls this after
+ * getting a fresh document back from an LLM and before rendering/persisting
+ * it. Nothing in this repo's core or examples calls it yet; it is not a
+ * step toward item 5's patch contract and should not grow index-based or
+ * diff-style matching to become one — that's a deliberately separate,
+ * still-undesigned feature.
  */
 export function preserveLockedNodes(previous: Resource, next: Resource): Resource {
   const locked = new Map<string, Resource>()

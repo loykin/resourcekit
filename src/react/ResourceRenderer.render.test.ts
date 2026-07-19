@@ -116,6 +116,51 @@ describe('ResourceRenderer node-level re-render scoping', () => {
   })
 })
 
+describe('RecordScopeNode refetches on a pure $data dependency change', () => {
+  it('re-fetches the record when the underlying dataflow node changes with no ${variable} involved', async () => {
+    let latestRecord: Record<string, unknown> | undefined
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'record-scope',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'RecordProbe',
+          specSchema: { type: 'object' },
+          recordScope: true,
+          render: (_resource, ctx) => {
+            latestRecord = ctx.record
+            context = ctx
+            return createElement('div', null, JSON.stringify(ctx.record))
+          },
+        },
+      ],
+    })
+    const document: ResourceDocument = {
+      data: { nodes: { customer: { kind: 'state', initialValue: { name: 'Ada' } } } },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'RecordProbe',
+        spec: { data: { $data: 'customer' } },
+      },
+    }
+
+    render(createElement(ResourceRenderer, { resource: document, registry }))
+    await act(async () => {})
+    expect(latestRecord).toEqual({ name: 'Ada' })
+
+    // No ${variable} is involved in this binding at all — before the fix,
+    // stateKey never changed for a pure $data binding, so this update never
+    // re-triggered the record fetch and latestRecord stayed { name: 'Ada' }.
+    await act(async () => {
+      await context?.data.set('customer', { name: 'Bob' })
+    })
+
+    expect(latestRecord).toEqual({ name: 'Bob' })
+  })
+})
+
 describe('ResourceRenderer mutation-to-dataflow integration', () => {
   it('runs submit effects through the renderer and exposes the updated graph state', async () => {
     let context: RenderContext | undefined

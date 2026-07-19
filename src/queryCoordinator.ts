@@ -55,7 +55,19 @@ export function createDirectQueryCoordinator(): QueryCoordinator {
     for (const listener of entry.listeners) listener()
   }
 
-  function run(entry: DirectEntry) {
+  // Generation-counter + AbortController supersession, same idea as
+// src/dataflow.ts's per-node cancellation (evaluate()/evaluateAffected,
+// ObsoleteExecutionError). Deliberately not shared: dataflow.ts tracks
+// generations for many graph nodes at once via external `Map<string,
+// number>` + `Map<string, AbortController>` lookups (needed because a
+// node's cancellation is driven by *other* nodes changing), while a
+// DirectEntry here is a single, self-contained query with no graph
+// awareness at all. Forcing one shape onto the other would either make
+// dataflow.ts's already-delicate multi-node bookkeeping indirect for no
+// reason, or make this file carry map lookups it doesn't need — see
+// AGENTS.md on not introducing abstractions beyond what's required. If a
+// third cancellation site appears, that's the signal to actually extract one.
+function run(entry: DirectEntry) {
     const generation = ++entry.generation
     entry.controller.abort()
     entry.controller = new AbortController()

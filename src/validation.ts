@@ -3,6 +3,7 @@ import type { ErrorObject } from 'ajv'
 import { isDataRef, scanDataRefs, validateDataGraph } from './dataflow'
 import type { ResourceDocument } from './dataflow'
 import { scanVariableRefs } from './variables'
+import { listExampleEntries } from './examples'
 import type { Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
 import type { ResourceRegistry, ScopedRegistry } from './registry'
 
@@ -21,18 +22,17 @@ export interface ExampleValidationFailure {
  */
 export function validateAllExamples(registry: ResourceRegistry | ScopedRegistry): ExampleValidationFailure[] {
   const failures: ExampleValidationFailure[] = []
+  const entries = listExampleEntries(registry)
 
-  registry.listKinds().forEach((manifest) => {
-    ;(manifest.examples ?? []).forEach((example, index) => {
-      const result = validateResource(example.resource, registry)
-      if (!result.valid) failures.push({ source: `kind:${manifest.apiVersion}/${manifest.kind}#${index}`, issues: result.issues })
-    })
-  })
+  for (const { manifest, index, example } of entries.kindExamples) {
+    const result = validateResource(example.resource, registry)
+    if (!result.valid) failures.push({ source: `kind:${manifest.apiVersion}/${manifest.kind}#${index}`, issues: result.issues })
+  }
 
-  registry.listPatternExamples().forEach((example) => {
+  for (const example of entries.patternExamples) {
     const result = validateResource(example.resource, registry)
     if (!result.valid) failures.push({ source: `pattern:${example.name}`, issues: result.issues })
-  })
+  }
 
   return failures
 }
@@ -57,7 +57,7 @@ function intersectsLevel(level: string[] | undefined, allowed: string[]): boolea
 
 function formatAjvError(error: ErrorObject): { message: string; hint: string } {
   const field = error.instancePath || '/'
-  return { message: `${field} ${error.message ?? 'is invalid'}`, hint: `fix ${field || 'the spec'} to match the kind's spec schema (call get_kind_spec_schema / singleKindSchema to see it)` }
+  return { message: `${field} ${error.message ?? 'is invalid'}`, hint: `fix ${field || 'the spec'} to match the kind's spec schema (see singleKindSchema(scope, apiVersion, kind))` }
 }
 
 function validateEnvelope(resource: unknown, path: string, issues: ValidationIssue[]): resource is Resource {
@@ -346,7 +346,7 @@ export function validateResource(
         issues,
         `${path}/kind`,
         `kind ${current.apiVersion}/${current.kind} is not registered or not allowed in this scope`,
-        'use a kind from this scope — call list_root_templates/next_stage_batch (or listKinds()) to see which are available',
+        'use a kind from this scope — call scope.listKinds() (or nextStage/nextStageBatch for staged generation) to see which are available',
       )
     } else {
       if (depth === 0 && options?.rootLevels && !intersectsLevel(manifest.level, options.rootLevels)) {

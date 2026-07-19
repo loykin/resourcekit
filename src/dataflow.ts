@@ -167,6 +167,15 @@ export interface DataflowRuntime {
    * "Mutation과 invalidation": a mutation's `invalidateData` effect). Pair
    * with `refetch` to actually reload; a coordinator-backed node may prefer
    * to just show a "stale" indicator until its own next poll instead.
+   *
+   * This is a graph-level primitive, independent of whether a
+   * `QueryCoordinator` is wired in: it operates only on this runtime's own
+   * snapshots, never on a coordinator's cache. When a coordinator *is*
+   * wired (P1 item 1, not yet implemented), the coordinator-aware path is
+   * `options.resolve` itself calling into the coordinator — not this method
+   * reaching into `QueryCoordinator`. That keeps `DataflowRuntime` ignorant
+   * of `QueryCoordinator` by construction (see queryCoordinator.ts's own
+   * top-of-file note) rather than needing a special case here.
    */
   invalidate(ids: string[]): Promise<void>
   /**
@@ -174,7 +183,9 @@ export interface DataflowRuntime {
    * descendants, ignoring whether any dependency actually changed — a
    * mutation's `refetchData` effect. Unlike `publish`, this re-runs
    * `options.resolve` itself rather than accepting an externally-produced
-   * value.
+   * value — so once a node's `resolve` is coordinator-backed, this
+   * transparently re-runs *through* the coordinator too. See `invalidate`'s
+   * note on why this stays graph-level rather than becoming coordinator-aware.
    */
   refetch(ids: string[]): Promise<void>
   subscribe(listener: (id: string, snapshot: DataSnapshot) => void): () => void
@@ -331,8 +342,9 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   let initialized: Promise<void> | undefined
   let started: Promise<void> | undefined
   let disposed = false
-  let pendingWrites = new Map<string, unknown>()
-  const pendingPathPatches: StatePatch[] = []
+  // One ordered queue for both whole-value sets and path patches, so their
+  // relative call order within a tick is preserved — see ensureScheduledWrite.
+  const pendingOps: Array<{ kind: 'set'; id: string; value: unknown } | { kind: 'patch'; id: string; path: string; value: unknown }> = []
   let scheduledWrite: Promise<void> | undefined
 
   for (const [id, node] of Object.entries(options.graph.nodes)) {
@@ -441,9 +453,13 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     await Promise.allSettled([...affected].map((id) => evaluate(id)))
   }
 
-  const applyStateBatch = async (values: Map<string, unknown>) => {
+  const requireActive = async () => {
     if (disposed) throw new Error('Dataflow runtime is disposed')
     await ensureInitialized()
+  }
+
+  const applyStateBatch = async (values: Map<string, unknown>) => {
+    await requireActive()
     for (const id of values.keys()) {
       if (options.graph.nodes[id]?.kind !== 'state') throw new Error(`Data node ${id} is not writable state`)
     }
@@ -463,11 +479,8 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   }
 
   const publishResult = async (id: string, result: PublishResult) => {
-    if (disposed) throw new Error('Dataflow runtime is disposed')
-    await ensureInitialized()
-    const node = options.graph.nodes[id]
-    if (!node) throw new Error(`Data node ${id} does not exist`)
-    if (node.kind !== 'resolve') throw new Error(`Data node ${id} is not a resolve node`)
+    await requireActive()
+    requireResolveNodes([id])
 
     epoch++
     const batchEpoch = epoch
@@ -496,8 +509,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   }
 
   const invalidateNodes = async (ids: string[]) => {
-    if (disposed) throw new Error('Dataflow runtime is disposed')
-    await ensureInitialized()
+    await requireActive()
     requireResolveNodes(ids)
     await Promise.all(
       ids.map(async (id) => {
@@ -510,8 +522,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   }
 
   const refetchNodes = async (ids: string[]) => {
-    if (disposed) throw new Error('Dataflow runtime is disposed')
-    await ensureInitialized()
+    await requireActive()
     requireResolveNodes(ids)
 
     epoch++
@@ -526,28 +537,54 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   }
 
   // A same tick may mix whole-value setState calls and setStatePath patches
-  // for the same node (e.g. two form fields). Both queue synchronously —
-  // pendingWrites.set / pendingPathPatches.push happen before any await —
-  // so back-to-back calls can never race on reading the same pre-batch
-  // snapshot as their base; the microtask below is the only place patches
-  // actually get resolved against a base value, once, in push order.
+  // for the same node in either order (e.g. a "reset to defaults" action and
+  // a field's onChange firing in the same batch). Both queue into one
+  // ordered list synchronously — push happens before any await — so
+  // back-to-back calls can never race on reading the same pre-batch
+  // snapshot as their base, and a later whole-value setState correctly wins
+  // over an earlier same-tick patch (and vice versa) because the microtask
+  // below replays every op in exact push order, not "all sets then all
+  // patches."
   const ensureScheduledWrite = (): Promise<void> => {
     if (!scheduledWrite) {
       scheduledWrite = Promise.resolve().then(async () => {
-        const writes = pendingWrites
-        const patches = pendingPathPatches.splice(0)
-        pendingWrites = new Map()
+        const ops = pendingOps.splice(0)
         scheduledWrite = undefined
 
-        if (patches.length > 0) await ensureInitialized()
-        for (const patch of patches) {
-          if (writes.has(patch.id)) {
-            writes.set(patch.id, setValueAtPath(writes.get(patch.id), patch.path, patch.value))
+        if (ops.some((op) => op.kind === 'patch')) await ensureInitialized()
+
+        // An id only needs its committed value fetched as a patch base if
+        // the *first* op touching it in this batch is a patch — anything
+        // preceded by a same-batch `set` builds on that in-memory value
+        // instead. Distinct ids' store reads are independent I/O, so fetch
+        // them concurrently instead of one at a time in patch order.
+        const seenIds = new Set<string>()
+        const idsNeedingBase = new Set<string>()
+        for (const op of ops) {
+          if (seenIds.has(op.id)) continue
+          seenIds.add(op.id)
+          if (op.kind === 'patch') idsNeedingBase.add(op.id)
+        }
+        const bases = new Map<string, unknown>()
+        await Promise.all(
+          [...idsNeedingBase].map(async (id) => {
+            const snapshot = await store.read(id)
+            bases.set(id, snapshot?.status === 'ready' ? snapshot.value : undefined)
+          }),
+        )
+
+        // Purely synchronous now that every needed base is pre-fetched —
+        // replays ops in exact push order, so a later same-tick setState
+        // still wins over an earlier setStatePath to the same node, and
+        // vice versa.
+        const writes = new Map<string, unknown>()
+        for (const op of ops) {
+          if (op.kind === 'set') {
+            writes.set(op.id, op.value)
             continue
           }
-          const snapshot = await store.read(patch.id)
-          const base = snapshot?.status === 'ready' ? snapshot.value : undefined
-          writes.set(patch.id, setValueAtPath(base, patch.path, patch.value))
+          const base = writes.has(op.id) ? writes.get(op.id) : bases.get(op.id)
+          writes.set(op.id, setValueAtPath(base, op.path, op.value))
         }
         return applyStateBatch(writes)
       })
@@ -556,7 +593,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   }
 
   const scheduleStateBatch = (values: Record<string, unknown>): Promise<void> => {
-    for (const [id, value] of Object.entries(values)) pendingWrites.set(id, value)
+    for (const [id, value] of Object.entries(values)) pendingOps.push({ kind: 'set', id, value })
     return ensureScheduledWrite()
   }
 
@@ -567,7 +604,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     for (const patch of patches) {
       if (!patch.path) throw new Error(`setStatePath requires a non-empty path (node ${patch.id}); use setState for the whole value`)
     }
-    pendingPathPatches.push(...patches)
+    for (const patch of patches) pendingOps.push({ kind: 'patch', id: patch.id, path: patch.path, value: patch.value })
     return ensureScheduledWrite()
   }
 
