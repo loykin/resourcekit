@@ -1,7 +1,10 @@
 import type { Resource } from '@loykin/resourcekit'
 import customerCrmExpected from '../scenarios/customer-crm/expected-resource.json'
+import { scope as customerCrmScope } from '../scenarios/customer-crm/schema-scope'
 import settingsFormExpected from '../scenarios/settings-form/expected-resource.json'
+import { scope as settingsFormScope } from '../scenarios/settings-form/schema-scope'
 import metricsDashboardExpected from '../scenarios/metrics-dashboard/expected-resource.json'
+import { scope as metricsDashboardScope } from '../scenarios/metrics-dashboard/schema-scope'
 
 // These are the same fixtures the root-level `pnpm scenario:eval` harness
 // (playground/scenarios/*) grades AI-generated documents against — imported
@@ -17,18 +20,27 @@ export const scenarioExamples = [
     id: 'scenario-customer-crm',
     name: 'Scenario / Customer CRM',
     description: 'Scenario fixture: list/detail selection, filter variable, detail summary, and chart.',
+    category: 'scenario',
+    evidence: 'scenario-test',
+    scope: customerCrmScope,
     resource: customerCrmScenario,
   },
   {
     id: 'scenario-settings-form',
     name: 'Scenario / Settings form',
     description: 'Scenario fixture: data body sections with form-local state and declarative submit.',
+    category: 'scenario',
+    evidence: 'scenario-test',
+    scope: settingsFormScope,
     resource: settingsFormScenario,
   },
   {
     id: 'scenario-metrics-dashboard',
     name: 'Scenario / Metrics dashboard',
     description: 'Scenario fixture: tabbed metrics body with summary, table, and chart.',
+    category: 'scenario',
+    evidence: 'scenario-test',
+    scope: metricsDashboardScope,
     resource: metricsDashboardScenario,
   },
 ] as const

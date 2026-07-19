@@ -757,6 +757,21 @@ export const appKinds: ResourceKitPlugin<KindRenderFn> = {
 Register the plugin with `registry.use(appKinds)` and include the kind only in
 scopes where it is supported.
 
+## Playground examples
+
+The playground separates its examples by what they prove:
+
+- **AI scenario** — a fixture graded against a scenario-specific generation scope.
+- **MCP generated** — a document produced through an MCP tool-calling session and validated before inclusion.
+- **Runtime demo** — a hand-authored integration example for rendering, dataflow, mutation, or event behavior.
+- **Component fragment** — a renderable embed whose root is intentionally not eligible in a full-page `rootLevels: ['template']` scope.
+
+Each example carries its own scope. The playground uses that same scope for
+root selection, staged slot replay, final `validateResource` or
+`validateResourceDocument`, and rendering. The composition panel reports the
+final validation result and does not present runtime or fragment examples as
+evidence of an MCP generation session.
+
 ## Development
 
 ```bash

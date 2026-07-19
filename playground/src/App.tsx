@@ -38,8 +38,19 @@ import {
   singleKindSchema,
   staticResolver,
   validateResource,
+  validateResourceDocument,
 } from '@loykin/resourcekit'
-import type { DataResolver, JsonSchema, Resource, ResourceDocument, MutationBinding, MutationResolver, ValidationResult } from '@loykin/resourcekit'
+import type {
+  DataResolver,
+  JsonSchema,
+  Resource,
+  ResourceDocument,
+  MutationBinding,
+  MutationResolver,
+  ScopeOptions,
+  ScopedRegistry,
+  ValidationResult,
+} from '@loykin/resourcekit'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { publicKindNames } from '@loykin/resourcekit/adapters'
@@ -47,6 +58,18 @@ import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapte
 import { createPlaygroundConnectionProvider, createPlaygroundDatasourceManager } from './demoDatasourceKit'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
 import { scenarioExamples } from './scenarios'
+
+export type PlaygroundExampleCategory = 'scenario' | 'mcp-generated' | 'runtime' | 'fragment'
+
+export interface PlaygroundExample {
+  id: string
+  name: string
+  description: string
+  category: PlaygroundExampleCategory
+  evidence?: 'scenario-test' | 'mcp-session' | 'blind-mcp'
+  scope?: ScopeOptions
+  resource: Resource | ResourceDocument
+}
 
 const customerRows = [
   { id: '1', name: 'Ada Lovelace', status: 'active', revenue: 140 },
@@ -1868,115 +1891,140 @@ const githubOrgReposPage: Resource = {
   ],
 }
 
-const examples = [
+export const examples: readonly PlaygroundExample[] = [
   ...scenarioExamples,
   {
     id: 'service-operations-command-center',
     name: 'Service operations command center',
     description: 'Production-style incident triage workspace with scoped filtering, selection, detail, mutation, refetch, and trend context.',
+    category: 'runtime',
     resource: serviceOperationsPage,
   },
   {
     id: 'demo-users-connection-page',
-    name: '[MCP-built] Demo users list/detail',
+    name: 'Demo users list/detail',
     description:
       'MCP-built: assembled from real list_connections/test_connection/preview_connection/next_stage_batch/get_kind_spec_schema calls against a live MCP server, then confirmed with validate_document.',
+    category: 'mcp-generated',
+    evidence: 'mcp-session',
+    scope: { connections: { allow: ['demo-users'] } },
     resource: demoUsersConnectionPage,
   },
   {
     id: 'coin-market-cap-top10',
-    name: '[hand-written] Top 10 by market cap',
+    name: 'Top 10 by market cap',
     description:
-      'Hand-written, not built through MCP tool calls — only proves the connection/rendering path works against a real, unfamiliar third-party API (CoinGecko), not the MCP generation flow.',
+      'Component fragment: proves the connection/rendering path against CoinGecko, but SelectableList is not a full-page generation root.',
+    category: 'fragment',
+    scope: { connections: { allow: ['coingecko'] } },
     resource: coinMarketCapTop10,
   },
   {
     id: 'github-org-repos',
-    name: '[MCP-built] GitHub org repos',
+    name: 'GitHub org repos',
     description:
       'MCP-built: assembled from real test_connection/preview_connection/next_stage_batch/get_kind_spec_schema calls against a live MCP server and a real GitHub connection, then confirmed with validate_document.',
+    category: 'mcp-generated',
+    evidence: 'mcp-session',
+    scope: { connections: { allow: ['github'] } },
     resource: githubOrgReposPage,
   },
   {
     id: 'connection-write-read',
-    name: '[hand-written] Connection read + REST write',
+    name: 'Connection read + REST write',
     description:
       'Hand-written, not built through MCP tool calls — pairs a connection-bound read (DetailView) with a mutation-bound write (FormView) against the same backend to prove writes persist and reads reflect them.',
+    category: 'runtime',
+    scope: { connections: { allow: ['demo-users'] } },
     resource: connectionWriteReadPage,
   },
   {
     id: 'dynamic-datasourcekit-metrics',
     name: 'Dynamic DatasourceKit metrics',
     description: 'Static-hosting-safe demo of a provider-backed DatasourceKit connection running entirely in the browser.',
+    category: 'runtime',
+    scope: { connections: { allow: ['demo-metrics-dynamic'] } },
     resource: dynamicDatasourceKitPage,
   },
   {
     id: 'user-editor',
     name: 'User editor (CRUD)',
     description: 'Row select → record fetch → form prefill → mutation → list refetch.',
+    category: 'runtime',
     resource: userEditor,
   },
   {
     id: 'customer-workspace',
     name: 'Customer workspace',
     description: 'List/detail layout with a filter, table, detail panel, and chart.',
+    category: 'runtime',
     resource: customerWorkspace,
   },
   {
     id: 'trending-repos-page',
     name: 'Trending repos (MCP blind test)',
     description: 'Built by a subagent with zero prior schema knowledge, via examples/mcp-server tool calls only.',
+    category: 'mcp-generated',
+    evidence: 'blind-mcp',
     resource: trendingReposPage,
   },
   {
     id: 'metrics-chart',
     name: 'Metrics chart',
-    description: 'A compact panel document with one chart leaf.',
+    description: 'Component fragment: a compact Panel with one chart leaf, not a full-page generation root.',
+    category: 'fragment',
     resource: metricsChart,
   },
   {
     id: 'chart-gallery',
     name: 'Chart gallery',
     description: 'Multiple ChartKit specs rendered from JSON in a Workbench layout.',
+    category: 'runtime',
     resource: chartGallery,
   },
   {
     id: 'workbench-template',
     name: 'Workbench template',
     description: 'Workbench with side panes, table content, and a chart.',
+    category: 'runtime',
     resource: workbenchTemplate,
   },
   {
     id: 'from-value-binding',
     name: 'from: value binding',
-    description: 'Button click payload writes variables.selectedPlan using from: "value".',
+    description: 'Component fragment: a Panel proving that click payload value writes variables.selectedPlan.',
+    category: 'fragment',
     resource: fromValueBinding,
   },
   {
     id: 'from-row-binding',
     name: 'from: row.id binding',
     description: 'Grid row selection writes variables.ticketId using from: "row.id".',
+    category: 'runtime',
     resource: fromRowBinding,
   },
   {
     id: 'rest-data-table',
     name: 'REST data table',
     description: 'Grid rows resolved through source: "rest" and rowsPath.',
+    category: 'runtime',
     resource: restDataTable,
   },
   {
     id: 'datasource-data-table',
     name: 'Datasource data table',
     description: 'Grid rows resolved through source: "datasource" as a datasourcekit adapter would register it.',
+    category: 'runtime',
     resource: datasourceDataTable,
   },
   {
     id: 'user-management',
     name: 'User management',
     description: 'Full page: table + Add member sheet + create mutation + toast via onEvent.',
+    category: 'runtime',
     resource: userManagement,
   },
-] as const
+]
 
 export const registry = createRegistry<KindRenderFn>()
 const playgroundDatasourceManager = createPlaygroundDatasourceManager()
@@ -2069,6 +2117,28 @@ const stepScope = registry.scope({
   rootLevels: ['template'],
   maxDepth: 8,
 })
+
+function scopeOptionsForExample(example: PlaygroundExample): ScopeOptions {
+  const rootLevels = example.category === 'fragment' ? undefined : ['template']
+  return {
+    apiVersions: ['resourcekit.dev/v1alpha1'],
+    kinds: { include: publicKindNames(registry) },
+    maxDepth: 8,
+    ...(rootLevels ? { rootLevels } : {}),
+    ...example.scope,
+  }
+}
+
+export function scopeForExample(example: PlaygroundExample): ScopedRegistry<KindRenderFn> {
+  return registry.scope(scopeOptionsForExample(example))
+}
+
+export function validatePlaygroundExample(example: PlaygroundExample): ValidationResult {
+  const scope = scopeForExample(example)
+  return isPlaygroundDocument(example.resource)
+    ? validateResourceDocument(example.resource, scope)
+    : validateResource(example.resource, scope)
+}
 
 interface StepWorkingNode {
   apiVersion: string
@@ -2235,11 +2305,11 @@ interface ReplayCheck {
   ok: boolean
 }
 
-function replayResource(resource: Resource, path = ''): ReplayCheck[] {
+function replayResource(resource: Resource, scope: ScopedRegistry<KindRenderFn> = stepScope, path = ''): ReplayCheck[] {
   const checks: ReplayCheck[] = []
   if (!resource.slots || resource.slots.length === 0) return checks
 
-  const batch = nextStageBatch(stepScope, { parent: { apiVersion: resource.apiVersion, kind: resource.kind } })
+  const batch = nextStageBatch(scope, { parent: { apiVersion: resource.apiVersion, kind: resource.kind } })
   const defs = (batch.schema?.$defs ?? {}) as Record<string, JsonSchema>
   const properties = (batch.schema?.properties ?? {}) as Record<string, JsonSchema>
 
@@ -2262,10 +2332,33 @@ function replayResource(resource: Resource, path = ''): ReplayCheck[] {
         const candidateKinds = propSchema ? stepCandidatesFromOneOf(stepSlotOneOf(propSchema), defs).map((c) => c.kind) : []
         checks.push({ path: childPath, parentKind: resource.kind, slotKey, actualKind: child.kind, validKinds: candidateKinds, ok: candidateKinds.includes(child.kind) })
       }
-      checks.push(...replayResource(child, childPath))
+      checks.push(...replayResource(child, scope, childPath))
     })
   }
   return checks
+}
+
+export function inspectPlaygroundExample(example: PlaygroundExample) {
+  const scope = scopeForExample(example)
+  const rootResource = isPlaygroundDocument(example.resource) ? example.resource.resource : example.resource
+  const stage = nextStage(scope, {})
+  const defs = (stage.schema?.$defs ?? {}) as Record<string, JsonSchema>
+  const candidateKinds = stage.fixed
+    ? [stage.fixed.kind]
+    : (stage.schema ? stepCandidatesFromOneOf((stage.schema.oneOf as JsonSchema[]) ?? [], defs) : []).map((candidate) => candidate.kind)
+  return {
+    scope,
+    rootResource,
+    root: {
+      onlyOption: Boolean(stage.fixed),
+      ok: candidateKinds.includes(rootResource.kind),
+      candidateKinds,
+    },
+    checks: replayResource(rootResource, scope),
+    validation: isPlaygroundDocument(example.resource)
+      ? validateResourceDocument(example.resource, scope)
+      : validateResource(example.resource, scope),
+  }
 }
 
 function StepByStepBuilder() {
@@ -2740,6 +2833,18 @@ function writeSampleUrl(exampleId: string): void {
   window.history.pushState({}, '', url)
 }
 
+const categoryLabels: Record<PlaygroundExampleCategory, string> = {
+  scenario: 'AI scenario',
+  'mcp-generated': 'MCP generated',
+  runtime: 'Runtime demo',
+  fragment: 'Component fragment',
+}
+
+function compositionTitle(category: PlaygroundExampleCategory): string {
+  if (category === 'scenario' || category === 'mcp-generated') return 'How AI built this'
+  return category === 'fragment' ? 'How this fragment is composed' : 'How this demo is composed'
+}
+
 function ExampleSelect({ value, onValueChange }: { value: string; onValueChange: (value: string) => void }) {
   const selectedExample = examples.find((example) => example.id === value) ?? examples[0]
   return (
@@ -2756,7 +2861,7 @@ function ExampleSelect({ value, onValueChange }: { value: string; onValueChange:
       <SelectContent>
         {examples.map((example) => (
           <SelectItem key={example.id} value={example.name}>
-            {example.name}
+            {categoryLabels[example.category]} · {example.name}
           </SelectItem>
         ))}
       </SelectContent>
@@ -2870,6 +2975,38 @@ const styles = `
   }
   .rk-example-select {
     min-width: 260px;
+  }
+  .rk-example-context {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+  }
+  .rk-example-meta {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    color: var(--muted-foreground);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .rk-example-category {
+    width: fit-content;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 7px;
+    color: var(--foreground);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .rk-example-category-scenario,
+  .rk-example-category-mcp-generated {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .rk-example-category-fragment {
+    border-style: dashed;
   }
   .rk-panel {
     min-height: 0;
@@ -3368,24 +3505,10 @@ export function App() {
   }
 
   const resourceJson = useMemo(() => prettyJson(resource), [resource])
-  const rootResource = isPlaygroundDocument(resource) ? resource.resource : resource
-
-  // The real nextStage/nextStageBatch trace for whatever resource is loaded —
-  // not a one-shot "here's the whole schema, generate a document" dump (that
-  // model was rejected; see docs/staged-generation-experiment.md "Final
-  // decision"). Reuses the same replay logic the Step-by-step tab uses to
-  // check hand-authored examples against the rule engine.
-  const aiTraceRoot = useMemo(() => {
-    // playgroundScope (not stepScope's rootLevels:['template']) — some Resource
-    // runtime examples are intentionally smaller fragments (e.g. a bare Panel),
-    // not whole-page templates, and are still valid roots in this tab's own scope.
-    const stage = nextStage(playgroundScope, {})
-    if (stage.fixed) return { onlyOption: true as const, ok: stage.fixed.kind === rootResource.kind, candidateKinds: [stage.fixed.kind] }
-    const defs = (stage.schema?.$defs ?? {}) as Record<string, JsonSchema>
-    const candidateKinds = (stage.schema ? stepCandidatesFromOneOf((stage.schema.oneOf as JsonSchema[]) ?? [], defs) : []).map((c) => c.kind)
-    return { onlyOption: false as const, ok: candidateKinds.includes(rootResource.kind), candidateKinds }
-  }, [rootResource.kind])
-  const aiTraceChecks = useMemo(() => replayResource(rootResource), [rootResource])
+  const selectedExample = useMemo(() => exampleById(selectedExampleId), [selectedExampleId])
+  const activeExample = useMemo<PlaygroundExample>(() => ({ ...selectedExample, resource }), [resource, selectedExample])
+  const composition = useMemo(() => inspectPlaygroundExample(activeExample), [activeExample])
+  const traceTitle = compositionTitle(selectedExample.category)
 
   useEffect(() => {
     const onPopState = () => {
@@ -3415,7 +3538,7 @@ export function App() {
       {loadError ? <pre className="rk-message">{loadError}</pre> : null}
       <ResourceRenderer
         confirmDialog={async ({ title, description }) => window.confirm(description ? `${title}\n\n${description}` : title)}
-        registry={playgroundScope}
+        registry={composition.scope}
         onEvent={handleDocumentEvent}
         renderError={(error) => <div className="fallback">{error instanceof Error ? error.message : 'Render error'}</div>}
         renderLoading={() => <div className="fallback">Loading kind...</div>}
@@ -3480,11 +3603,19 @@ export function App() {
                 ) : (
                   <section className="rk-render-pane">
                     <div className="rk-render-toolbar">
-                      <ExampleSelect value={selectedExampleId} onValueChange={selectExampleById} />
+                      <div className="rk-example-context">
+                        <ExampleSelect value={selectedExampleId} onValueChange={selectExampleById} />
+                        <div className="rk-example-meta">
+                          <span className={`rk-example-category rk-example-category-${selectedExample.category}`}>
+                            {categoryLabels[selectedExample.category]}
+                          </span>
+                          <span>{selectedExample.description}</span>
+                        </div>
+                      </div>
                       <div className="rk-pane-actions">
                         <Button size="sm" variant="outline" onClick={() => setAiTraceSheetOpen(true)}>
                           <Sparkles />
-                          How AI builds this
+                          {traceTitle}
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => setJsonSheetOpen(true)}>
                           <Braces />
@@ -3512,27 +3643,29 @@ export function App() {
                   <SheetContent side="right" className="rk-json-sheet-content">
                     <SheetHeader className="rk-json-sheet-header">
                       <div>
-                        <SheetTitle className="rk-json-sheet-title">How AI builds this</SheetTitle>
+                        <SheetTitle className="rk-json-sheet-title">{traceTitle}</SheetTitle>
                         <p className="rk-json-sheet-description">
-                          The real nextStage/nextStageBatch trace for this document — not a one-shot "here's the
-                          whole schema, generate a document" request. This is what an MCP client actually sees and
-                          decides, one position at a time.
+                          {selectedExample.category === 'scenario' || selectedExample.category === 'mcp-generated'
+                            ? 'The exact example scope is reused for root selection, slot replay, and final document validation.'
+                            : selectedExample.category === 'fragment'
+                              ? 'This is a renderable component fragment, not a full-page generation root. Its fragment scope and final validation are shown below.'
+                              : 'This hand-authored runtime demo proves rendering and interaction behavior; the composition check does not claim an MCP generation session.'}
                         </p>
                       </div>
                     </SheetHeader>
                     <div className="rk-step-panel">
-                      <p className={aiTraceRoot.ok ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
-                        {aiTraceRoot.onlyOption
-                          ? `root: only ${aiTraceRoot.candidateKinds[0]} is a valid root here — no choice needed`
-                          : !aiTraceRoot.ok
-                            ? `root: ${rootResource.kind} is NOT a valid root per the rule engine (valid options: ${aiTraceRoot.candidateKinds.join(', ') || '(none)'})`
-                            : aiTraceRoot.candidateKinds.length > 8
-                              ? `root: chose ${rootResource.kind} (valid — this scope has no root restriction, so any of the ${aiTraceRoot.candidateKinds.length} registered kinds qualify)`
-                              : `root: chose ${rootResource.kind} (valid — one of ${aiTraceRoot.candidateKinds.join(', ')})`}
+                      <p className={composition.root.ok ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
+                        {composition.root.onlyOption
+                          ? `root: only ${composition.root.candidateKinds[0]} is valid in this example's scope`
+                          : !composition.root.ok
+                            ? `root: ${composition.rootResource.kind} is NOT valid in this example's scope (valid options: ${composition.root.candidateKinds.join(', ') || '(none)'})`
+                            : selectedExample.category === 'fragment'
+                              ? `root: ${composition.rootResource.kind} is valid in fragment scope; it is intentionally not presented as a full-page root`
+                              : `root: chose ${composition.rootResource.kind} (valid in this example's declared scope)`}
                       </p>
-                      {aiTraceChecks.length > 0 ? (
+                      {composition.checks.length > 0 ? (
                         <ol className="rk-workflow-call-log">
-                          {aiTraceChecks.map((check) => (
+                          {composition.checks.map((check) => (
                             <li key={check.path}>
                               {check.ok ? '✓' : '✗'} <code>{check.parentKind}</code> → <code>{check.slotKey}</code>:
                               chose <strong>{check.actualKind}</strong>
@@ -3547,6 +3680,11 @@ export function App() {
                       ) : (
                         <p className="rk-step-slot-desc">This document has no slots — nothing to resolve beyond the root.</p>
                       )}
+                      <p className={composition.validation.valid ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
+                        {composition.validation.valid
+                          ? `✓ ${isPlaygroundDocument(resource) ? 'validateResourceDocument' : 'validateResource'}: valid under the same example scope`
+                          : `✗ final validation: ${composition.validation.issues.map((issue) => `${issue.path || '/'} ${issue.message}`).join('; ')}`}
+                      </p>
                     </div>
                   </SheetContent>
                 </Sheet>
