@@ -16,9 +16,11 @@ import {
 } from '@loykin/designkit'
 import { getValueAtPath } from '../../path'
 import type { ResourceKitPlugin, SubmitSpec } from '../../types'
+import { SUBMIT_CANCELLED } from '../../submit'
 import type { KindRenderFn, RenderContext } from '../../react'
 import { useBindingValue } from '../internal/bindings'
 import { withKindAliases } from '../internal/shared'
+import { submitSpecSchema } from '../internal/submitSchema'
 
 interface ListDetailSpec {
   listWidth?: number
@@ -309,12 +311,14 @@ function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
     <form
       onSubmit={(event) => {
         event.preventDefault()
-        const payload = Object.fromEntries(new FormData(event.currentTarget).entries())
+        const payload = collectFormPayload(new FormData(event.currentTarget))
         setBusy(true)
         setMessage(undefined)
         ctx.actions
           .submit(spec.submit, payload)
-          .then(() => setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' }))
+          .then((result) => {
+            if (result !== SUBMIT_CANCELLED) setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' })
+          })
           .catch((error: unknown) =>
             setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Submit failed' }),
           )
@@ -349,12 +353,14 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
     <form
       onSubmit={(event) => {
         event.preventDefault()
-        const payload = Object.fromEntries(new FormData(event.currentTarget).entries())
+        const payload = collectFormPayload(new FormData(event.currentTarget))
         setBusy(true)
         setMessage(undefined)
         ctx.actions
           .submit(spec.submit, payload)
-          .then(() => setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' }))
+          .then((result) => {
+            if (result !== SUBMIT_CANCELLED) setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' })
+          })
           .catch((error: unknown) =>
             setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Submit failed' }),
           )
@@ -366,11 +372,14 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
           {section.label && <h3 className="mb-1 text-sm font-medium">{section.label}</h3>}
           {section.description && <p className="mb-3 text-xs text-muted-foreground">{section.description}</p>}
           <div className="grid gap-3">
-            {section.fields.map((field) => {
+            {section.fields.map((field, fieldIndex) => {
               const fieldValue = field.fieldRef !== undefined ? getValueAtPath(ctx.record, field.fieldRef) : undefined
               const defaultValue = fieldValue == null ? field.defaultValue : String(fieldValue)
               return (
-                <label key={field.name} className="grid gap-1 text-sm">
+                // Repeated `name` is a deliberately supported pattern now (a
+                // checkbox group posting multiple values under one field
+                // name) — `field.name` alone is no longer a safe React key.
+                <label key={`${field.name}-${fieldIndex}`} className="grid gap-1 text-sm">
                   {field.label && <span className="text-muted-foreground">{field.label}</span>}
                   <KitInput
                     name={field.name}
@@ -399,70 +408,13 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
   )
 }
 
-const submitSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['mutation'],
-  properties: {
-    action: { type: 'string' },
-    mutation: { type: 'object' },
-    onSuccess: {
-      type: 'array',
-      items: {
-        oneOf: [
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind', 'variable'],
-            properties: {
-              kind: { const: 'setVariable' },
-              variable: { type: 'string' },
-              from: { type: 'string' },
-              value: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
-            },
-          },
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind', 'event'],
-            properties: {
-              kind: { const: 'emit' },
-              event: { type: 'string' },
-            },
-          },
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind', 'node'],
-            properties: {
-              kind: { const: 'setData' },
-              node: { type: 'string' },
-              from: { type: 'string' },
-              value: {},
-            },
-          },
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind', 'nodes'],
-            properties: {
-              kind: { const: 'invalidateData' },
-              nodes: { type: 'array', items: { type: 'string' } },
-            },
-          },
-          {
-            type: 'object',
-            additionalProperties: false,
-            required: ['kind', 'nodes'],
-            properties: {
-              kind: { const: 'refetchData' },
-              nodes: { type: 'array', items: { type: 'string' } },
-            },
-          },
-        ],
-      },
-    },
-  },
+function collectFormPayload(formData: FormData): Record<string, FormDataEntryValue | FormDataEntryValue[]> {
+  const payload: Record<string, FormDataEntryValue | FormDataEntryValue[]> = {}
+  for (const key of new Set(formData.keys())) {
+    const values = formData.getAll(key)
+    payload[key] = values.length === 1 ? values[0] : values
+  }
+  return payload
 }
 
 const formViewFieldSchema = {
@@ -1158,7 +1110,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           additionalProperties: false,
           required: ['submit'],
           properties: {
-            submit: submitSchema,
+            submit: submitSpecSchema,
             submitLabel: { type: 'string' },
             successMessage: { type: 'string' },
           },
@@ -1184,7 +1136,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           required: ['sections', 'submit'],
           properties: {
             sections: { type: 'array', items: formViewSectionSchema },
-            submit: submitSchema,
+            submit: submitSpecSchema,
             submitLabel: { type: 'string' },
             successMessage: { type: 'string' },
           },

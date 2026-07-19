@@ -214,3 +214,90 @@ describe('ResourceRenderer mutation-to-dataflow integration', () => {
     expect(query).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('ResourceRenderer visibility', () => {
+  it('reactively hides a visible root when its page variable changes', async () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'visibility',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div', { 'data-testid': 'root-probe' }, 'Visible')
+          },
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Probe',
+      visible: { $variable: 'roles', contains: 'admin' },
+      spec: { variables: [{ name: 'roles', type: 'string[]', default: ['admin'] }] },
+    }
+
+    const view = render(createElement(ResourceRenderer, { resource, registry }))
+    expect(view.queryByTestId('root-probe')).toBeTruthy()
+
+    await act(async () => context?.variables.set('roles', []))
+    expect(view.queryByTestId('root-probe')).toBeNull()
+  })
+
+  it('keeps slot children, entries, and resources on the same filtered set', async () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'visibility',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Group',
+          specSchema: { type: 'object' },
+          slotPolicy: { slots: { content: { min: 0 } } },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement(
+              'div',
+              null,
+              createElement('span', { 'data-testid': 'counts' }, `${ctx.slots.entries('content').length}:${ctx.slots.resources('content').length}`),
+              ctx.slots.one('content'),
+            )
+          },
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (resource) => createElement('span', null, resource.metadata?.name),
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Group',
+      spec: { variables: [{ name: 'showFirst', default: '' }] },
+      slots: [
+        {
+          name: 'content',
+          items: [
+            { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', metadata: { name: 'hidden' }, visible: { $variable: 'showFirst' }, spec: {} },
+            { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', metadata: { name: 'shown' }, spec: {} },
+          ],
+        },
+      ],
+    }
+
+    const view = render(createElement(ResourceRenderer, { resource, registry }))
+    expect(view.getByTestId('counts').textContent).toBe('1:1')
+    expect(view.queryByText('hidden')).toBeNull()
+    expect(view.queryByText('shown')).toBeTruthy()
+
+    await act(async () => context?.variables.set('showFirst', 'yes'))
+    expect(view.getByTestId('counts').textContent).toBe('2:2')
+    expect(view.queryByText('hidden')).toBeTruthy()
+  })
+})

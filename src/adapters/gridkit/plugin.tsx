@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { DataGrid, DataGridPaginationCompact, GlobalSearch, inferTablePayload } from '@loykin/gridkit'
 import { getValueAtPath } from '../../path'
-import type { DataBinding, ResourceKitPlugin } from '../../types'
-import type { KindRenderFn, RenderContext } from '../../react/types'
+import type { ActionSpec, DataBinding, ResourceKitPlugin } from '../../types'
+import type { KindRenderFn, RenderContext } from '../../react'
 import { withKindAliases } from '../internal/shared'
+import { submitSpecSchema } from '../internal/submitSchema'
 
 interface ColumnHint {
   label?: string
@@ -13,7 +14,8 @@ interface ColumnHint {
   flex?: number
   emphasis?: 'strong'
   tone?: 'muted'
-  display?: 'badge'
+  display?: 'badge' | 'actions'
+  items?: ActionSpec[]
   variant?: string
   map?: Record<string, string>
 }
@@ -33,7 +35,7 @@ interface GridTableSpec {
   inferOptions?: { hints?: Record<string, Partial<ColumnHint>> }
 }
 
-type CellCtx = { getValue: () => unknown }
+type CellCtx = { getValue: () => unknown; row: { original: Record<string, unknown> } }
 
 function originalRow(row: unknown): unknown {
   if (typeof row === 'object' && row !== null && 'original' in row) {
@@ -82,6 +84,50 @@ function buildHintCell(type: string | undefined, hint: ColumnHint | undefined): 
   }
 }
 
+function matchesRowCondition(row: Record<string, unknown>, condition: ActionSpec['hideWhen']): boolean {
+  return condition !== undefined && getValueAtPath(row, condition.field) === condition.equals
+}
+
+function RowActionsCell({ items, row, ctx }: { items: ActionSpec[]; row: Record<string, unknown>; ctx: RenderContext }) {
+  const [busy, setBusy] = useState<string>()
+  const [error, setError] = useState<string>()
+
+  const invoke = (event: MouseEvent<HTMLButtonElement>, item: ActionSpec) => {
+    event.stopPropagation()
+    if (item.event) ctx.events.emit(item.event, { row })
+    if (!item.submit) return
+    setBusy(item.id)
+    setError(undefined)
+    void ctx.actions
+      .submit(item.submit, row)
+      .catch((nextError: unknown) => setError(nextError instanceof Error ? nextError.message : 'Action failed'))
+      .finally(() => setBusy(undefined))
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      {items
+        .filter((item) => !matchesRowCondition(row, item.hideWhen))
+        .map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={
+              item.variant === 'destructive'
+                ? 'rounded-md px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50'
+                : 'rounded-md px-2 py-1 text-xs hover:bg-muted disabled:opacity-50'
+            }
+            disabled={busy !== undefined || matchesRowCondition(row, item.disabledWhen)}
+            onClick={(event) => invoke(event, item)}
+          >
+            {busy === item.id ? 'Working…' : item.label}
+          </button>
+        ))}
+      {error && <span className="text-xs text-destructive">{error}</span>}
+    </div>
+  )
+}
+
 function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderContext }) {
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -119,7 +165,10 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
     // "company.name" work without the row needing that exact top-level key.
     if (explicitColumns.length > 0) {
       return explicitColumns.map(([key, hint]) => {
-        const cell = buildHintCell(hint.type, hint)
+        const cell =
+          hint.display === 'actions'
+            ? ({ row }: CellCtx) => <RowActionsCell items={hint.items ?? []} row={row.original} ctx={ctx} />
+            : buildHintCell(hint.type, hint)
         return {
           id: key,
           accessorFn: (row: Record<string, unknown>) => getValueAtPath(row, key),
@@ -155,7 +204,7 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
         meta: { align: col.align, flex: col.flex ?? 1 },
       }
     })
-  }, [rows, spec.columns, spec.inferOptions, spec.title])
+  }, [ctx, rows, spec.columns, spec.inferOptions, spec.title])
 
   if (error) return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load rows'}</div>
   if (!rows) return <div className="resourcekit-state">Loading rows...</div>
@@ -213,7 +262,38 @@ export function createGridKitPlugin(): ResourceKitPlugin<KindRenderFn> {
                     flex: { type: 'number', description: 'Relative column width. Default: 1.' },
                     emphasis: { enum: ['strong'] },
                     tone: { enum: ['muted'] },
-                    display: { enum: ['badge'] },
+                    display: { enum: ['badge', 'actions'] },
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['id', 'label'],
+                        properties: {
+                          id: { type: 'string' },
+                          label: { type: 'string' },
+                          variant: { type: 'string' },
+                          event: { type: 'string' },
+                          submit: submitSpecSchema,
+                          hideWhen: {
+                            type: 'object',
+                            additionalProperties: false,
+                            required: ['field', 'equals'],
+                            properties: { field: { type: 'string' }, equals: {} },
+                          },
+                          disabledWhen: {
+                            type: 'object',
+                            additionalProperties: false,
+                            required: ['field', 'equals'],
+                            properties: { field: { type: 'string' }, equals: {} },
+                          },
+                        },
+                        oneOf: [
+                          { required: ['event'], not: { required: ['submit'] } },
+                          { required: ['submit'], not: { required: ['event'] } },
+                        ],
+                      },
+                    },
                     variant: { type: 'string', description: 'Badge variant when display is "badge".' },
                     map: {
                       type: 'object',

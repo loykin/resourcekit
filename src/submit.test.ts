@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runSubmit } from './submit'
+import { runSubmit, SUBMIT_CANCELLED } from './submit'
 import type { SubmitRuntime } from './submit'
 import type { VariableValue } from './types'
 
@@ -28,6 +28,43 @@ describe('runSubmit', () => {
       { name: 'Ada' },
       { variables: { customerId: '7' } },
     )
+  })
+
+  it('resolves explicit payload references in mutation bindings and confirmation copy', async () => {
+    const resolver = vi.fn(async () => ({ ok: true }))
+    const confirm = vi.fn(async () => true)
+    const runtime = makeRuntime({ getMutationResolver: () => resolver, confirm })
+
+    await runSubmit(
+      runtime,
+      {
+        mutation: { target: 'rest', url: '/api/customers/${payload.customer.id}', method: 'DELETE' },
+        confirm: { title: 'Delete ${payload.customer.name}?', description: 'Tenant ${customerId}' },
+      },
+      { customer: { id: '9', name: 'Ada' } },
+    )
+
+    expect(confirm).toHaveBeenCalledWith({ title: 'Delete Ada?', description: 'Tenant 7' })
+    expect(resolver).toHaveBeenCalledWith(
+      { target: 'rest', url: '/api/customers/9', method: 'DELETE' },
+      { customer: { id: '9', name: 'Ada' } },
+      { variables: { customerId: '7' } },
+    )
+  })
+
+  it('fails closed without a confirm handler and returns a cancellation sentinel without mutating', async () => {
+    const resolver = vi.fn(async () => ({ ok: true }))
+    await expect(
+      runSubmit(makeRuntime({ getMutationResolver: () => resolver }), { mutation: { target: 'memory' }, confirm: { title: 'Proceed?' } }, {}),
+    ).rejects.toThrow(/no confirm handler/)
+
+    const cancelled = await runSubmit(
+      makeRuntime({ getMutationResolver: () => resolver, confirm: async () => false }),
+      { mutation: { target: 'memory' }, confirm: { title: 'Proceed?' } },
+      {},
+    )
+    expect(cancelled).toBe(SUBMIT_CANCELLED)
+    expect(resolver).not.toHaveBeenCalled()
   })
 
   it('applies onSuccess setVariable effects from the result via dot-path', async () => {
@@ -113,7 +150,19 @@ describe('runSubmit', () => {
     const runtime = makeRuntime()
     await expect(
       runSubmit(runtime, { mutation: { target: 'rest', url: '/api/${missing}' } }, {}),
-    ).rejects.toThrow(/unresolved variables/)
+    ).rejects.toThrow(/unresolved references/)
+  })
+
+  it('rejects unresolved payload references before confirmation', async () => {
+    const confirm = vi.fn(async () => true)
+    await expect(
+      runSubmit(
+        makeRuntime({ confirm }),
+        { mutation: { target: 'rest', url: '/api/${payload.id}' }, confirm: { title: 'Delete?' } },
+        {},
+      ),
+    ).rejects.toThrow(/payload\.id/)
+    expect(confirm).not.toHaveBeenCalled()
   })
 
   it('rejects unregistered mutation targets', async () => {

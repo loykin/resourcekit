@@ -32,7 +32,14 @@ export interface Resource<TSpec = unknown> {
   /** Runtime-owned inputs declared by the kind's `bindingPolicy`. */
   bindings?: Record<string, ValueBinding>
   slots?: Slot[]
+  /** Runtime-owned conditional rendering against one flat page variable. */
+  visible?: VisibilityCondition
 }
+
+export type VisibilityCondition =
+  | { $variable: string; equals?: never; contains?: never }
+  | { $variable: string; equals: string; contains?: never }
+  | { $variable: string; contains: string; equals?: never }
 
 export interface Metadata {
   name?: string
@@ -247,6 +254,7 @@ export type SubmitEffect =
 export interface SubmitSpec {
   action?: string
   mutation: MutationBinding
+  confirm?: ConfirmSpec
   onSuccess?: SubmitEffect[]
 }
 
@@ -272,16 +280,25 @@ export interface FilterSpec {
   options?: Array<{ label: string; value: string }>
 }
 
-export interface ActionSpec {
+export interface ConfirmSpec {
+  title: string
+  description?: string
+}
+
+export interface RowCondition {
+  field: string
+  equals: unknown
+}
+
+interface ActionSpecBase {
   id: string
   label: string
-  action?: string
-  mutation?: MutationBinding
-  confirm?: {
-    title: string
-    description?: string
-  }
+  variant?: string
+  hideWhen?: RowCondition
+  disabledWhen?: RowCondition
 }
+
+export type ActionSpec = ActionSpecBase & ({ event: string; submit?: never } | { submit: SubmitSpec; event?: never })
 
 /** Messages shown for a view's empty/error states; omitted fields fall back to the kind's default copy. */
 export interface ViewStateSpec {

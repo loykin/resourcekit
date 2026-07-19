@@ -2,7 +2,7 @@ import { createElement, Fragment, useCallback, useEffect, useMemo, useReducer, u
 import type { ReactNode } from 'react'
 import { createDataflowRuntime, isDataRef, scanDataRefs } from '../dataflow'
 import type { DataflowRuntime, DataRef, DataStore, ResourceDocument } from '../dataflow'
-import type { DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration } from '../types'
+import type { ConfirmSpec, DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration } from '../types'
 import type { ResourceRegistry, ScopedRegistry } from '../registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../variables'
 import type { VariableEngine } from '../variables'
@@ -19,6 +19,8 @@ export interface ResourceRendererProps {
   renderUnknownKind?: (resource: Resource) => ReactNode
   renderLoading?: () => ReactNode
   renderError?: (error: unknown, resource: Resource) => ReactNode
+  /** Handles SubmitSpec.confirm. A confirmed submit fails closed when this is omitted. */
+  confirmDialog?: (options: ConfirmSpec) => Promise<boolean>
   /**
    * External hook: receives `emit` event policies and submit `emit` effects.
    * This is how a document reaches app-owned behavior (toasts, navigation,
@@ -85,6 +87,15 @@ function renderNodes(
       resource,
     }),
   )
+}
+
+function isVisible(resource: Resource, runtime: Runtime): boolean {
+  const condition = resource.visible
+  if (!condition) return true
+  const value = runtime.engine.get(condition.$variable)
+  if (condition.equals !== undefined) return value === condition.equals
+  if (condition.contains !== undefined) return Array.isArray(value) && value.includes(condition.contains)
+  return Array.isArray(value) ? value.length > 0 : Boolean(value)
 }
 
 function resolveThroughRuntime(
@@ -224,12 +235,15 @@ function renderKindNode(
     const slots = resource.slots ?? []
     const slotNodes = new Map<string | undefined, ReactNode>()
     const slotEntries = new Map<string | undefined, Array<{ resource: Resource; node: ReactNode }>>()
+    const slotResources = new Map<string | undefined, Resource[]>()
     for (const [index, slot] of slots.entries()) {
-      const nodes = renderNodes(slot.items, props, `slot-${index}-${slot.name ?? 'default'}`)
+      const visibleItems = slot.items.filter((child) => isVisible(child, runtime))
+      const nodes = renderNodes(visibleItems, props, `slot-${index}-${slot.name ?? 'default'}`)
       slotNodes.set(slot.name, nodes)
+      slotResources.set(slot.name, visibleItems)
       slotEntries.set(
         slot.name,
-        slot.items.map((child, childIndex) => ({
+        visibleItems.map((child, childIndex) => ({
           resource: child,
           node: Array.isArray(nodes) ? nodes[childIndex] : null,
         })),
@@ -247,7 +261,7 @@ function renderKindNode(
           if (node === undefined || node === null) throw new Error(`required slot ${name} is missing`)
           return node
         },
-        resources: (name: string) => slots.find((slot) => slot.name === name)?.items ?? [],
+        resources: (name: string) => slotResources.get(name) ?? [],
         entries: (name?: string) => slotEntries.get(name) ?? [],
       },
       data: {
@@ -322,6 +336,7 @@ function renderKindNode(
                 set: (name, value) => runtime.engine.set(name, value),
               },
               allowedActions,
+              confirm: props.confirmDialog,
               emit: (event, result) => props.onEvent?.(event, result),
               dataflow: (() => {
                 const dataflow = runtime.dataflow
@@ -420,6 +435,12 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
   return renderKindNode(props, manifest, render, nodeVersion)
 }
 
+function RootResourceNode(props: ResourceNodeProps): ReactNode {
+  useSyncExternalStore(props.runtime.subscribeVersion, props.runtime.getVersion, props.runtime.getVersion)
+  if (!isVisible(props.resource, props.runtime)) return null
+  return createElement(ResourceNode, props)
+}
+
 /**
  * Recursive renderer — slots render before the kind renderer runs, so a kind
  * receives finished ReactNodes through ctx.slots and maps them onto its
@@ -493,7 +514,7 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
     }
   }, [onDataError, runtime])
 
-  return createElement(ResourceNode, { ...props, resource, runtime })
+  return createElement(RootResourceNode, { ...props, resource, runtime })
 }
 
 function isResourceDocument(value: Resource | ResourceDocument): value is ResourceDocument {

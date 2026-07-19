@@ -121,6 +121,7 @@ describe('createRegistry', () => {
     expect(scopedPanel?.slotPolicy?.slots).toEqual({ main: { min: 1 } })
     expect(scopedPanel?.specSchema).toEqual({
       type: 'object',
+      additionalProperties: false,
       properties: {
         title: { type: 'string' },
         pageSize: { const: 50 },

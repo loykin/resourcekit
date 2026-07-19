@@ -98,6 +98,15 @@ function applySpecScope(schema: JsonSchema, kind: string, options: ScopeOptions)
     delete properties[key]
   }
 
+  // pick/omit narrow the *allowed* field set. If the underlying spec schema
+  // left additionalProperties open (or unset — JSON Schema treats that as
+  // open too), a removed field would still validate: the scope would only be
+  // hiding the field from the generated schema, not actually rejecting it.
+  // Close it so pick/omit are a real capability boundary, not a UI hint.
+  if (specOptions.pick || (specOptions.omit && specOptions.omit.length > 0)) {
+    scoped.additionalProperties = false
+  }
+
   const required = Array.isArray(scoped.required)
     ? scoped.required.filter((value): value is string => typeof value === 'string')
     : []

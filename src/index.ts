@@ -10,6 +10,7 @@ export type {
   VariableRef,
   ValueBinding,
   Resource,
+  VisibilityCondition,
   Metadata,
   Slot,
   SlotPolicy,
@@ -31,11 +32,13 @@ export type {
   DataSourceAdapter,
   MutationBinding,
   MutationResolver,
+  ConfirmSpec,
   SubmitSpec,
   SubmitEffect,
   FieldSpec,
   FilterSpec,
   ActionSpec,
+  RowCondition,
   ViewStateSpec,
   ConnectionPolicy,
   ConnectionMcpPolicy,
@@ -81,8 +84,8 @@ export { restConnectionAdapter } from './connectionAdapters'
 export type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
 
 export { getValueAtPath, setValueAtPath, coerceVariableValue } from './path'
-export { runSubmit } from './submit'
-export type { SubmitRuntime } from './submit'
+export { runSubmit, SUBMIT_CANCELLED } from './submit'
+export type { SubmitRuntime, SubmitResult } from './submit'
 
 export { LOCKED_ANNOTATION, isLocked, markLocked, preserveLockedNodes } from './annotations'
 export { canonicalizeJson, canonicalizeResource, canonicalStringify } from './canonical'

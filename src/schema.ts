@@ -41,7 +41,12 @@ function hasRequiredBindings(manifest: KindManifest): boolean {
   return Object.values(manifest.bindingPolicy?.inputs ?? {}).some((port) => port.required)
 }
 
-function dataBindingSchemas(sources: string[]): JsonSchema[] {
+/** `enum`-constrains a string schema to `allow` when the scope sets one — otherwise leaves it open. Mirrors the `$variable`/`visibleVariableNames` pattern below. */
+function allowedStringSchema(allow: string[] | undefined): JsonSchema {
+  return allow ? { type: 'string', enum: allow } : { type: 'string' }
+}
+
+function dataBindingSchemas(sources: string[], allowedConnections: string[] | undefined, allowedDatasources: string[] | undefined): JsonSchema[] {
   return sources.map((source) => {
     if (source === 'static') {
       return {
@@ -70,6 +75,37 @@ function dataBindingSchemas(sources: string[]): JsonSchema[] {
         },
       }
     }
+    if (source === 'connection') {
+      return {
+        type: 'object',
+        additionalProperties: false,
+        required: ['source', 'connection', 'request'],
+        properties: {
+          source: { const: 'connection' },
+          connection: allowedStringSchema(allowedConnections),
+          request: { description: "Shape is defined by the connection's adapter (ConnectionAdapter.requestSchema)." },
+          valuePath: { type: 'string' },
+        },
+        description: 'References a registered connection by UID instead of embedding a raw URL/DSN.',
+      }
+    }
+    if (source === 'datasource') {
+      return {
+        type: 'object',
+        additionalProperties: false,
+        required: ['source', 'datasourceUid'],
+        properties: {
+          source: { const: 'datasource' },
+          datasourceUid: allowedStringSchema(allowedDatasources),
+          datasourceType: { type: 'string' },
+          query: {},
+          options: { type: 'object' },
+          cacheTtlMs: { type: 'number' },
+          staleWhileRevalidate: { type: 'boolean' },
+          valuePath: { type: 'string' },
+        },
+      }
+    }
     return {
       type: 'object',
       required: ['source'],
@@ -80,7 +116,7 @@ function dataBindingSchemas(sources: string[]): JsonSchema[] {
   })
 }
 
-function mutationBindingSchemas(targets: string[]): JsonSchema[] {
+function mutationBindingSchemas(targets: string[], allowedDatasources: string[] | undefined): JsonSchema[] {
   return targets.map((target) => {
     if (target === 'rest') {
       return {
@@ -102,7 +138,7 @@ function mutationBindingSchemas(targets: string[]): JsonSchema[] {
         required: ['target', 'datasourceUid'],
         properties: {
           target: { const: 'datasource' },
-          datasourceUid: { type: 'string' },
+          datasourceUid: allowedStringSchema(allowedDatasources),
           mutation: {},
         },
       }
@@ -176,6 +212,7 @@ function cloneSchema(schema: JsonSchema): JsonSchema {
 interface WellKnownRefOptions {
   hasDataBindingSchema: boolean
   hasMutationBindingSchema: boolean
+  allowedActions?: string[]
 }
 
 /**
@@ -199,6 +236,9 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
       const properties = object.properties as Record<string, unknown>
       if (options.hasDataBindingSchema && 'data' in properties) properties.data = { $ref: '#/$defs/dataBinding' }
       if (options.hasMutationBindingSchema && 'mutation' in properties) properties.mutation = { $ref: '#/$defs/mutationBinding' }
+      if ('mutation' in properties && 'action' in properties && options.allowedActions) {
+        properties.action = { type: 'string', enum: options.allowedActions }
+      }
       if ('events' in properties) properties.events = { type: 'object', additionalProperties: { $ref: '#/$defs/eventPolicy' } }
       if ('variables' in properties) properties.variables = { type: 'array', items: { $ref: '#/$defs/variableDeclaration' } }
     }
@@ -231,16 +271,32 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
     properties: { $variable: { type: 'string' } },
   }
   defs.valueBinding = { oneOf: [{ $ref: '#/$defs/dataRef' }, { $ref: '#/$defs/variableRef' }] }
+  const visibleVariableNames = scoped.options.variables?.allow
+  defs.visibilityCondition = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['$variable'],
+    properties: {
+      $variable: visibleVariableNames ? { type: 'string', enum: visibleVariableNames } : { type: 'string' },
+      equals: { type: 'string' },
+      contains: { type: 'string' },
+    },
+    oneOf: [
+      { required: ['$variable'], not: { anyOf: [{ required: ['equals'] }, { required: ['contains'] }] } },
+      { required: ['$variable', 'equals'], not: { required: ['contains'] } },
+      { required: ['$variable', 'contains'], not: { required: ['equals'] } },
+    ],
+  }
 
-  const dataSchemas = dataBindingSchemas(scoped.listDataResolvers())
+  const dataSchemas = dataBindingSchemas(scoped.listDataResolvers(), scoped.options.connections?.allow, scoped.options.datasources?.allow)
   const hasDataBindingSchema = dataSchemas.length > 0
   if (hasDataBindingSchema) defs.dataBinding = dataSchemas.length === 1 ? dataSchemas[0] : { oneOf: dataSchemas }
 
-  const mutationSchemas = mutationBindingSchemas(scoped.listMutationResolvers())
+  const mutationSchemas = mutationBindingSchemas(scoped.listMutationResolvers(), scoped.options.datasources?.allow)
   const hasMutationBindingSchema = mutationSchemas.length > 0
   if (hasMutationBindingSchema) defs.mutationBinding = mutationSchemas.length === 1 ? mutationSchemas[0] : { oneOf: mutationSchemas }
 
-  return { hasDataBindingSchema, hasMutationBindingSchema }
+  return { hasDataBindingSchema, hasMutationBindingSchema, allowedActions: scoped.options.actions?.allow }
 }
 
 /** Manifests matching `accepts` (by kind name) or `acceptsLevels` (by level intersection), deduped. Unset both to accept everything. */
@@ -273,6 +329,7 @@ function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOpti
       kind: { const: manifest.kind },
       metadata: metadataSchema,
       spec: embedSpecSchema(manifest, refOptions, defs),
+      visible: { $ref: '#/$defs/visibilityCondition' },
       ...(bindings ? { bindings } : {}),
     },
     ...(manifest.description ? { description: manifest.description } : {}),
@@ -411,6 +468,7 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
       kind: { const: manifest.kind },
       metadata: metadataSchema,
       spec: embedSpecSchema(manifest, refOptions, definitions),
+      visible: { $ref: '#/$defs/visibilityCondition' },
     }
     const bindings = bindingsSchema(manifest)
     if (bindings) properties.bindings = bindings
@@ -419,18 +477,36 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
 
     if (manifest.slotPolicy) {
       const slotBranches: JsonSchema[] = []
-      if (manifest.slotPolicy.defaultSlot) {
-        const rule = manifest.slotPolicy.defaultSlot
-        slotBranches.push(slotItemSchema(undefined, rule.accepts, rule.acceptsLevels, rule.min, rule.max, rule.description))
+      // Each declared slot name (including the unnamed default slot) may
+      // appear at most once in `slots` — the renderer keeps only the last
+      // entry with a given name (see validateSlots's duplicate check) — and
+      // a `min > 0` slot must appear at least once. `contains`/`minContains`/
+      // `maxContains` express both per name, independently of every other
+      // declared slot, via one `allOf` branch each.
+      const slotPresenceConstraints: JsonSchema[] = []
+      let hasRequiredSlot = false
+
+      const addSlotRule = (name: string | undefined, rule: SlotRule) => {
+        const branch = slotItemSchema(name, rule.accepts, rule.acceptsLevels, rule.min, rule.max, rule.description)
+        slotBranches.push(branch)
+        const constraint: JsonSchema = { contains: branch, maxContains: 1 }
+        if (rule.min !== undefined && rule.min > 0) {
+          constraint.minContains = 1
+          hasRequiredSlot = true
+        }
+        slotPresenceConstraints.push(constraint)
       }
-      for (const [name, rule] of Object.entries(manifest.slotPolicy.slots ?? {})) {
-        slotBranches.push(slotItemSchema(name, rule.accepts, rule.acceptsLevels, rule.min, rule.max, rule.description))
-      }
+
+      if (manifest.slotPolicy.defaultSlot) addSlotRule(undefined, manifest.slotPolicy.defaultSlot)
+      for (const [name, rule] of Object.entries(manifest.slotPolicy.slots ?? {})) addSlotRule(name, rule)
+
       if (slotBranches.length > 0) {
         properties.slots = {
           type: 'array',
           items: slotBranches.length === 1 ? slotBranches[0] : { oneOf: slotBranches },
+          ...(slotPresenceConstraints.length > 0 ? { allOf: slotPresenceConstraints } : {}),
         }
+        if (hasRequiredSlot) required.push('slots')
       }
     }
 

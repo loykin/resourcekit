@@ -79,6 +79,25 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   if ('slots' in resource && !Array.isArray(resource.slots)) {
     addIssue(issues, `${path}/slots`, 'slots must be an array', 'wrap slot entries in an array: [{ items: [...] }]')
   }
+  if ('visible' in resource) {
+    if (!isRecord(resource.visible) || typeof resource.visible.$variable !== 'string') {
+      addIssue(issues, `${path}/visible`, 'visible must reference a page variable', 'use { "$variable": "name" } with optional equals or contains')
+    } else {
+      const hasEquals = 'equals' in resource.visible
+      const hasContains = 'contains' in resource.visible
+      if (hasEquals && typeof resource.visible.equals !== 'string') {
+        addIssue(issues, `${path}/visible/equals`, 'visible.equals must be a string', 'use a string value that can be compared with the page variable')
+      }
+      if (hasContains && typeof resource.visible.contains !== 'string') {
+        addIssue(issues, `${path}/visible/contains`, 'visible.contains must be a string', 'use a string member expected in the page variable array')
+      }
+      if (hasEquals && hasContains) {
+        addIssue(issues, `${path}/visible`, 'visible cannot use equals and contains together', 'keep exactly one comparison operator')
+      }
+      const extra = Object.keys(resource.visible).filter((key) => !['$variable', 'equals', 'contains'].includes(key))
+      if (extra.length > 0) addIssue(issues, `${path}/visible`, `visible has unknown field ${extra[0]}`, 'use only $variable, equals, or contains')
+    }
+  }
   return typeof resource.apiVersion === 'string' && typeof resource.kind === 'string' && 'spec' in resource
 }
 
@@ -187,6 +206,7 @@ function validateSlots(resource: Resource, registry: ResourceRegistry | ScopedRe
   }
 
   const declaredSlotNames = Object.keys(manifest.slotPolicy.slots ?? {})
+  const seenCounts = new Map<string | undefined, number>()
 
   slots.forEach((slot, index) => {
     if (!isRecord(slot)) {
@@ -211,8 +231,43 @@ function validateSlots(resource: Resource, registry: ResourceRegistry | ScopedRe
       )
       return
     }
+
+    // A renderer keeps only the last slot with a given name (Map.set
+    // semantics) — a second declaration silently discards the first one's
+    // children, so it must fail validation instead of passing quietly.
+    const priorCount = seenCounts.get(name) ?? 0
+    if (priorCount > 0) {
+      addIssue(
+        issues,
+        `${path}/slots/${index}`,
+        name === undefined ? 'default slot is declared more than once' : `slot ${name} is declared more than once`,
+        'merge these into a single slot entry — only the last slot with this name is rendered',
+      )
+    }
+    seenCounts.set(name, priorCount + 1)
+
     validateRule(rule, slot, `${path}/slots/${index}`, registry, issues)
   })
+
+  // validateRule only checks min/max for slots that are *present* — a
+  // required slot (min > 0) that's missing from `resource.slots` entirely
+  // never reaches that check, so it has to be caught here instead.
+  const declaredRules: Array<[string | undefined, SlotRule]> = [
+    ...(manifest.slotPolicy.defaultSlot ? ([[undefined, manifest.slotPolicy.defaultSlot]] as Array<[string | undefined, SlotRule]>) : []),
+    ...Object.entries(manifest.slotPolicy.slots ?? {}),
+  ]
+  for (const [name, rule] of declaredRules) {
+    if (rule.min !== undefined && rule.min > 0 && !seenCounts.has(name)) {
+      addIssue(
+        issues,
+        `${path}/slots`,
+        name === undefined ? `default slot is required (min ${rule.min}) but missing` : `slot ${name} is required (min ${rule.min}) but missing`,
+        name === undefined
+          ? `add a slot entry with no name and at least ${rule.min} child resource(s)`
+          : `add a slot entry named "${name}" with at least ${rule.min} child resource(s)`,
+      )
+    }
+  }
 }
 
 function variableDeclarations(spec: unknown): VariableDeclaration[] {
@@ -244,6 +299,9 @@ function validateScopedCapabilities(resource: Resource, options: ScopeOptions | 
   const variableAllow = options.variables?.allow
   const variableHint = () => `use one of the scope's allowed variables: ${variableAllow?.join(', ') || '(none allowed)'}`
   if (variableAllow) {
+    if (resource.visible && typeof resource.visible.$variable === 'string' && !variableAllow.includes(resource.visible.$variable)) {
+      addIssue(issues, `${path}/visible/$variable`, `variable ${resource.visible.$variable} is not allowed in this scope`, variableHint())
+    }
     for (const name of scanVariableRefs(resource.spec)) {
       if (!variableAllow.includes(name)) addIssue(issues, `${path}/spec`, `variable ${name} is not allowed in this scope`, variableHint())
     }
@@ -302,9 +360,34 @@ function validateDatasourceAndActions(resource: Resource, registry: ResourceRegi
           `use one of the scope's allowed datasources: ${options.datasources.allow.join(', ') || '(none allowed)'}`,
         )
       }
+      // Mirrors the same check the ResourceDocument data-graph path applies
+      // to `resolve` nodes — a bare Resource's `spec.data`/binding tree must
+      // not be able to reach a connection the document-graph path would
+      // reject (test.md §5.2, ScopeOptions.connections.allow).
+      if (
+        current.source === 'connection' &&
+        options?.connections?.allow &&
+        typeof current.connection === 'string' &&
+        !options.connections.allow.includes(current.connection)
+      ) {
+        addIssue(
+          issues,
+          `${currentPath}/connection`,
+          `connection ${current.connection} is not allowed in this scope`,
+          `use one of the scope's allowed connections: ${options.connections.allow.join(', ') || '(none allowed)'}`,
+        )
+      }
     }
 
     if (current.kind === 'action' && typeof current.action === 'string' && options?.actions?.allow && !options.actions.allow.includes(current.action)) {
+      addIssue(
+        issues,
+        `${currentPath}/action`,
+        `action ${current.action} is not allowed in this scope`,
+        `use one of the scope's allowed actions: ${options.actions.allow.join(', ') || '(none allowed)'}`,
+      )
+    }
+    if ('mutation' in current && typeof current.action === 'string' && options?.actions?.allow && !options.actions.allow.includes(current.action)) {
       addIssue(
         issues,
         `${currentPath}/action`,
@@ -364,7 +447,7 @@ export function validateResource(
     }
 
     current.slots?.forEach((slot, slotIndex) => {
-      children(slot).forEach((child, childIndex) => visit(child, `${path}/slots/${slotIndex}/children/${childIndex}`, depth + 1))
+      children(slot).forEach((child, childIndex) => visit(child, `${path}/slots/${slotIndex}/items/${childIndex}`, depth + 1))
     })
   }
 

@@ -366,17 +366,21 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     for (const listener of listeners) listener(id, next)
   }
 
-  const waitForSettled = async (id: string): Promise<DataSnapshot> => {
-    const current = await store.read(id)
-    if (current && current.status !== 'pending' && current.status !== 'idle') return current
+  const waitForSettled = (id: string): Promise<DataSnapshot> => {
+    // Subscribe *before* checking the current snapshot — reading first and
+    // subscribing second leaves a window where a node can settle between the
+    // read and the subscribe call, so the notification that would have
+    // resolved this promise fires into nothing and it hangs forever.
     return new Promise((resolve) => {
+      const settleIfReady = (snapshot: DataSnapshot | undefined, unsubscribe: () => void) => {
+        if (!snapshot || snapshot.status === 'pending' || snapshot.status === 'idle') return
+        unsubscribe()
+        resolve(snapshot)
+      }
       const unsubscribe = store.subscribe(id, () => {
-        void Promise.resolve(store.read(id)).then((snapshot) => {
-          if (!snapshot || snapshot.status === 'pending' || snapshot.status === 'idle') return
-          unsubscribe()
-          resolve(snapshot)
-        })
+        void Promise.resolve(store.read(id)).then((snapshot) => settleIfReady(snapshot, unsubscribe))
       })
+      void Promise.resolve(store.read(id)).then((snapshot) => settleIfReady(snapshot, unsubscribe))
     })
   }
 

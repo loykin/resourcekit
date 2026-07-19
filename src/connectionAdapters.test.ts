@@ -58,6 +58,26 @@ describe('restConnectionAdapter', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('rejects pathPrefixes bypass attempts that a naive startsWith check would let through', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const outsidePrefix = /not within an allowed prefix/
+
+    // dot-segment traversal escaping the "/customers" prefix
+    await expect(restConnectionAdapter.resolve(connection(), { path: '/customers/../admin' }, { variables: {} })).rejects.toThrow(outsidePrefix)
+    // percent-encoded traversal
+    await expect(restConnectionAdapter.resolve(connection(), { path: '/customers/%2e%2e/admin' }, { variables: {} })).rejects.toThrow(outsidePrefix)
+    // backslash traversal — WHATWG URL parsing treats "\" as "/" for http(s)
+    await expect(restConnectionAdapter.resolve(connection(), { path: '/customers/..\\admin' }, { variables: {} })).rejects.toThrow(outsidePrefix)
+    // string-prefix match with no segment boundary
+    await expect(restConnectionAdapter.resolve(connection(), { path: '/customers-evil' }, { variables: {} })).rejects.toThrow(outsidePrefix)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // a legitimate nested path under the prefix still passes
+    fetchMock.mockResolvedValue(new Response('[]', { status: 200 }))
+    await expect(restConnectionAdapter.resolve(connection(), { path: '/customers/123/orders' }, { variables: {} })).resolves.toEqual([])
+  })
+
   it('validate() reports the same policy issues resolve() would enforce', async () => {
     await expect(restConnectionAdapter.validate?.(connection(), { path: '/customers' }, {})).resolves.toEqual({ valid: true })
     await expect(restConnectionAdapter.validate?.(connection(), { path: '/customers', method: 'DELETE' }, {})).resolves.toMatchObject({
@@ -95,5 +115,26 @@ describe('restConnectionAdapter', () => {
     const resolveCallUrl = fetchMock.mock.calls[0]?.[0]
 
     expect(resolveCallUrl).toEqual(previewCallUrl)
+  })
+
+  it('enforces mcpPolicy.timeoutMs by aborting the request', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const signal = init?.signal as AbortSignal
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason))
+      })
+      return new Response('[]', { status: 200 })
+    })
+
+    const timedConnection = connection({ mcpPolicy: { timeoutMs: 5 } })
+    await expect(restConnectionAdapter.resolve(timedConnection, { path: '/customers' }, { variables: {} })).rejects.toThrow(/timed out after 5ms/)
+  })
+
+  it('enforces mcpPolicy.maxResponseBytes by rejecting an oversized body before it is fully parsed', async () => {
+    const bigBody = JSON.stringify(Array.from({ length: 1000 }, (_, index) => ({ id: index, note: 'x'.repeat(50) })))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(bigBody, { status: 200 }))
+
+    const cappedConnection = connection({ mcpPolicy: { maxResponseBytes: 100 } })
+    await expect(restConnectionAdapter.resolve(cappedConnection, { path: '/customers' }, { variables: {} })).rejects.toThrow(/exceeded maxResponseBytes/)
   })
 })

@@ -3,11 +3,106 @@ import { describe, expect, it } from 'vitest'
 import { createChartKitPlugin } from './adapters'
 import { createRegistry } from './registry'
 import { restResolver, staticResolver } from './resolvers'
-import { buildDocumentSchema, nextStage, nextStageBatch } from './schema'
+import { buildDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './schema'
 import type { JsonSchema, Resource } from './types'
 import { validateResource } from './validation'
 
 describe('buildDocumentSchema', () => {
+  it('includes scoped visibility conditions in full and staged node schemas', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', specSchema: { type: 'object' } }],
+    })
+    const scoped = registry.scope({ variables: { allow: ['roles'] } })
+    const resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Text',
+      visible: { $variable: 'roles', contains: 'admin' },
+      spec: {},
+    }
+    const ajv = new Ajv2020({ strict: false })
+
+    expect(ajv.compile(buildDocumentSchema(scoped))(resource)).toBe(true)
+    expect(ajv.compile(singleKindSchema(scoped, 'resourcekit.dev/v1alpha1', 'Text')!)(resource)).toBe(true)
+
+    const invalid = { ...resource, visible: { $variable: 'other' } }
+    expect(ajv.compile(buildDocumentSchema(scoped))(invalid)).toBe(false)
+  })
+
+  it('constrains a connection/datasource binding to the scope allowlist, matching runtime validateResource', () => {
+    // Generated schema is the AI-facing contract — it must reject the same
+    // things validateResource() rejects at runtime, or an AI can "legally"
+    // author a document that only fails later.
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object', additionalProperties: false, properties: { data: { type: 'object' } } },
+        },
+      ],
+      dataResolvers: { connection: async () => [] },
+    })
+    const scoped = registry.scope({ connections: { allow: ['public'] } })
+    const schema = buildDocumentSchema(scoped)
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    const resource = (connection: string) => ({
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Panel',
+      spec: { data: { source: 'connection', connection, request: { path: '/x' } } },
+    })
+
+    expect(validate(resource('public'))).toBe(true)
+    expect(validate(resource('secret'))).toBe(false)
+    expect(validateResource(resource('secret') as Resource, scoped).valid).toBe(false)
+  })
+
+  it('requires a min>0 slot and rejects a duplicate slot name in the generated schema, matching runtime validateResource', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Layout',
+          specSchema: { type: 'object', properties: {} },
+          slotPolicy: { slots: { main: { min: 1, accepts: ['Text'] } } },
+        },
+        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', specSchema: { type: 'object', properties: { text: { type: 'string' } } } },
+      ],
+    })
+    const scoped = registry.scope({})
+    const schema = buildDocumentSchema(scoped)
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    const textChild = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'A' } }
+
+    const missingSlot = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Layout', spec: {} }
+    expect(validate(missingSlot)).toBe(false)
+    expect(validateResource(missingSlot as Resource, scoped).valid).toBe(false)
+
+    const withSlot = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Layout', spec: {}, slots: [{ name: 'main', items: [textChild] }] }
+    expect(validate(withSlot)).toBe(true)
+
+    const duplicateSlot = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Layout',
+      spec: {},
+      slots: [
+        { name: 'main', items: [textChild] },
+        { name: 'main', items: [textChild] },
+      ],
+    }
+    expect(validate(duplicateSlot)).toBe(false)
+    expect(validateResource(duplicateSlot as Resource, scoped).valid).toBe(false)
+  })
+
   it('builds a scoped recursive schema from registered manifests and resolvers', () => {
     const registry = createRegistry()
     registry.use({

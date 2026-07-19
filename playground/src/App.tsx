@@ -101,6 +101,7 @@ const playgroundDatasourceResolver: DataResolver = async (binding) => {
 // In-memory CRUD backend — stands in for a real REST API or datasource so the
 // full read → edit → mutate → refetch loop can run inside the playground.
 const memoryUsers: Record<string, unknown>[] = userRows.map((row, index) => ({ id: String(index + 1), ...row }))
+let nextMemoryUserId = memoryUsers.length + 1
 
 const memoryDataResolver: DataResolver = async (rawBinding) => {
   const binding = rawBinding as Record<string, unknown>
@@ -116,13 +117,20 @@ const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => 
   if (binding.collection !== 'users') throw new Error(`unknown collection: ${String(binding.collection)}`)
   const values = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
   const id = typeof binding.id === 'string' ? binding.id : undefined
+  if (binding.operation === 'delete' && id) {
+    const index = memoryUsers.findIndex((item) => item.id === id)
+    if (index < 0) throw new Error(`user ${id} not found`)
+    if (memoryUsers[index].role === 'Admin') throw new Error('Admin members cannot be deleted')
+    const [removed] = memoryUsers.splice(index, 1)
+    return { ...removed, version: String(Date.now()) }
+  }
   if (id) {
     const row = memoryUsers.find((item) => item.id === id)
     if (!row) throw new Error(`user ${id} not found`)
     Object.assign(row, values)
     return { ...row, version: String(Date.now()) }
   }
-  const row = { id: String(memoryUsers.length + 1), status: 'Pending', joined: new Date().toISOString().slice(0, 10), ...values }
+  const row = { id: String(nextMemoryUserId++), status: 'Pending', joined: new Date().toISOString().slice(0, 10), ...values }
   memoryUsers.push(row)
   return { ...row, version: String(Date.now()) }
 }
@@ -1000,6 +1008,31 @@ const userManagement: Resource = {
                 map: { Active: 'default', Pending: 'secondary', Inactive: 'outline' },
               },
               joined: { label: 'Joined', type: 'date', flex: 0.9, tone: 'muted' },
+              actions: {
+                label: '',
+                display: 'actions',
+                flex: 0.7,
+                items: [
+                  {
+                    id: 'delete',
+                    label: 'Delete',
+                    variant: 'destructive',
+                    disabledWhen: { field: 'role', equals: 'Admin' },
+                    submit: {
+                      action: 'users.delete',
+                      mutation: { target: 'memory', collection: 'users', operation: 'delete', id: '${payload.id}' },
+                      confirm: {
+                        title: 'Delete ${payload.name}?',
+                        description: 'This removes ${payload.email} from the in-memory team list.',
+                      },
+                      onSuccess: [
+                        { kind: 'setVariable', variable: 'usersVersion', from: 'version' },
+                        { kind: 'emit', event: 'users.deleted' },
+                      ],
+                    },
+                  },
+                ],
+              },
             },
           },
         },
@@ -2558,7 +2591,7 @@ function StepByStepBuilder() {
         )}
         <div className="rk-render-body rk-step-live-render">
           <ResourceRenderer
-            registry={registry}
+            registry={playgroundScope}
             renderError={(err) => <div className="fallback">{err instanceof Error ? err.message : 'Render error'}</div>}
             renderLoading={() => <div className="fallback">Loading kind...</div>}
             renderUnknownKind={(res) => <div className="fallback">Unknown kind: {res.kind}</div>}
@@ -2632,7 +2665,7 @@ function ReplayCheckPanel() {
           <div className="rk-step-log-title">The real, rendered workbenchTemplate — exactly as it shows in "Resource runtime"</div>
           <div className="rk-render-body rk-step-live-render">
             <ResourceRenderer
-              registry={registry}
+              registry={playgroundScope}
               renderError={(err) => <div className="fallback">{err instanceof Error ? err.message : 'Render error'}</div>}
               renderLoading={() => <div className="fallback">Loading kind...</div>}
               renderUnknownKind={(res) => <div className="fallback">Unknown kind: {res.kind}</div>}
@@ -3327,6 +3360,11 @@ export function App() {
       setToast(`${String(record.name ?? 'Member')} added to the team`)
       window.setTimeout(() => setToast(undefined), 3500)
     }
+    if (event === 'users.deleted') {
+      const record = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
+      setToast(`${String(record.name ?? 'Member')} removed from the team`)
+      window.setTimeout(() => setToast(undefined), 3500)
+    }
   }
 
   const resourceJson = useMemo(() => prettyJson(resource), [resource])
@@ -3376,7 +3414,8 @@ export function App() {
     <>
       {loadError ? <pre className="rk-message">{loadError}</pre> : null}
       <ResourceRenderer
-        registry={registry}
+        confirmDialog={async ({ title, description }) => window.confirm(description ? `${title}\n\n${description}` : title)}
+        registry={playgroundScope}
         onEvent={handleDocumentEvent}
         renderError={(error) => <div className="fallback">{error instanceof Error ? error.message : 'Render error'}</div>}
         renderLoading={() => <div className="fallback">Loading kind...</div>}

@@ -3,7 +3,7 @@ import { createRegistry } from '../../registry'
 import { staticResolver } from '../../resolvers'
 import { validateResource } from '../../validation'
 import type { Resource, ResourceKitPlugin } from '../../types'
-import type { KindRenderFn } from '../../react/types'
+import type { KindRenderFn } from '../../react'
 import { composeResourceKitPlugins, createFirstPartyResourceAdapters } from './kits'
 
 describe('createFirstPartyResourceAdapters', () => {
@@ -106,6 +106,49 @@ describe('flattened list/detail and form views (test.md §4)', () => {
     }
 
     expect(validateResource(doc, registry)).toEqual({ valid: true, issues: [] })
+  })
+
+  it('validates confirmable form and row-action submit schemas without external $defs', () => {
+    const registry = firstPartyRegistry()
+    const form: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormView',
+      spec: {
+        sections: [],
+        submit: {
+          mutation: { target: 'rest', url: '/api/users/${payload.id}', method: 'DELETE' },
+          confirm: { title: 'Delete ${payload.name}?' },
+        },
+      },
+    }
+    const table: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'GridKitTable',
+      spec: {
+        data: { source: 'static', rows: [{ id: '1', name: 'Ada' }] },
+        columns: {
+          name: { label: 'Name' },
+          actions: {
+            display: 'actions',
+            items: [
+              {
+                id: 'delete',
+                label: 'Delete',
+                submit: {
+                  action: 'users.delete',
+                  mutation: { target: 'rest', url: '/api/users/${payload.id}', method: 'DELETE' },
+                  confirm: { title: 'Delete ${payload.name}?' },
+                  onSuccess: [{ kind: 'invalidateData', nodes: ['users'] }],
+                },
+              },
+            ],
+          },
+        },
+      },
+    }
+
+    expect(validateResource(form, registry)).toEqual({ valid: true, issues: [] })
+    expect(validateResource(table, registry)).toEqual({ valid: true, issues: [] })
   })
 
   it('rejects a DetailView missing the required fields array', () => {

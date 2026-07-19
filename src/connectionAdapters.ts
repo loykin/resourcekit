@@ -1,5 +1,5 @@
 import { getValueAtPath } from './path'
-import type { ConnectionAdapter, ConnectionPolicy, JsonSchema, RegisteredConnection } from './types'
+import type { ConnectionAdapter, ConnectionMcpPolicy, ConnectionPolicy, JsonSchema, RegisteredConnection } from './types'
 
 /**
  * Built-in connection adapters. Only `rest` lives in core — like the plain
@@ -20,27 +20,53 @@ export interface RestConnectionRequest {
   rowsPath?: string
 }
 
+// `new URL(request.path, config.baseUrl)` would be wrong whenever baseUrl has
+// its own path segment (e.g. "https://api.example.com/crm"): a leading-"/"
+// reference like "/customers" is an absolute-path reference per the URL
+// spec, so it *replaces* the base's path instead of appending to it,
+// silently dropping "/crm". String-concatenate first instead.
+function joinUrl(baseUrl: string, path: string): URL {
+  const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return new URL(base + normalizedPath)
+}
+
+/**
+ * `pathname` after the same WHATWG URL parsing `joinUrl`/`fetch` itself
+ * apply — resolves `.`/`..` segments (including a percent-encoded `%2e%2e`)
+ * and treats `\` as a path separator the way the URL spec does for
+ * http(s). Checking the *canonical* pathname instead of the raw request
+ * string is what closes those as `pathPrefixes` bypasses: whatever the
+ * parser would resolve the request to is exactly what gets compared against
+ * the (identically parsed) allowed prefix, so the check can't disagree with
+ * the request actually sent.
+ */
+function canonicalPathname(baseUrl: string, path: string): string {
+  return joinUrl(baseUrl, path).pathname
+}
+
+/** True only if every segment of `prefix` matches the corresponding leading segment of `path`'s canonical pathname — a boundary-aware, traversal-proof replacement for `path.startsWith(prefix)`. */
+function matchesPathPrefix(baseUrl: string, path: string, prefix: string): boolean {
+  const pathSegments = canonicalPathname(baseUrl, path).split('/').filter(Boolean)
+  const prefixSegments = canonicalPathname(baseUrl, prefix).split('/').filter(Boolean)
+  if (prefixSegments.length > pathSegments.length) return false
+  return prefixSegments.every((segment, index) => segment === pathSegments[index])
+}
+
 function checkPolicy(connection: RegisteredConnection<RestConnectionConfig>, request: RestConnectionRequest, policy: ConnectionPolicy | undefined): string[] {
   const issues: string[] = []
   const method = request.method ?? 'GET'
   if (policy?.methods && !policy.methods.includes(method)) {
     issues.push(`method ${method} is not allowed for connection ${connection.uid}`)
   }
-  if (policy?.pathPrefixes && !policy.pathPrefixes.some((prefix) => request.path.startsWith(prefix))) {
+  if (policy?.pathPrefixes && !policy.pathPrefixes.some((prefix) => matchesPathPrefix(connection.config.baseUrl, request.path, prefix))) {
     issues.push(`path ${request.path} is not within an allowed prefix for connection ${connection.uid}`)
   }
   return issues
 }
 
 function buildUrl(config: RestConnectionConfig, request: RestConnectionRequest): string {
-  // `new URL(request.path, config.baseUrl)` would be wrong whenever baseUrl has
-  // its own path segment (e.g. "https://api.example.com/crm"): a leading-"/"
-  // reference like "/customers" is an absolute-path reference per the URL
-  // spec, so it *replaces* the base's path instead of appending to it,
-  // silently dropping "/crm". String-concatenate first instead.
-  const base = config.baseUrl.endsWith('/') ? config.baseUrl.slice(0, -1) : config.baseUrl
-  const path = request.path.startsWith('/') ? request.path : `/${request.path}`
-  const url = new URL(base + path)
+  const url = joinUrl(config.baseUrl, request.path)
   for (const [key, value] of Object.entries(request.query ?? {})) {
     for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, item)
   }
@@ -54,21 +80,77 @@ function asRows(value: unknown): Record<string, unknown>[] {
   return value as Record<string, unknown>[]
 }
 
+/** Combines the caller's signal with a `timeoutMs`-derived one. `dispose()` must run once the request settles, or the timer leaks. */
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number | undefined): { signal: AbortSignal | undefined; dispose: () => void } {
+  if (!timeoutMs) return { signal, dispose: () => {} }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error(`request timed out after ${timeoutMs}ms`)), timeoutMs)
+  const forwardAbort = () => controller.abort(signal?.reason)
+  if (signal) {
+    if (signal.aborted) controller.abort(signal.reason)
+    else signal.addEventListener('abort', forwardAbort, { once: true })
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', forwardAbort)
+    },
+  }
+}
+
+function concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
+  const result = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk, offset)
+    offset += chunk.length
+  }
+  return result
+}
+
+/** Reads and JSON-parses a response body while enforcing `maxResponseBytes` — `response.json()` has no size cap of its own. */
+async function readJsonWithLimit(response: Response, maxBytes: number | undefined): Promise<unknown> {
+  if (!maxBytes || !response.body) return response.json()
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel()
+      throw new Error(`REST connection response exceeded maxResponseBytes (${maxBytes})`)
+    }
+    chunks.push(value)
+  }
+  return JSON.parse(new TextDecoder().decode(concatChunks(chunks, total)))
+}
+
 async function fetchRows(
   connection: RegisteredConnection<RestConnectionConfig>,
   request: RestConnectionRequest,
   signal: AbortSignal | undefined,
+  mcpPolicy: ConnectionMcpPolicy | undefined,
 ): Promise<Record<string, unknown>[]> {
-  const response = await fetch(buildUrl(connection.config, request), {
-    method: request.method ?? 'GET',
-    headers: connection.config.headers,
-    body: request.body === undefined ? undefined : JSON.stringify(request.body),
-    signal,
-  })
-  if (!response.ok) {
-    throw new Error(`REST connection request failed: ${response.status} ${response.statusText}`)
+  const combined = withTimeout(signal, mcpPolicy?.timeoutMs)
+  let json: unknown
+  try {
+    const response = await fetch(buildUrl(connection.config, request), {
+      method: request.method ?? 'GET',
+      headers: connection.config.headers,
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
+      signal: combined.signal,
+    })
+    if (!response.ok) {
+      throw new Error(`REST connection request failed: ${response.status} ${response.statusText}`)
+    }
+    json = await readJsonWithLimit(response, mcpPolicy?.maxResponseBytes)
+  } finally {
+    combined.dispose()
   }
-  const json: unknown = await response.json()
   if (request.rowsPath) return asRows(getValueAtPath(json, request.rowsPath))
   if (Array.isArray(json)) return asRows(json)
   const rows = getValueAtPath(json, 'rows')
@@ -118,8 +200,9 @@ export const restConnectionAdapter: ConnectionAdapter<RestConnectionConfig, Rest
     // proves the connection is reachable. Only a network-level failure
     // (fetch throwing: DNS, connection refused, timeout, ...) means it isn't.
     const start = Date.now()
+    const combined = withTimeout(context.signal, connection.mcpPolicy?.timeoutMs)
     try {
-      const response = await fetch(connection.config.baseUrl, { method: 'GET', headers: connection.config.headers, signal: context.signal })
+      const response = await fetch(connection.config.baseUrl, { method: 'GET', headers: connection.config.headers, signal: combined.signal })
       return {
         ok: true,
         message: response.ok ? undefined : `reachable, but the base URL itself responded ${response.status} ${response.statusText}`,
@@ -127,6 +210,8 @@ export const restConnectionAdapter: ConnectionAdapter<RestConnectionConfig, Rest
       }
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'connection test failed', latencyMs: Date.now() - start }
+    } finally {
+      combined.dispose()
     }
   },
 
@@ -140,7 +225,7 @@ export const restConnectionAdapter: ConnectionAdapter<RestConnectionConfig, Rest
     if (issues.length > 0) throw new Error(issues.join('; '))
 
     const start = Date.now()
-    const rows = await fetchRows(connection, request, context.signal)
+    const rows = await fetchRows(connection, request, context.signal, connection.mcpPolicy)
     const maxRows = connection.mcpPolicy?.maxRows ?? 20
     const limited = rows.slice(0, maxRows)
     return {
@@ -154,6 +239,6 @@ export const restConnectionAdapter: ConnectionAdapter<RestConnectionConfig, Rest
   async resolve(connection, request, context) {
     const issues = checkPolicy(connection, request, connection.policy)
     if (issues.length > 0) throw new Error(issues.join('; '))
-    return fetchRows(connection, request, context.signal)
+    return fetchRows(connection, request, context.signal, connection.mcpPolicy)
   },
 }

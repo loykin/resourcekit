@@ -133,6 +133,7 @@ interface VariableRef {
 }
 
 interface Resource<TSpec = unknown> {
+  $schema?: string
   apiVersion: string
   kind: string
   metadata?: {
@@ -142,6 +143,10 @@ interface Resource<TSpec = unknown> {
   }
   spec: TSpec
   bindings?: Record<string, DataRef | VariableRef>
+  visible?:
+    | { $variable: string }
+    | { $variable: string; equals: string }
+    | { $variable: string; contains: string }
   slots?: Array<{
     name?: string
     items: Resource[]
@@ -153,6 +158,8 @@ interface Resource<TSpec = unknown> {
 - `spec` belongs exclusively to that kind and is checked against its schema.
 - `bindings` connects kind-declared ports to document data nodes or flat
   variables. Adapters access those values only through the runtime context.
+- `visible` conditionally renders the node from a flat page variable. The
+  runtime owns this field, so kinds do not implement visibility themselves.
 - `slots` belong to the parent. Omit `name` for the default slot.
 - Each parent's `SlotPolicy` controls accepted child kinds and cardinality.
 - A leaf kind has no slot policy and must not contain `slots`.
@@ -367,6 +374,23 @@ integration store. `internal` behavior stays inside the kind. `action` is
 currently schema/validation vocabulary; use submit/mutation dispatch or an
 emitted host event when an action must execute.
 
+Nodes can reactively opt into rendering through the runtime-owned `visible`
+field:
+
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "Panel",
+  "visible": { "$variable": "roles", "contains": "admin" },
+  "spec": { "title": "Administration" }
+}
+```
+
+`{ "$variable": "name" }` uses string truthiness or a non-empty array.
+`equals` compares a string variable, while `contains` checks membership in a
+`string[]` variable. Generated scoped schemas and runtime validation both
+enforce the scope's variable allowlist.
+
 ## Document dataflow
 
 `ResourceDocument` adds one document-scoped reactive store and data graph
@@ -431,27 +455,105 @@ to `state` and `resolve`; there is no general transform DSL.
 
 ## Mutations and submit
 
-Forms and editable kinds use a declarative `SubmitSpec`: an optional scoped
-action name, a mutation binding, and success effects.
+Forms, editable kinds, and row actions use one declarative `SubmitSpec`: an
+optional scoped action name, a mutation binding, an optional confirmation,
+and success effects.
 
 ```json
 {
-  "action": "customer.update",
+  "action": "customer.delete",
   "mutation": {
     "target": "rest",
-    "url": "https://api.example.com/customers/${customerId}",
-    "method": "PATCH"
+    "url": "https://api.example.com/customers/${payload.id}",
+    "method": "DELETE"
+  },
+  "confirm": {
+    "title": "Delete ${payload.name}?",
+    "description": "This cannot be undone."
   },
   "onSuccess": [
-    { "kind": "emit", "event": "customer.updated" }
+    { "kind": "invalidateData", "nodes": ["customers"] },
+    { "kind": "emit", "event": "customer.deleted" }
   ]
 }
 ```
 
-The runtime interpolates the binding, dispatches it to the registered mutation
-resolver for `target`, applies success effects, and forwards emitted effects to
-the host. The same flow is available headlessly through `runSubmit` and inside
-kind renderers through `ctx.actions.submit`.
+Page variables use `${variableName}`. Submit payload fields use an explicit
+`${payload.id}` or nested `${payload.customer.id}` namespace. Mutation
+bindings and confirmation copy both support these references; unresolved
+references fail before confirmation or mutation.
+
+The runtime checks the scoped action allowlist, resolves references, verifies
+the mutation resolver and confirmation handler, waits for confirmation,
+dispatches the mutation, and only then applies success effects. A declared
+confirmation fails closed when the host does not provide
+`ResourceRenderer.confirmDialog`:
+
+```tsx
+<ResourceRenderer
+  registry={scope}
+  resource={resource}
+  confirmDialog={({ title, description }) => openApplicationDialog({ title, description })}
+/>
+```
+
+The callback returns `Promise<boolean>`. Cancellation does not call the
+mutation resolver or apply effects; `runSubmit`/`ctx.actions.submit` returns
+the exported `SUBMIT_CANCELLED` sentinel. Successful submits keep returning
+the mutation resolver's result. Form adapters suppress their success message
+after cancellation. Repeated form controls with the same name are submitted
+as an array rather than losing all but one value. Headless callers provide the
+same confirmation callback through `SubmitRuntime.confirm`.
+
+`setData`, `invalidateData`, and `refetchData` effects require a
+`ResourceDocument` data graph. `setVariable` and `emit` also work for a bare
+`Resource`.
+
+### Grid row actions
+
+`GridKitTable` (alias `TableView`) supports an action column through
+`display: "actions"`. Each item must choose exactly one of `event` or
+`submit`; submit items use the same contract as forms and receive the complete
+`row.original` object as their payload. Event items route their event name
+through the table's normal `spec.events` policy map.
+
+```json
+{
+  "columns": {
+    "name": { "label": "Name" },
+    "actions": {
+      "label": "",
+      "display": "actions",
+      "items": [
+        {
+          "id": "delete",
+          "label": "Delete",
+          "variant": "destructive",
+          "disabledWhen": { "field": "role", "equals": "Admin" },
+          "submit": {
+            "action": "users.delete",
+            "mutation": {
+              "target": "rest",
+              "url": "/api/users/${payload.id}",
+              "method": "DELETE"
+            },
+            "confirm": { "title": "Delete ${payload.name}?" }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+`hideWhen` and `disabledWhen` compare a dot-path field from the row with an
+`equals` value. These are presentation rules, not authorization; mutation
+resolvers and backends must enforce permissions. Action button clicks stop
+propagation so they do not also trigger the grid's row-selection behavior.
+The playground's **User management** sample demonstrates the full
+row-action → confirmation → in-memory mutation → reactive refetch flow. It
+uses `window.confirm` only as a self-contained host implementation; production
+applications should inject their own accessible application dialog.
 
 ## Registered connections
 
@@ -489,9 +591,17 @@ registry.registerConnection({
     preview: true,
     mutate: false,
     maxRows: 20,
+    timeoutMs: 5000,
+    maxResponseBytes: 1_000_000,
   },
 })
 ```
+
+`timeoutMs` aborts the request once it elapses; `maxResponseBytes` stops
+reading the response body (and rejects) once it's exceeded, before the whole
+payload is buffered. Both apply to `resolve` (the render-path fetch), not
+just `preview` (the MCP inspection path) — a connection with no
+`timeoutMs`/`maxResponseBytes` set has neither limit.
 
 Documents use only the UID and adapter-specific request:
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
-import type { DataRef } from '../dataflow'
+import type { DataRef } from '../types'
 import type { DataBinding, Resource, SubmitSpec } from '../types'
+import type { SubmitResult } from '../submit'
 
 /**
  * React narrowing of the manifest's generic `render` member.
@@ -45,8 +46,8 @@ export interface RenderContext {
    */
   record?: Record<string, unknown>
   actions: {
-    /** Executes a declarative submit (mutation binding + onSuccess effects). */
-    submit: (submit: SubmitSpec, payload: unknown) => Promise<unknown>
+    /** Executes a declarative submit (optional confirmation + mutation binding + onSuccess effects). */
+    submit: (submit: SubmitSpec, payload: unknown) => Promise<SubmitResult>
   }
 }
 

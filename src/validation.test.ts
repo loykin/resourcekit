@@ -192,4 +192,103 @@ describe('validateResource', () => {
 
     expect(acceptedResult.valid).toBe(true)
   })
+
+  it('validates visibility shape and its scoped variable', () => {
+    const scoped = registry().scope({ variables: { allow: ['isAdmin'] } })
+    expect(
+      validateResource(
+        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', visible: { $variable: 'isAdmin' }, spec: { text: 'Admin' } },
+        scoped,
+      ),
+    ).toEqual({ valid: true, issues: [] })
+
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        visible: { $variable: 'roles', equals: 'admin', contains: 'admin' },
+        spec: { text: 'Admin' },
+      } as unknown as import('./types').Resource,
+      scoped,
+    )
+    expect(result.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(['/visible', '/visible/$variable']))
+  })
+
+  it('rejects non-string visibility comparisons', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        visible: { $variable: 'mode', equals: 1 },
+        spec: { text: 'Admin' },
+      } as unknown as import('./types').Resource,
+      registry(),
+    )
+
+    expect(result.issues.map((issue) => issue.path)).toContain('/visible/equals')
+  })
+
+  it('enforces connections.allow on a bare Resource, not just a ResourceDocument data graph', () => {
+    // The ResourceDocument data-graph path (validateResourceDocument) already
+    // checks `connections.allow` for `resolve` nodes — this covers the same
+    // policy for a plain Resource's own spec.data binding, which used to
+    // reach `registry.getConnection`/the resolver with no allowlist check at
+    // all as long as the AI omitted the ResourceDocument wrapper.
+    const scoped = registry().scope({ connections: { allow: ['public'] } })
+
+    const disallowed = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'Customers', data: { source: 'connection', connection: 'secret', request: { path: '/customers' } } },
+      },
+      scoped,
+    )
+    expect(disallowed.issues.map((issue) => issue.message)).toContain('connection secret is not allowed in this scope')
+
+    const allowed = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'Customers', data: { source: 'connection', connection: 'public', request: { path: '/customers' } } },
+      },
+      scoped,
+    )
+    expect(allowed.issues.map((issue) => issue.message)).not.toContain('connection public is not allowed in this scope')
+  })
+
+  it('rejects a missing required slot instead of only checking slots that are present', () => {
+    const required = createRegistry()
+    required.use({
+      name: 'test',
+      kinds: [{ ...panel, slotPolicy: { defaultSlot: { min: 1, accepts: ['Text'] } } }],
+    })
+
+    const result = validateResource({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'Empty' } }, required)
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('default slot is required (min 1) but missing')
+  })
+
+  it('rejects a duplicate slot declaration instead of silently letting the renderer drop the first one', () => {
+    const named = createRegistry()
+    named.use({
+      name: 'test',
+      kinds: [{ ...panel, slotPolicy: { slots: { main: { min: 0, accepts: ['Text'] } } } }],
+    })
+
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'Dup' },
+        slots: [
+          { name: 'main', items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'A' } }] },
+          { name: 'main', items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'B' } }] },
+        ],
+      },
+      named,
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('slot main is declared more than once')
+  })
 })
