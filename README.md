@@ -584,6 +584,29 @@ The orchestration loop is intentionally owned by the caller:
 recursive schema. The staged primitives usually produce smaller, more focused
 model inputs.
 
+### Editor support for hand-edited documents
+
+Writing `buildDocumentSchema(scope)`'s output to a file and referencing it
+from a document's own `$schema` field gives editors like VS Code inline
+autocomplete and validation — the same workflow as a Kubernetes manifest:
+
+```ts
+import { writeFileSync } from 'node:fs'
+writeFileSync('resourcekit-schema.json', JSON.stringify(buildDocumentSchema(scope), null, 2))
+```
+
+```json
+{
+  "$schema": "./resourcekit-schema.json",
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "Panel",
+  "spec": { "title": "Customers" }
+}
+```
+
+`$schema` is a recognized, optional `Resource` field — every generated
+schema allows it without needing `additionalProperties` exceptions elsewhere.
+
 See [`examples/mcp-server/`](./examples/mcp-server/) for a working MCP server
 that exposes staged generation, connection discovery, request validation,
 preview, and final document validation as tools.

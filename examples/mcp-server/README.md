@@ -59,6 +59,16 @@ them into server boot code (test.md §12). `list_connections`/`get_connection`
 don't distinguish the two sources; the registry checks its static map first
 and falls back to the provider.
 
+`secure-reports` demonstrates the production credential boundary. The host
+maps `RESOURCEKIT_SECURE_REPORTS_URL` and
+`RESOURCEKIT_SECURE_REPORTS_TOKEN` into a server-owned connection config via
+`src/secure-reports-connection.ts`; resourcekit core never reads environment
+variables itself. The demo API URL/token are only development fallbacks.
+Scoped connection catalogs expose the uid, schema, and capabilities but
+never the config or bearer token. The accompanying E2E test sends a real
+authenticated HTTP request and asserts that the scoped catalog remains
+redacted.
+
 ## Tools
 
 - `list_root_templates` — get the candidate kinds for the document root

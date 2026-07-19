@@ -1,6 +1,6 @@
-import { createElement, Fragment, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import { createDataflowRuntime, isDataRef } from '../dataflow'
+import { createDataflowRuntime, isDataRef, scanDataRefs } from '../dataflow'
 import type { DataflowRuntime, DataRef, DataStore, ResourceDocument } from '../dataflow'
 import type { DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration } from '../types'
 import type { ResourceRegistry, ScopedRegistry } from '../registry'
@@ -132,8 +132,45 @@ function eventPolicy(resource: Resource, manifestPolicy: EventPolicy | undefined
   return isRecord(policy) && typeof policy.kind === 'string' ? (policy as unknown as EventPolicy) : undefined
 }
 
-function useRenderVersion(runtime: Runtime): void {
-  useSyncExternalStore(runtime.subscribeVersion, runtime.getVersion, runtime.getVersion)
+function scanResourceDataNodeIds(resource: Resource): Set<string> {
+  const ids = new Set<string>()
+  for (const ref of scanDataRefs(resource.spec)) ids.add(ref.$data)
+  if (resource.bindings) for (const ref of scanDataRefs(resource.bindings)) ids.add(ref.$data)
+  return ids
+}
+
+/**
+ * Re-renders this node on its own variable changes (unchanged, global —
+ * variables are page-scoped and cheap) and on dataflow-node changes
+ * *specific to this resource's own `$data` references* (docs/dataflow-and-
+ * server-state-direction.md "React 구독 모델"). A document-wide polling
+ * node updating must not re-render resources that don't consume it.
+ */
+function useNodeVersion(runtime: Runtime, resource: Resource): number {
+  const dependsOn = useMemo(() => (runtime.dataflow ? scanResourceDataNodeIds(resource) : undefined), [runtime.dataflow, resource])
+  const versionRef = useRef(0)
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      const unsubscribeVariables = runtime.subscribeVersion(() => {
+        versionRef.current++
+        onStoreChange()
+      })
+      const unsubscribeDataflow = runtime.dataflow?.subscribe((id, snapshot) => {
+        if (snapshot.status === 'pending' || !dependsOn?.has(id)) return
+        versionRef.current++
+        onStoreChange()
+      })
+      return () => {
+        unsubscribeVariables()
+        unsubscribeDataflow?.()
+      }
+    },
+    [runtime, dependsOn],
+  )
+  const getSnapshot = useCallback(() => versionRef.current, [])
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 function useRegistryVersion(registry: ResourceRendererProps['registry']): void {
@@ -170,6 +207,7 @@ function renderKindNode(
   props: ResourceNodeProps,
   manifest: KindManifest<unknown, KindRenderFn>,
   render: KindRenderFn,
+  nodeVersion: number,
 ): ReactNode {
   const { resource, registry, runtime, record } = props
 
@@ -213,7 +251,7 @@ function renderKindNode(
           if (!runtime.dataflow) return Promise.reject(new Error(`Data node ${node} requires a ResourceDocument data graph`))
           return runtime.dataflow.setState(node, value)
         },
-        revision: runtime.getVersion(),
+        revision: nodeVersion,
       },
       bindings: {
         has: (name) => resource.bindings?.[name] !== undefined,
@@ -233,12 +271,12 @@ function renderKindNode(
           if (!binding) return Promise.reject(new Error(`Binding ${name} is not connected`))
           if (isDataRef(binding)) {
             if (!runtime.dataflow) return Promise.reject(new Error(`Data reference ${binding.$data} requires a ResourceDocument data graph`))
-            return runtime.dataflow.setState(binding.$data, value)
+            return binding.path ? runtime.dataflow.setStatePath(binding.$data, binding.path, value) : runtime.dataflow.setState(binding.$data, value)
           }
           runtime.engine.set(binding.$variable, coerceVariableValue(value))
           return Promise.resolve()
         },
-        revision: runtime.getVersion(),
+        revision: nodeVersion,
       },
       events: {
         emit: (event: string, payload?: unknown) => {
@@ -276,6 +314,12 @@ function renderKindNode(
               },
               allowedActions,
               emit: (event, result) => props.onEvent?.(event, result),
+              dataflow: (() => {
+                const dataflow = runtime.dataflow
+                return dataflow
+                  ? { setState: dataflow.setState, invalidate: dataflow.invalidate, refetch: dataflow.refetch }
+                  : undefined
+              })(),
             },
             submit,
             payload,
@@ -292,6 +336,8 @@ function renderKindNode(
 interface RecordScopeNodeProps extends ResourceNodeProps {
   manifest: KindManifest<unknown, KindRenderFn>
   render: KindRenderFn
+  /** This resource's own data-change counter — see `useNodeVersion`. */
+  nodeVersion: number
 }
 
 /**
@@ -333,19 +379,19 @@ function RecordScopeNode(props: RecordScopeNodeProps): ReactNode {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stateKey, unresolved])
 
-  if (!binding || unresolved) return renderKindNode({ ...props, record: undefined }, manifest, render)
+  if (!binding || unresolved) return renderKindNode({ ...props, record: undefined }, manifest, render, props.nodeVersion)
   if (error) return props.renderError?.(error, resource) ?? null
 
   // Stale-while-revalidate: after the first load, keep rendering the previous
   // record while a refetch is in flight so children (e.g. forms) don't unmount.
   if (!state) return props.renderLoading?.() ?? null
 
-  return renderKindNode({ ...props, record: state.record }, manifest, render)
+  return renderKindNode({ ...props, record: state.record }, manifest, render, props.nodeVersion)
 }
 
 function ResourceNode(props: ResourceNodeProps): ReactNode {
   const { resource, registry } = props
-  useRenderVersion(props.runtime)
+  const nodeVersion = useNodeVersion(props.runtime, resource)
   useRegistryVersion(registry)
 
   const manifest = registry.getKind(resource.apiVersion, resource.kind)
@@ -354,10 +400,10 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
   if (!render) return props.renderLoading?.() ?? null
 
   if (manifest.recordScope) {
-    return createElement(RecordScopeNode, { ...props, manifest, render })
+    return createElement(RecordScopeNode, { ...props, manifest, render, nodeVersion })
   }
 
-  return renderKindNode(props, manifest, render)
+  return renderKindNode(props, manifest, render, nodeVersion)
 }
 
 /**
@@ -411,9 +457,9 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
         })
       : undefined
 
-    dataflow?.subscribe((_id, snapshot) => {
-      if (snapshot.status !== 'pending') notify()
-    })
+    // No global notify() on dataflow changes — each ResourceNode subscribes
+    // to its own `$data` dependencies directly via useNodeVersion, so a
+    // document-wide polling node updating doesn't force a full-tree re-render.
 
     return { engine, dataCache, bindingRefs, dataflow, subscribeVersion, getVersion: () => version }
   }, [props.dataStore, props.registry, document, resource])

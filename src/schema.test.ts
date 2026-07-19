@@ -1,6 +1,6 @@
 import Ajv2020 from 'ajv/dist/2020'
 import { describe, expect, it } from 'vitest'
-import { createChartKitPlugin } from './adapters/chartkit/plugin'
+import { createChartKitPlugin } from './adapters'
 import { createRegistry } from './registry'
 import { restResolver, staticResolver } from './resolvers'
 import { buildDocumentSchema, nextStage, nextStageBatch } from './schema'
@@ -56,6 +56,33 @@ describe('buildDocumentSchema', () => {
     expect(JSON.stringify(schema)).toContain('#/$defs/dataBinding')
     expect(JSON.stringify(schema)).toContain('"const":"rest"')
     expect(JSON.stringify(schema)).toContain('"const":"static"')
+  })
+
+  it('accepts an instance-level $schema pointer (human-editing-and-persistence.md #1) via ajv against the generated schema', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object', additionalProperties: false, required: ['title'], properties: { title: { type: 'string' } } },
+        },
+      ],
+    })
+
+    const schema = buildDocumentSchema(registry.scope({}))
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    const document = {
+      $schema: './resourcekit-schema.json',
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Panel',
+      spec: { title: 'Customers' },
+    }
+
+    expect(validate(document), validate.errors?.map((error) => error.message).join(', ')).toBe(true)
   })
 
   it('narrows the document root and slot items by level when rootLevels/acceptsLevels are set', () => {

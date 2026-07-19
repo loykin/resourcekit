@@ -33,6 +33,7 @@ import { DEMO_API_TOKEN, startDemoApi } from './demo-api.js'
 import { startDemoDb } from './demo-db.js'
 import { DATASOURCE_TYPE, DATASOURCE_UID, startDemoDatasourceKit } from './demo-datasourcekit.js'
 import { sqliteConnectionAdapter } from './sqlite-connection-adapter.js'
+import { createSecureReportsConnection } from './secure-reports-connection.js'
 
 const demoApi = await startDemoApi()
 const demoDb = startDemoDb()
@@ -86,15 +87,12 @@ registry.registerConnection({
 // only in `config.headers` here, server-side; list_connections/get_connection
 // only ever expose the ConnectionSummary shape (uid/type/name/requestSchema/
 // capabilities), never `config`.
-registry.registerConnection({
-  uid: 'secure-reports',
-  type: 'rest',
-  name: 'Secure Reports API',
-  description: 'Auth-gated demo REST API — GET /secure/reports requires a bearer token.',
-  config: { baseUrl: demoApi.baseUrl, headers: { authorization: `Bearer ${DEMO_API_TOKEN}` } },
-  policy: { methods: ['GET'], pathPrefixes: ['/secure'] },
-  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
-})
+registry.registerConnection(
+  createSecureReportsConnection(process.env, {
+    RESOURCEKIT_SECURE_REPORTS_URL: demoApi.baseUrl,
+    RESOURCEKIT_SECURE_REPORTS_TOKEN: DEMO_API_TOKEN,
+  }),
+)
 // A real, public third-party API — for building actual example documents
 // through this server's own tools, not just our demo backends.
 registry.registerConnection({

@@ -91,6 +91,29 @@ describe('validateResource', () => {
     expect(result.issues.map((issue) => issue.path)).toContain('/slots/0/items/0/kind')
   })
 
+  it('gives every issue a path, a message, and an actionable hint (human-editing-and-persistence.md #2)', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 1 },
+        slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'Nested' } }] }],
+      },
+      registry(),
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.length).toBeGreaterThan(0)
+    for (const issue of result.issues) {
+      expect(issue.path).toEqual(expect.any(String))
+      expect(issue.message).toEqual(expect.any(String))
+      expect(issue.hint, `issue at ${issue.path} ("${issue.message}") is missing a hint`).toEqual(expect.any(String))
+    }
+
+    const slotIssue = result.issues.find((issue) => issue.path === '/slots/0/items/0/kind')
+    expect(slotIssue?.hint).toContain('Text')
+  })
+
   it('enforces scoped kinds, variables, datasources, actions, and maxDepth', () => {
     const scoped = registry().scope({
       kinds: { include: ['Panel'] },

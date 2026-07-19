@@ -28,6 +28,7 @@ export type {
   TimeRange,
   DataResolveContext,
   DataResolver,
+  DataSourceAdapter,
   MutationBinding,
   MutationResolver,
   SubmitSpec,
@@ -57,13 +58,20 @@ export type {
   StageResult,
   StageBatchPosition,
   StageBatchResult,
+  QueryScopePolicy,
+  KindExample,
+  PatternExample,
+  SelectedKindExample,
+  SelectedExamples,
 } from './types'
 
 export { createRegistry } from './registry'
 export type { ResourceRegistry, ScopedRegistry } from './registry'
 
-export { validateResource, validateResourceDocument } from './validation'
+export { validateResource, validateResourceDocument, validateAllExamples } from './validation'
+export type { ExampleValidationFailure } from './validation'
 export { buildDocumentSchema, buildResourceDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './schema'
+export type { BuildResourceDocumentSchemaOptions } from './schema'
 
 export { createVariableEngine, scanVariableRefs, interpolate } from './variables'
 export type { VariableEngine } from './variables'
@@ -72,9 +80,12 @@ export { restResolver, staticResolver, createConnectionDataResolver } from './re
 export { restConnectionAdapter } from './connectionAdapters'
 export type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
 
-export { getValueAtPath, coerceVariableValue } from './path'
+export { getValueAtPath, setValueAtPath, coerceVariableValue } from './path'
 export { runSubmit } from './submit'
 export type { SubmitRuntime } from './submit'
+
+export { LOCKED_ANNOTATION, isLocked, markLocked, preserveLockedNodes } from './annotations'
+export { canonicalizeJson, canonicalizeResource, canonicalStringify } from './canonical'
 
 export {
   createDataflowRuntime,
@@ -83,6 +94,7 @@ export {
   scanDataRefs,
   resolveDataRefs,
   validateDataGraph,
+  clampQueryPolicy,
   DataGraphValidationError,
 } from './dataflow'
 export type {
@@ -93,10 +105,17 @@ export type {
   ResourceDocument,
   DataStatus,
   DataSnapshot,
+  FetchStatus,
   DataStore,
   DataGraphIssue,
   DataGraphValidationResult,
   DataNodeResolveContext,
   CreateDataflowRuntimeOptions,
   DataflowRuntime,
+  QueryPolicy,
+  PublishResult,
+  StatePatch,
 } from './dataflow'
+
+export { createDirectQueryCoordinator } from './queryCoordinator'
+export type { QueryRequest, QueryStatus, QuerySnapshot, QueryHandle, QueryCoordinator } from './queryCoordinator'

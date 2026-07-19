@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { coerceVariableValue, getValueAtPath } from './path'
+import { coerceVariableValue, getValueAtPath, setValueAtPath } from './path'
 
 describe('coerceVariableValue', () => {
   it('passes strings and arrays of strings through unchanged', () => {
@@ -31,5 +31,34 @@ describe('getValueAtPath', () => {
 
   it('returns undefined for a missing path', () => {
     expect(getValueAtPath({ a: {} }, 'a.b.c')).toBeUndefined()
+  })
+})
+
+describe('setValueAtPath', () => {
+  it('sets a top-level field without disturbing siblings', () => {
+    expect(setValueAtPath({ command: 'old', name: 'nginx' }, 'command', 'new')).toEqual({ command: 'new', name: 'nginx' })
+  })
+
+  it('sets a nested field, creating and preserving intermediate objects', () => {
+    const draft = { process: { command: 'old', name: 'nginx' }, other: 'untouched' }
+    expect(setValueAtPath(draft, 'process.command', 'new')).toEqual({ process: { command: 'new', name: 'nginx' }, other: 'untouched' })
+  })
+
+  it('does not mutate the original value', () => {
+    const draft = { a: { b: 1 } }
+    const result = setValueAtPath(draft, 'a.b', 2)
+    expect(draft.a.b).toBe(1)
+    expect(result).not.toBe(draft)
+  })
+
+  it('treats a missing or non-object intermediate as an empty object instead of throwing', () => {
+    expect(setValueAtPath(undefined, 'a.b', 1)).toEqual({ a: { b: 1 } })
+    expect(setValueAtPath({ a: 'not an object' }, 'a.b', 1)).toEqual({ a: { b: 1 } })
+  })
+
+  it('round-trips with getValueAtPath', () => {
+    const result = setValueAtPath({ a: { b: 1, c: 2 } }, 'a.b', 99)
+    expect(getValueAtPath(result, 'a.b')).toBe(99)
+    expect(getValueAtPath(result, 'a.c')).toBe(2)
   })
 })

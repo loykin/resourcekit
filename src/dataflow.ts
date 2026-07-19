@@ -1,5 +1,5 @@
-import { getValueAtPath } from './path'
-import type { DataBinding, DataRef, Resource } from './types'
+import { getValueAtPath, setValueAtPath } from './path'
+import type { DataBinding, DataRef, QueryScopePolicy, Resource } from './types'
 
 export type { DataRef } from './types'
 
@@ -9,9 +9,51 @@ export interface StateDataNode {
   lifecycle?: 'ephemeral' | 'page' | 'session' | 'persistent'
 }
 
+/**
+ * AI-authored server-state policy for a `resolve` node
+ * (docs/dataflow-and-server-state-direction.md). Vocabulary is
+ * resourcekit-generic, never a specific query library's option names —
+ * `clampQueryPolicy` enforces the host's `QueryScopePolicy` ceiling on it.
+ */
+export interface QueryPolicy {
+  refresh?: { kind: 'interval'; ms: number }
+  staleForMs?: number
+  retainPreviousData?: boolean
+  retry?: { maxAttempts: number }
+}
+
 export interface ResolveDataNode {
   kind: 'resolve'
   binding: DataBinding
+  policy?: QueryPolicy
+}
+
+/**
+ * Applies a host's `QueryScopePolicy` ceiling to an AI-authored `QueryPolicy`
+ * — never rejects, always returns a policy the host has already agreed to
+ * run (docs/dataflow-and-server-state-direction.md: "runtime은 1초로 clamp").
+ */
+export function clampQueryPolicy(policy: QueryPolicy | undefined, scope: QueryScopePolicy | undefined): QueryPolicy | undefined {
+  if (!policy) return policy
+
+  const clamped: QueryPolicy = { ...policy }
+
+  if (clamped.refresh) {
+    if (scope?.allowPolling === false) {
+      delete clamped.refresh
+    } else {
+      let ms = clamped.refresh.ms
+      if (scope?.minIntervalMs !== undefined) ms = Math.max(ms, scope.minIntervalMs)
+      if (scope?.maxIntervalMs !== undefined) ms = Math.min(ms, scope.maxIntervalMs)
+      clamped.refresh = { ...clamped.refresh, ms }
+    }
+  }
+
+  if (clamped.retry && scope?.maxRetries !== undefined) {
+    clamped.retry = { ...clamped.retry, maxAttempts: Math.min(clamped.retry.maxAttempts, scope.maxRetries) }
+  }
+
+  return clamped
 }
 
 export type DataNode = StateDataNode | ResolveDataNode
@@ -27,6 +69,9 @@ export interface ResourceDocument {
 
 export type DataStatus = 'idle' | 'pending' | 'ready' | 'error'
 
+/** Network activity, independent of `status` (data availability) — see docs/dataflow-and-server-state-direction.md "Snapshot 확장". */
+export type FetchStatus = 'idle' | 'fetching' | 'paused'
+
 export interface DataSnapshot<T = unknown> {
   status: DataStatus
   value?: T
@@ -34,6 +79,10 @@ export interface DataSnapshot<T = unknown> {
   version: number
   updatedAt?: number
   epoch: number
+  /** Set by a `QueryCoordinator` via `publish()`; internal resolver-driven writes leave this unset. */
+  fetchStatus?: FetchStatus
+  /** True when `value`/`error` are from a previous, superseded fetch — a `retainPreviousData` policy keeps showing them while newer data loads or a refresh fails. */
+  isStale?: boolean
 }
 
 type MaybePromise<T> = T | Promise<T>
@@ -68,12 +117,66 @@ export interface CreateDataflowRuntimeOptions {
   resolve(binding: DataBinding, context: DataNodeResolveContext): Promise<unknown>
 }
 
+/**
+ * Outcome of a resolve node's execution, produced outside `options.resolve`
+ * — see `DataflowRuntime.publish`. The `error` variant may carry a `value`
+ * alongside it: a `retainPreviousData` refresh that fails should still show
+ * the last-good payload while reporting the new failure (`isStale: true`).
+ */
+export type PublishResult =
+  | { status: 'ready'; value: unknown; isStale?: boolean; fetchStatus?: FetchStatus }
+  | { status: 'error'; error: unknown; value?: unknown; isStale?: boolean; fetchStatus?: FetchStatus }
+
+export interface StatePatch {
+  id: string
+  /** Non-empty dot-path — use `setState`/`setStates` to replace a node's whole value. */
+  path: string
+  value: unknown
+}
+
 export interface DataflowRuntime {
   start(): Promise<void>
   read(id: string): Promise<DataSnapshot | undefined>
   resolve(id: string): Promise<unknown>
   setState(id: string, value: unknown): Promise<void>
   setStates(values: Record<string, unknown>): Promise<void>
+  /**
+   * Immutably updates one sub-field of a state node's current value,
+   * leaving the rest untouched — the write-side counterpart to
+   * `DataRef.path` reads (docs/dataflow-and-server-state-direction.md
+   * "Resource binding에서 필요한 수정"). Without this, a writable binding
+   * with a `path` would have no way to change just that field: `setState`
+   * always replaces the whole node.
+   */
+  setStatePath(id: string, path: string, value: unknown): Promise<void>
+  /** Batched form of `setStatePath` — patches to the same id apply in order within one epoch, so several controlled inputs sharing one draft object stay consistent. */
+  setStatePaths(patches: StatePatch[]): Promise<void>
+  /**
+   * Publishes a `resolve` node result produced out of band — by a
+   * `QueryCoordinator`'s background refetch/poll, not by this runtime's own
+   * `options.resolve` call — into the dataflow epoch (docs/dataflow-and-
+   * server-state-direction.md P0 item 4). Opens a new epoch, supersedes any
+   * in-flight internal evaluation of `id`, and re-evaluates only `id`'s
+   * descendants — the same fan-in-consistent path `setState` uses for its
+   * own writes.
+   */
+  publish(id: string, result: PublishResult): Promise<void>
+  /**
+   * Marks `resolve` nodes' current snapshots stale in place — value/error
+   * kept, no re-execution (docs/dataflow-and-server-state-direction.md
+   * "Mutation과 invalidation": a mutation's `invalidateData` effect). Pair
+   * with `refetch` to actually reload; a coordinator-backed node may prefer
+   * to just show a "stale" indicator until its own next poll instead.
+   */
+  invalidate(ids: string[]): Promise<void>
+  /**
+   * Forces a fresh internal execution of `resolve` nodes and their
+   * descendants, ignoring whether any dependency actually changed — a
+   * mutation's `refetchData` effect. Unlike `publish`, this re-runs
+   * `options.resolve` itself rather than accepting an externally-produced
+   * value.
+   */
+  refetch(ids: string[]): Promise<void>
   subscribe(listener: (id: string, snapshot: DataSnapshot) => void): () => void
   dispose(): void
 }
@@ -229,6 +332,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   let started: Promise<void> | undefined
   let disposed = false
   let pendingWrites = new Map<string, unknown>()
+  const pendingPathPatches: StatePatch[] = []
   let scheduledWrite: Promise<void> | undefined
 
   for (const [id, node] of Object.entries(options.graph.nodes)) {
@@ -290,6 +394,11 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
         const node = options.graph.nodes[id]
         if (node.kind === 'state' || !affected.has(id)) {
           const snapshot = await store.read(id)
+          // A dependency outside this batch's affected set (e.g. a resolve
+          // node `publish()` just wrote directly) can itself be in `error`
+          // status — propagate its real error instead of a generic "not
+          // ready" message that would swallow it.
+          if (snapshot?.status === 'error') throw snapshot.error
           if (!snapshot || snapshot.status !== 'ready') throw new Error(`Data node ${id} is not ready`)
           return snapshot
         }
@@ -305,13 +414,13 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
               upstream.set(dependency, await evaluate(dependency))
             }),
           )
-          if (generation !== generations.get(id)) throw new ObsoleteExecutionError()
+          if (generation !== generations.get(id)) return Promise.reject(new ObsoleteExecutionError())
 
           const binding = resolveDataRefs(node.binding, upstream) as DataBinding
           controller = new AbortController()
           controllers.set(id, controller)
           const value = await options.resolve(binding, { signal: controller.signal, nodeId: id, epoch: batchEpoch })
-          if (generation !== generations.get(id) || controller.signal.aborted) throw new ObsoleteExecutionError()
+          if (generation !== generations.get(id) || controller.signal.aborted) return Promise.reject(new ObsoleteExecutionError())
           await writeSnapshot(id, { status: 'ready', value, epoch: batchEpoch })
           return (await store.read(id)) as DataSnapshot
         } catch (error) {
@@ -353,17 +462,113 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     await evaluateAffected(affected, batchEpoch)
   }
 
-  const scheduleStateBatch = (values: Record<string, unknown>): Promise<void> => {
-    for (const [id, value] of Object.entries(values)) pendingWrites.set(id, value)
+  const publishResult = async (id: string, result: PublishResult) => {
+    if (disposed) throw new Error('Dataflow runtime is disposed')
+    await ensureInitialized()
+    const node = options.graph.nodes[id]
+    if (!node) throw new Error(`Data node ${id} does not exist`)
+    if (node.kind !== 'resolve') throw new Error(`Data node ${id} is not a resolve node`)
+
+    epoch++
+    const batchEpoch = epoch
+
+    // Supersede any in-flight internal evaluation of `id` itself — without
+    // this, a same-node resolver call already in progress could still land
+    // after this externally-produced result and overwrite it.
+    generations.set(id, (generations.get(id) ?? 0) + 1)
+    controllers.get(id)?.abort()
+    await writeSnapshot(id, { ...result, epoch: batchEpoch })
+
+    const affected = affectedFrom([id])
+    for (const dependent of affected) {
+      generations.set(dependent, (generations.get(dependent) ?? 0) + 1)
+      controllers.get(dependent)?.abort()
+    }
+    await evaluateAffected(affected, batchEpoch)
+  }
+
+  const requireResolveNodes = (ids: string[]) => {
+    for (const id of ids) {
+      const node = options.graph.nodes[id]
+      if (!node) throw new Error(`Data node ${id} does not exist`)
+      if (node.kind !== 'resolve') throw new Error(`Data node ${id} is not a resolve node`)
+    }
+  }
+
+  const invalidateNodes = async (ids: string[]) => {
+    if (disposed) throw new Error('Dataflow runtime is disposed')
+    await ensureInitialized()
+    requireResolveNodes(ids)
+    await Promise.all(
+      ids.map(async (id) => {
+        const snapshot = await store.read(id)
+        if (!snapshot) return
+        const { version: _version, updatedAt: _updatedAt, ...rest } = snapshot
+        await writeSnapshot(id, { ...rest, isStale: true })
+      }),
+    )
+  }
+
+  const refetchNodes = async (ids: string[]) => {
+    if (disposed) throw new Error('Dataflow runtime is disposed')
+    await ensureInitialized()
+    requireResolveNodes(ids)
+
+    epoch++
+    const batchEpoch = epoch
+    const affected = new Set(ids)
+    for (const dependent of affectedFrom(ids)) affected.add(dependent)
+    for (const id of affected) {
+      generations.set(id, (generations.get(id) ?? 0) + 1)
+      controllers.get(id)?.abort()
+    }
+    await evaluateAffected(affected, batchEpoch)
+  }
+
+  // A same tick may mix whole-value setState calls and setStatePath patches
+  // for the same node (e.g. two form fields). Both queue synchronously —
+  // pendingWrites.set / pendingPathPatches.push happen before any await —
+  // so back-to-back calls can never race on reading the same pre-batch
+  // snapshot as their base; the microtask below is the only place patches
+  // actually get resolved against a base value, once, in push order.
+  const ensureScheduledWrite = (): Promise<void> => {
     if (!scheduledWrite) {
-      scheduledWrite = Promise.resolve().then(() => {
-        const batch = pendingWrites
+      scheduledWrite = Promise.resolve().then(async () => {
+        const writes = pendingWrites
+        const patches = pendingPathPatches.splice(0)
         pendingWrites = new Map()
         scheduledWrite = undefined
-        return applyStateBatch(batch)
+
+        if (patches.length > 0) await ensureInitialized()
+        for (const patch of patches) {
+          if (writes.has(patch.id)) {
+            writes.set(patch.id, setValueAtPath(writes.get(patch.id), patch.path, patch.value))
+            continue
+          }
+          const snapshot = await store.read(patch.id)
+          const base = snapshot?.status === 'ready' ? snapshot.value : undefined
+          writes.set(patch.id, setValueAtPath(base, patch.path, patch.value))
+        }
+        return applyStateBatch(writes)
       })
     }
     return scheduledWrite
+  }
+
+  const scheduleStateBatch = (values: Record<string, unknown>): Promise<void> => {
+    for (const [id, value] of Object.entries(values)) pendingWrites.set(id, value)
+    return ensureScheduledWrite()
+  }
+
+  // `async` only so a bad path rejects the returned promise instead of
+  // throwing synchronously — the push itself still runs before any await,
+  // same timing as a plain function.
+  const scheduleStatePathBatch = async (patches: StatePatch[]): Promise<void> => {
+    for (const patch of patches) {
+      if (!patch.path) throw new Error(`setStatePath requires a non-empty path (node ${patch.id}); use setState for the whole value`)
+    }
+    pendingPathPatches.push(...patches)
+    return ensureScheduledWrite()
   }
 
   const ensureInitialized = (): Promise<void> => {
@@ -408,6 +613,11 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     },
     setState: (id, value) => scheduleStateBatch({ [id]: value }),
     setStates: scheduleStateBatch,
+    setStatePath: (id, path, value) => scheduleStatePathBatch([{ id, path, value }]),
+    setStatePaths: scheduleStatePathBatch,
+    publish: publishResult,
+    invalidate: invalidateNodes,
+    refetch: refetchNodes,
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

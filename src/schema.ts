@@ -268,6 +268,7 @@ function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOpti
     additionalProperties: false,
     required: ['apiVersion', 'kind', 'spec', ...(hasRequiredBindings(manifest) ? ['bindings'] : [])],
     properties: {
+      $schema: { type: 'string' },
       apiVersion: { const: manifest.apiVersion },
       kind: { const: manifest.kind },
       metadata: metadataSchema,
@@ -405,6 +406,7 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
 
   for (const manifest of manifests) {
     const properties: Record<string, unknown> = {
+      $schema: { type: 'string' },
       apiVersion: { const: manifest.apiVersion },
       kind: { const: manifest.kind },
       metadata: metadataSchema,
@@ -465,7 +467,20 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
  * state/resolve nodes. The existing document definitions are reused so kind,
  * slot and scope constraints cannot drift from `buildDocumentSchema`.
  */
-export function buildResourceDocumentSchema(scoped: ScopedRegistry): JsonSchema {
+export interface BuildResourceDocumentSchemaOptions {
+  /**
+   * Node ids already declared in the in-progress document (a staged
+   * generation caller's own bookkeeping — resourcekit doesn't track this
+   * itself, see docs/staged-generation-experiment.md). When given,
+   * `$data` is constrained to this exact enum instead of a free string —
+   * generation-quality.md hallucination surface (b): kinds are already
+   * enum-constrained by scope, so a free-string node id was the one
+   * inconsistent escape hatch.
+   */
+  knownNodeIds?: string[]
+}
+
+export function buildResourceDocumentSchema(scoped: ScopedRegistry, options: BuildResourceDocumentSchemaOptions = {}): JsonSchema {
   const resourceSchema = buildDocumentSchema(scoped)
   const defs = structuredClone((resourceSchema.$defs ?? {}) as Record<string, unknown>)
   const executableDataBinding = defs.dataBinding
@@ -475,7 +490,12 @@ export function buildResourceDocumentSchema(scoped: ScopedRegistry): JsonSchema 
     additionalProperties: false,
     required: ['$data'],
     properties: {
-      $data: { type: 'string', description: 'ID of a node in this document data graph.' },
+      $data:
+        options.knownNodeIds === undefined
+          ? { type: 'string', description: 'ID of a node in this document data graph.' }
+          : options.knownNodeIds.length > 0
+            ? { type: 'string', enum: options.knownNodeIds, description: 'ID of a node already declared in this document data graph.' }
+            : false,
       path: { type: 'string', description: 'Optional dot-path into the referenced node value.' },
     },
   }
@@ -503,6 +523,29 @@ export function buildResourceDocumentSchema(scoped: ScopedRegistry): JsonSchema 
         properties: {
           kind: { const: 'resolve' },
           binding: { $ref: '#/$defs/executableDataBinding' },
+          policy: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              refresh: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['kind', 'ms'],
+                properties: {
+                  kind: { const: 'interval' },
+                  ms: { type: 'integer', minimum: 1 },
+                },
+              },
+              staleForMs: { type: 'integer', minimum: 0 },
+              retainPreviousData: { type: 'boolean' },
+              retry: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['maxAttempts'],
+                properties: { maxAttempts: { type: 'integer', minimum: 0 } },
+              },
+            },
+          },
         },
       }
     : false

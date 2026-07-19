@@ -16,7 +16,7 @@ import {
 } from '@loykin/designkit'
 import { getValueAtPath } from '../../path'
 import type { ResourceKitPlugin, SubmitSpec } from '../../types'
-import type { KindRenderFn, RenderContext } from '../../react/types'
+import type { KindRenderFn, RenderContext } from '../../react'
 import { useBindingValue } from '../internal/bindings'
 import { withKindAliases } from '../internal/shared'
 
@@ -428,6 +428,35 @@ const submitSchema = {
             properties: {
               kind: { const: 'emit' },
               event: { type: 'string' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'node'],
+            properties: {
+              kind: { const: 'setData' },
+              node: { type: 'string' },
+              from: { type: 'string' },
+              value: {},
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'nodes'],
+            properties: {
+              kind: { const: 'invalidateData' },
+              nodes: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['kind', 'nodes'],
+            properties: {
+              kind: { const: 'refetchData' },
+              nodes: { type: 'array', items: { type: 'string' } },
             },
           },
         ],

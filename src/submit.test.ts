@@ -69,6 +69,46 @@ describe('runSubmit', () => {
     expect(emitted[0][0]).toBe('users.created')
   })
 
+  it('applies setData/invalidateData/refetchData effects through runtime.dataflow', async () => {
+    const setState = vi.fn(async () => undefined)
+    const invalidate = vi.fn(async () => undefined)
+    const refetch = vi.fn(async () => undefined)
+    const runtime = makeRuntime({ dataflow: { setState, invalidate, refetch } })
+
+    await runSubmit(
+      runtime,
+      {
+        mutation: { target: 'memory' },
+        onSuccess: [
+          { kind: 'setData', node: 'selectedCustomer', from: 'id' },
+          { kind: 'invalidateData', nodes: ['customers', 'customerDetail'] },
+          { kind: 'refetchData', nodes: ['customers'] },
+        ],
+      },
+      {},
+    )
+
+    expect(setState).toHaveBeenCalledWith('selectedCustomer', '7')
+    expect(invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
+    expect(refetch).toHaveBeenCalledWith(['customers'])
+  })
+
+  it('setData falls back to the whole mutation result when no from/value is given', async () => {
+    const setState = vi.fn(async () => undefined)
+    const runtime = makeRuntime({ dataflow: { setState, invalidate: vi.fn(), refetch: vi.fn() } })
+
+    await runSubmit(runtime, { mutation: { target: 'memory' }, onSuccess: [{ kind: 'setData', node: 'lastResult' }] }, {})
+
+    expect(setState).toHaveBeenCalledWith('lastResult', { id: '7', echoed: {}, version: 'v2' })
+  })
+
+  it('rejects data effects when the document has no data graph', async () => {
+    const runtime = makeRuntime()
+    await expect(
+      runSubmit(runtime, { mutation: { target: 'memory' }, onSuccess: [{ kind: 'invalidateData', nodes: ['x'] }] }, {}),
+    ).rejects.toThrow(/data graph/)
+  })
+
   it('rejects unresolved variables in the binding', async () => {
     const runtime = makeRuntime()
     await expect(

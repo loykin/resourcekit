@@ -12,6 +12,12 @@ export interface SubmitRuntime {
   allowedActions?: string[]
   /** Receives `emit` effects — the host app's external hook. */
   emit?: (event: string, payload: unknown) => void
+  /** Present only when the document has a data graph — required by `setData`/`invalidateData`/`refetchData` effects. */
+  dataflow?: {
+    setState(id: string, value: unknown): Promise<void>
+    invalidate(ids: string[]): Promise<void>
+    refetch(ids: string[]): Promise<void>
+  }
 }
 
 /**
@@ -50,6 +56,19 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
     }
     if (effect.kind === 'emit') {
       runtime.emit?.(effect.event, result)
+    }
+    if (effect.kind === 'setData') {
+      if (!runtime.dataflow) throw new Error(`setData effect on node ${effect.node} requires a ResourceDocument data graph`)
+      const next = effect.value !== undefined ? effect.value : effect.from !== undefined ? getValueAtPath(result, effect.from) : result
+      await runtime.dataflow.setState(effect.node, next)
+    }
+    if (effect.kind === 'invalidateData') {
+      if (!runtime.dataflow) throw new Error(`invalidateData effect requires a ResourceDocument data graph`)
+      await runtime.dataflow.invalidate(effect.nodes)
+    }
+    if (effect.kind === 'refetchData') {
+      if (!runtime.dataflow) throw new Error(`refetchData effect requires a ResourceDocument data graph`)
+      await runtime.dataflow.refetch(effect.nodes)
     }
   }
 

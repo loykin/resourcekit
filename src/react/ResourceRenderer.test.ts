@@ -283,4 +283,41 @@ describe('ResourceRenderer', () => {
     await expect(captured?.bindings.read('selected')).resolves.toBe('b')
     await expect(captured?.bindings.write('rows', [])).rejects.toThrow('not writable')
   })
+
+  it('writes through a binding path update only that field, not the whole node (docs/dataflow-and-server-state-direction.md)', async () => {
+    let captured: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'FormProbe',
+          specSchema: { type: 'object' },
+          bindingPolicy: { inputs: { command: { description: 'Draft command field', writable: true } } },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+    const document: ResourceDocument = {
+      data: { nodes: { draft: { kind: 'state', initialValue: { command: 'old', name: 'nginx' } } } },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'FormProbe',
+        bindings: { command: { $data: 'draft', path: 'command' } },
+        spec: {},
+      },
+    }
+
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: document, registry }))
+    await expect(captured?.bindings.read('command')).resolves.toBe('old')
+
+    await captured?.bindings.write('command', 'nginx -g daemon off;')
+
+    await expect(captured?.bindings.read('command')).resolves.toBe('nginx -g daemon off;')
+    await expect(captured?.data.read({ $data: 'draft' })).resolves.toEqual({ command: 'nginx -g daemon off;', name: 'nginx' })
+  })
 })

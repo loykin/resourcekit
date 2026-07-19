@@ -144,6 +144,23 @@ const restMutationResolver: MutationResolver = async (rawBinding, payload) => {
   return response.json()
 }
 
+const operationsMutationResolver: MutationResolver = async (rawBinding, payload) => {
+  const binding = rawBinding as Record<string, unknown>
+  const connectionUid = typeof binding.connection === 'string' ? binding.connection : 'service-operations'
+  const connection = await registry.getConnection(connectionUid)
+  if (!connection || typeof connection.config !== 'object' || connection.config === null || !('baseUrl' in connection.config)) {
+    throw new Error(`operations connection ${connectionUid} is not registered`)
+  }
+  const baseUrl = String(connection.config.baseUrl).replace(/\/$/, '')
+  const response = await fetch(`${baseUrl}/handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error(`Operations handoff failed: ${response.status} ${response.statusText}`)
+  return response.json()
+}
+
 const customerWorkspace: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'ListDetail',
@@ -1557,6 +1574,206 @@ const dynamicDatasourceKitPage: ResourceDocument = {
   resource: dynamicDatasourceKitResource,
 }
 
+export const serviceOperationsPage: ResourceDocument = {
+  data: {
+    nodes: {
+      incidentStatus: { kind: 'state', initialValue: 'all', lifecycle: 'page' },
+      selectedIncident: { kind: 'state', initialValue: 'INC-2048', lifecycle: 'page' },
+      incidents: {
+        kind: 'resolve',
+        binding: {
+          source: 'connection',
+          connection: 'service-operations',
+          request: { path: '/incidents', query: { status: { $data: 'incidentStatus' } } },
+        },
+        policy: { refresh: { kind: 'interval', ms: 30_000 }, staleForMs: 10_000, retainPreviousData: true, retry: { maxAttempts: 2 } },
+      },
+      incidentDetail: {
+        kind: 'resolve',
+        binding: {
+          source: 'connection',
+          connection: 'service-operations',
+          request: { path: '/incidents', query: { id: { $data: 'selectedIncident' } } },
+        },
+      },
+    },
+  },
+  resource: {
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'Workbench',
+    metadata: { name: 'service-operations-command-center' },
+    spec: { leftPaneWidth: 280, rightPaneWidth: 330, bottomPaneHeight: 210, minLeftPaneWidth: 250, minRightPaneWidth: 300, resizable: true },
+    slots: [
+      {
+        name: 'topBar',
+        items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'Service operations', eyebrow: 'Production control room' } }],
+      },
+      {
+        name: 'headerRight',
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'FilterControl',
+            bindings: { value: { $data: 'incidentStatus' } },
+            spec: {
+              config: {
+                key: 'status',
+                type: 'select',
+                label: 'Queue',
+                options: [
+                  { label: 'All incidents', value: 'all' },
+                  { label: 'Investigating', value: 'Investigating' },
+                  { label: 'Monitoring', value: 'Monitoring' },
+                  { label: 'Resolved', value: 'Resolved' },
+                ],
+              },
+              events: { change: { kind: 'setData', node: 'incidentStatus', from: 'value' } },
+            },
+          },
+        ],
+      },
+      {
+        name: 'actions',
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'ActionButton',
+            spec: { label: 'Open runbook', size: 'sm', variant: 'outline' },
+          },
+        ],
+      },
+      {
+        name: 'leftPane',
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'Panel',
+            spec: { title: 'Incident queue', eyebrow: 'Live triage' },
+            slots: [
+              {
+                items: [
+                  {
+                    apiVersion: 'resourcekit.dev/v1alpha1',
+                    kind: 'SelectableList',
+                    bindings: { selected: { $data: 'selectedIncident' } },
+                    spec: {
+                      data: { $data: 'incidents' },
+                      idField: 'id',
+                      primary: { field: 'service' },
+                      secondary: [
+                        { field: 'severity', label: 'Severity' },
+                        { field: 'age', label: 'Open' },
+                      ],
+                      events: { select: { kind: 'setData', node: 'selectedIncident', from: 'row.id' } },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'mainPane',
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'TableView',
+            spec: {
+              title: 'Active incidents',
+              data: { $data: 'incidents' },
+              enableSorting: true,
+              globalSearch: true,
+              searchPlaceholder: 'Search incident, service, or owner…',
+              searchableColumns: ['id', 'service', 'summary', 'owner'],
+              tableHeight: 390,
+              columns: {
+                id: { label: 'Incident', flex: 0.8, emphasis: 'strong' },
+                service: { label: 'Service', flex: 1.3 },
+                severity: { label: 'Severity', flex: 0.8, display: 'badge', map: { Critical: 'destructive', High: 'secondary', Medium: 'outline', Low: 'outline' } },
+                age: { label: 'Age', flex: 0.6, tone: 'muted' },
+              },
+              events: { rowSelect: { kind: 'setData', node: 'selectedIncident', from: 'row.id' } },
+            },
+          },
+        ],
+      },
+      {
+        name: 'rightPane',
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'Panel',
+            spec: { title: 'Incident inspector', eyebrow: 'Selection context' },
+            slots: [
+              {
+                items: [
+                  {
+                    apiVersion: 'resourcekit.dev/v1alpha1',
+                    kind: 'DetailView',
+                    spec: {
+                      data: { $data: 'incidentDetail' },
+                      fields: [
+                        { field: 'summary', label: 'Summary' },
+                        { field: 'status', label: 'Status', display: 'badge' },
+                        { field: 'severity', label: 'Severity', display: 'badge' },
+                        { field: 'owner', label: 'Commander' },
+                      ],
+                    },
+                  },
+                  {
+                    apiVersion: 'resourcekit.dev/v1alpha1',
+                    kind: 'FormView',
+                    spec: {
+                      sections: [
+                        {
+                          id: 'handoff',
+                          label: 'Shift handoff',
+                          description: 'Record the next owner and response note.',
+                          fields: [
+                            { name: 'owner', label: 'Next owner', required: true, defaultValue: 'Platform on-call' },
+                            { name: 'note', label: 'Handoff note', required: true, defaultValue: 'Continue monitoring error budget.' },
+                          ],
+                        },
+                      ],
+                      submit: {
+                        mutation: { target: 'operations', connection: 'service-operations' },
+                        onSuccess: [{ kind: 'refetchData', nodes: ['incidents', 'incidentDetail'] }],
+                      },
+                      submitLabel: 'Save handoff',
+                      successMessage: 'Handoff saved and incident data refreshed',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'bottomPane',
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'ChartView',
+            spec: {
+              chart: {
+                type: 'bar',
+                height: 180,
+                categories: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
+                series: [
+                  { label: 'Opened', color: '#ef4444', values: [2, 1, 3, 2, 4, 2] },
+                  { label: 'Resolved', color: '#14b8a6', values: [1, 2, 1, 3, 2, 3] },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    ],
+  },
+}
+
 // Built via a live MCP client session against examples/mcp-server's
 // "github" connection (test_connection → preview_connection ×2 →
 // next_stage_batch → get_kind_spec_schema → validate_document) — not
@@ -1620,6 +1837,12 @@ const githubOrgReposPage: Resource = {
 
 const examples = [
   ...scenarioExamples,
+  {
+    id: 'service-operations-command-center',
+    name: 'Service operations command center',
+    description: 'Production-style incident triage workspace with scoped filtering, selection, detail, mutation, refetch, and trend context.',
+    resource: serviceOperationsPage,
+  },
   {
     id: 'demo-users-connection-page',
     name: '[MCP-built] Demo users list/detail',
@@ -1722,7 +1945,7 @@ const examples = [
   },
 ] as const
 
-const registry = createRegistry<KindRenderFn>()
+export const registry = createRegistry<KindRenderFn>()
 const playgroundDatasourceManager = createPlaygroundDatasourceManager()
 registry.use({
   name: 'playground-resolvers',
@@ -1733,7 +1956,7 @@ registry.use({
     memory: memoryDataResolver,
     connection: createConnectionDataResolver(registry),
   },
-  mutationResolvers: { memory: memoryMutationResolver, rest: restMutationResolver },
+  mutationResolvers: { memory: memoryMutationResolver, rest: restMutationResolver, operations: operationsMutationResolver },
   connectionAdapters: { rest: restConnectionAdapter, datasourcekit: createDatasourceKitConnectionAdapter(playgroundDatasourceManager) },
 })
 registry.use(createPlaygroundResourceAdapters())
@@ -1751,6 +1974,16 @@ registry.registerConnection({
   description: 'In-memory demo REST API — GET /users, GET /users/:id, PATCH /users/:id.',
   config: { baseUrl: `${window.location.origin}/api/demo-users` },
   policy: { methods: ['GET', 'PATCH'], pathPrefixes: ['/users'] },
+  mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
+})
+
+registry.registerConnection({
+  uid: 'service-operations',
+  type: 'rest',
+  name: 'Service Operations API',
+  description: 'Same-origin backend for live incident queries and handoff writes.',
+  config: { baseUrl: `${window.location.origin}/api/service-operations` },
+  policy: { methods: ['GET'], pathPrefixes: ['/incidents'] },
   mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
 })
 
@@ -2294,7 +2527,7 @@ function StepByStepBuilder() {
         ) : null}
         <strong>{node.kind}</strong>
       </div>
-      {node.slots.map((slot) => slot.items.map((child, i) => renderNode(child, slot.name ?? '(default)', depth + 1)))}
+      {node.slots.map((slot) => slot.items.map((child) => renderNode(child, slot.name ?? '(default)', depth + 1)))}
       {renderOpenSlotsFor(node, depth + 1)}
     </div>
   )

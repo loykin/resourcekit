@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 import { demoUsersMiddleware } from './server/demo-users-api'
+import { createServiceOperationsApi } from './server/service-operations-api'
 
 function demoUsersApiPlugin(): Plugin {
   return {
@@ -14,9 +15,19 @@ function demoUsersApiPlugin(): Plugin {
   }
 }
 
+function serviceOperationsApiPlugin(): Plugin {
+  const api = createServiceOperationsApi()
+  return {
+    name: 'service-operations-api',
+    configureServer(server) {
+      server.middlewares.use('/api/service-operations', api.middleware)
+    },
+  }
+}
+
 export default defineConfig({
   base: process.env.BASE_PATH ?? '/',
-  plugins: [react(), tailwindcss(), demoUsersApiPlugin()],
+  plugins: [react(), tailwindcss(), demoUsersApiPlugin(), serviceOperationsApiPlugin()],
   resolve: {
     alias: [
       { find: '@loykin/resourcekit/adapters/designkit', replacement: resolve(__dirname, '../src/adapters/designkit/index.ts') },

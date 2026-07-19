@@ -4,12 +4,16 @@ import type {
   ConnectionProvider,
   ConnectionSummary,
   DataResolver,
+  DataSourceAdapter,
   KindManifest,
   MutationResolver,
+  PatternExample,
   RegisteredConnection,
   ResourceKitPlugin,
   ScopeOptions,
+  SelectedExamples,
 } from './types'
+import { validateResource } from './validation'
 
 /**
  * Plugin host. Registration is runtime data, not build-time wiring: plugins
@@ -20,8 +24,13 @@ export interface ResourceRegistry<TRender = unknown> {
   use(plugin: ResourceKitPlugin<TRender>): void
   getKind(apiVersion: string, kind: string): KindManifest<unknown, TRender> | undefined
   listKinds(): KindManifest<unknown, TRender>[]
+  /** Registered multi-kind pattern examples, unfiltered — see `ScopedRegistry.selectExamples` for the scope-validated view. */
+  listPatternExamples(): PatternExample[]
   getDataResolver(source: string): DataResolver | undefined
   listDataResolvers(): string[]
+  /** Optional queryKey/schema enrichment registered alongside a `dataResolvers` source. */
+  getDataSourceAdapter(source: string): DataSourceAdapter | undefined
+  listDataSourceAdapters(): DataSourceAdapter[]
   getMutationResolver(target: string): MutationResolver | undefined
   listMutationResolvers(): string[]
   /** Connection *type* adapters (rest, datasourcekit, ...), registered via `use()`. */
@@ -48,6 +57,8 @@ export interface ScopedRegistry<TRender = unknown>
   readonly options: ScopeOptions
   /** MCP-facing connection view — `config` (base URL, DSN, credentials) stripped, capabilities intersected from adapter ∩ connection.mcpPolicy ∩ scope (test.md §5.3, §6). */
   listConnections(): Promise<ConnectionSummary[]>
+  /** Kind + pattern examples that are both scope-allowed and independently pass `validateResource` against this scope (generation-quality.md) — never include an example a document couldn't actually reuse as-is. */
+  selectExamples(): SelectedExamples
 }
 
 function kindKey(apiVersion: string, kind: string): string {
@@ -157,13 +168,16 @@ function toConnectionSummary(
     name: connection.name,
     description: connection.description,
     requestSchema: adapter.requestSchema,
+    ...(adapter.resultSchema ? { resultSchema: adapter.resultSchema } : {}),
     capabilities,
   }
 }
 
 export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
   const kinds = new Map<string, KindManifest<unknown, TRender>>()
+  const patternExamples = new Map<string, PatternExample>()
   const dataResolvers = new Map<string, DataResolver>()
+  const dataSourceAdapters = new Map<string, DataSourceAdapter>()
   const mutationResolvers = new Map<string, MutationResolver>()
   const connectionAdapters = new Map<string, ConnectionAdapter>()
   const connections = new Map<string, RegisteredConnection>()
@@ -200,8 +214,14 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
       for (const manifest of plugin.kinds ?? []) {
         kinds.set(kindKey(manifest.apiVersion, manifest.kind), manifest)
       }
+      for (const example of plugin.patternExamples ?? []) {
+        patternExamples.set(example.name, example)
+      }
       for (const [source, resolver] of Object.entries(plugin.dataResolvers ?? {})) {
         dataResolvers.set(source, resolver)
+      }
+      for (const [source, adapter] of Object.entries(plugin.dataSourceAdapters ?? {})) {
+        dataSourceAdapters.set(source, adapter)
       }
       for (const [target, resolver] of Object.entries(plugin.mutationResolvers ?? {})) {
         mutationResolvers.set(target, resolver)
@@ -213,8 +233,11 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
     },
     getKind: (apiVersion, kind) => kinds.get(kindKey(apiVersion, kind)),
     listKinds: () => [...kinds.values()],
+    listPatternExamples: () => [...patternExamples.values()],
     getDataResolver: (source) => dataResolvers.get(source),
     listDataResolvers: () => [...dataResolvers.keys()],
+    getDataSourceAdapter: (source) => dataSourceAdapters.get(source),
+    listDataSourceAdapters: () => [...dataSourceAdapters.values()],
     getMutationResolver: (target) => mutationResolvers.get(target),
     listMutationResolvers: () => [...mutationResolvers.keys()],
     getConnectionAdapter: (type) => connectionAdapters.get(type),
@@ -246,11 +269,33 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
             .filter((manifest) => kindAllowed(manifest, options))
             .map((manifest) => applySlotScope(manifest, options))
         },
+        listPatternExamples() {
+          return [...patternExamples.values()]
+        },
+        selectExamples() {
+          const kindExamples: SelectedExamples['kindExamples'] = []
+          for (const manifest of kinds.values()) {
+            if (!kindAllowed(manifest, options)) continue
+            for (const example of manifest.examples ?? []) {
+              if (validateResource(example.resource, scoped).valid) {
+                kindExamples.push({ apiVersion: manifest.apiVersion, kind: manifest.kind, description: example.description, resource: example.resource })
+              }
+            }
+          }
+          const filteredPatternExamples = [...patternExamples.values()].filter((example) => validateResource(example.resource, scoped).valid)
+          return { kindExamples, patternExamples: filteredPatternExamples }
+        },
         getDataResolver(source) {
           return dataResolvers.get(source)
         },
         listDataResolvers() {
           return [...dataResolvers.keys()]
+        },
+        getDataSourceAdapter(source) {
+          return dataSourceAdapters.get(source)
+        },
+        listDataSourceAdapters() {
+          return [...dataSourceAdapters.values()]
         },
         getMutationResolver(target) {
           return mutationResolvers.get(target)

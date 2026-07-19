@@ -55,6 +55,19 @@ describe('createRegistry', () => {
     expect(notified).toBe(1)
   })
 
+  it('registers a data source adapter without requiring or replacing its resolver', () => {
+    const registry = createRegistry()
+    const adapter = { source: 'static', resolve: staticResolver, queryKey: () => ['static'] }
+
+    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'adapters', dataSourceAdapters: { static: adapter } })
+
+    expect(registry.getDataResolver('static')).toBe(staticResolver)
+    expect(registry.getDataSourceAdapter('static')).toBe(adapter)
+    expect(registry.getDataSourceAdapter('rest')).toBeUndefined()
+    expect(registry.listDataSourceAdapters()).toEqual([adapter])
+  })
+
   it('resolves static bindings to their rows', async () => {
     const rows = [{ id: '1' }]
     await expect(
@@ -161,6 +174,19 @@ describe('createRegistry', () => {
     // the render path still gets the full connection (with config) for allowed UIDs, scoped by allowlist only
     expect((await scoped.getConnection('crm-api'))?.config).toEqual({ baseUrl: 'https://api.example.com/crm', token: 'secret-token' })
     expect(await scoped.getConnection('metrics-main')).toBeUndefined()
+  })
+
+  it('exposes an adapter resultSchema on the connection summary when the adapter declares one', async () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'rest-connections',
+      connectionAdapters: { rest: { ...testConnectionAdapter(), resultSchema: { type: 'object', properties: { id: { type: 'string' } } } } },
+    })
+    registry.registerConnection(testConnection())
+
+    const scoped = registry.scope({})
+    const summaries = await scoped.listConnections()
+    expect(summaries[0].resultSchema).toEqual({ type: 'object', properties: { id: { type: 'string' } } })
   })
 
   it('falls back to a ConnectionProvider when a uid is not statically registered, merging list results', async () => {

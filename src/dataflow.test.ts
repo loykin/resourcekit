@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   DataGraphValidationError,
+  clampQueryPolicy,
   createDataflowRuntime,
   createMemoryDataStore,
   resolveDataRefs,
@@ -8,6 +9,42 @@ import {
   validateDataGraph,
 } from './dataflow'
 import type { DataBinding } from './types'
+
+describe('clampQueryPolicy', () => {
+  it('passes an undefined policy through', () => {
+    expect(clampQueryPolicy(undefined, { minIntervalMs: 1000 })).toBeUndefined()
+  })
+
+  it('raises a refresh interval below the host minimum', () => {
+    const clamped = clampQueryPolicy({ refresh: { kind: 'interval', ms: 100 } }, { minIntervalMs: 1000 })
+    expect(clamped?.refresh).toEqual({ kind: 'interval', ms: 1000 })
+  })
+
+  it('lowers a refresh interval above the host maximum', () => {
+    const clamped = clampQueryPolicy({ refresh: { kind: 'interval', ms: 60_000 } }, { maxIntervalMs: 30_000 })
+    expect(clamped?.refresh).toEqual({ kind: 'interval', ms: 30_000 })
+  })
+
+  it('drops refresh entirely when the host disallows polling', () => {
+    const clamped = clampQueryPolicy({ refresh: { kind: 'interval', ms: 5000 } }, { allowPolling: false })
+    expect(clamped?.refresh).toBeUndefined()
+  })
+
+  it('caps retry attempts to the host maximum', () => {
+    const clamped = clampQueryPolicy({ retry: { maxAttempts: 10 } }, { maxRetries: 3 })
+    expect(clamped?.retry).toEqual({ maxAttempts: 3 })
+  })
+
+  it('leaves a policy already within bounds untouched', () => {
+    const policy = { refresh: { kind: 'interval' as const, ms: 5000 }, retry: { maxAttempts: 2 } }
+    expect(clampQueryPolicy(policy, { minIntervalMs: 1000, maxIntervalMs: 10_000, maxRetries: 5 })).toEqual(policy)
+  })
+
+  it('is a no-op with no host scope policy', () => {
+    const policy = { refresh: { kind: 'interval' as const, ms: 10 } }
+    expect(clampQueryPolicy(policy, undefined)).toEqual(policy)
+  })
+})
 
 describe('data references', () => {
   it('scans and resolves structural references recursively', () => {
@@ -201,5 +238,268 @@ describe('createDataflowRuntime', () => {
 
     await expect(runtime.resolve('upstream')).rejects.toThrow('upstream failed')
     await expect(runtime.resolve('downstream')).rejects.toThrow('upstream failed')
+  })
+
+  describe('publish', () => {
+    it('writes an externally-produced value and propagates it to descendants', async () => {
+      const runtime = createDataflowRuntime({
+        graph: {
+          nodes: {
+            processes: { kind: 'resolve', binding: { source: 'poll' } },
+            summary: { kind: 'resolve', binding: { source: 'test', rows: { $data: 'processes' } } },
+          },
+        },
+        resolve: async (binding) => {
+          const b = binding as DataBinding & { rows?: unknown[] }
+          if (b.source === 'poll') return []
+          return (b.rows ?? []).length
+        },
+      })
+
+      await runtime.start()
+      expect(await runtime.resolve('summary')).toBe(0)
+
+      await runtime.publish('processes', { status: 'ready', value: [{ id: '1' }, { id: '2' }] })
+
+      expect(await runtime.read('processes')).toEqual(expect.objectContaining({ status: 'ready', value: [{ id: '1' }, { id: '2' }] }))
+      expect(await runtime.resolve('summary')).toBe(2)
+    })
+
+    it('propagates an error result to descendants', async () => {
+      const runtime = createDataflowRuntime({
+        graph: {
+          nodes: {
+            processes: { kind: 'resolve', binding: { source: 'poll' } },
+            summary: { kind: 'resolve', binding: { source: 'test', rows: { $data: 'processes' } } },
+          },
+        },
+        resolve: async () => [],
+      })
+
+      await runtime.start()
+      await runtime.publish('processes', { status: 'error', error: new Error('poll failed') })
+
+      await expect(runtime.resolve('processes')).rejects.toThrow('poll failed')
+      await expect(runtime.resolve('summary')).rejects.toThrow('poll failed')
+    })
+
+    it('carries fetchStatus/isStale through to the stored snapshot', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { processes: { kind: 'resolve', binding: { source: 'poll' } } } },
+        resolve: async () => [],
+      })
+      await runtime.start()
+
+      await runtime.publish('processes', { status: 'ready', value: [{ id: '1' }], isStale: false, fetchStatus: 'idle' })
+      expect(await runtime.read('processes')).toEqual(
+        expect.objectContaining({ status: 'ready', value: [{ id: '1' }], isStale: false, fetchStatus: 'idle' }),
+      )
+    })
+
+    it('retains the last-good value alongside a background refresh failure', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { processes: { kind: 'resolve', binding: { source: 'poll' } } } },
+        resolve: async () => [{ id: '1' }],
+      })
+      await runtime.start()
+      expect(await runtime.resolve('processes')).toEqual([{ id: '1' }])
+
+      // A retainPreviousData refresh failure: report the new error but keep
+      // showing the last-good value, flagged stale rather than cleared.
+      await runtime.publish('processes', { status: 'error', error: new Error('refresh failed'), value: [{ id: '1' }], isStale: true })
+
+      const snapshot = await runtime.read('processes')
+      expect(snapshot).toEqual(
+        expect.objectContaining({ status: 'error', value: [{ id: '1' }], isStale: true }),
+      )
+      expect((snapshot?.error as Error).message).toBe('refresh failed')
+    })
+
+    it('rejects publishing to a state node', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { selected: { kind: 'state', initialValue: 'a' } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+      await expect(runtime.publish('selected', { status: 'ready', value: 'b' })).rejects.toThrow('is not a resolve node')
+    })
+
+    it('rejects publishing to an unknown node', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { known: { kind: 'resolve', binding: { source: 'test' } } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+      await expect(runtime.publish('unknown', { status: 'ready', value: 1 })).rejects.toThrow('does not exist')
+    })
+
+    it('supersedes an in-flight internal resolve, discarding it even if it later settles', async () => {
+      let releaseStaleResolve!: (value: string) => void
+      const staleResolve = new Promise<string>((resolve) => {
+        releaseStaleResolve = resolve
+      })
+
+      const runtime = createDataflowRuntime({
+        graph: {
+          nodes: {
+            selection: { kind: 'state', initialValue: 'initial' },
+            result: { kind: 'resolve', binding: { source: 'test', value: { $data: 'selection' } } },
+          },
+        },
+        // Ignores the abort signal entirely — the generation check inside
+        // evaluate(), not abort propagation, must be what protects the
+        // published value once this stale execution eventually settles.
+        resolve: (binding) => {
+          const value = (binding as DataBinding & { value: string }).value
+          return value === 'initial' ? Promise.resolve(value) : staleResolve
+        },
+      })
+
+      await runtime.start()
+      const stateWrite = runtime.setState('selection', 'triggers-slow-resolve')
+      await vi.waitFor(async () => expect((await runtime.read('result'))?.status).toBe('pending'))
+
+      await runtime.publish('result', { status: 'ready', value: 'published' })
+      expect(await runtime.resolve('result')).toBe('published')
+
+      releaseStaleResolve('stale-internal-value')
+      await stateWrite // now free to settle: its evaluate() call discards the stale result and resolves
+
+      expect(await runtime.resolve('result')).toBe('published')
+    })
+  })
+
+  describe('setStatePath', () => {
+    it('updates one field of a state node, leaving siblings untouched', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { draft: { kind: 'state', initialValue: { command: 'old', name: 'nginx' } } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+
+      await runtime.setStatePath('draft', 'command', 'nginx -g daemon off;')
+      expect(await runtime.resolve('draft')).toEqual({ command: 'nginx -g daemon off;', name: 'nginx' })
+    })
+
+    it('same-tick calls to different paths of the same node both apply (explicit batch)', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { draft: { kind: 'state', initialValue: { command: 'old', name: 'old-name' } } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+
+      const first = runtime.setStatePath('draft', 'command', 'new-command')
+      const second = runtime.setStatePath('draft', 'name', 'new-name')
+      await Promise.all([first, second])
+
+      expect(await runtime.resolve('draft')).toEqual({ command: 'new-command', name: 'new-name' })
+    })
+
+    it('setStatePaths applies patches to multiple nodes in one call', async () => {
+      const runtime = createDataflowRuntime({
+        graph: {
+          nodes: {
+            a: { kind: 'state', initialValue: { x: 1 } },
+            b: { kind: 'state', initialValue: { y: 1 } },
+          },
+        },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+
+      await runtime.setStatePaths([
+        { id: 'a', path: 'x', value: 2 },
+        { id: 'b', path: 'y', value: 2 },
+      ])
+
+      expect(await runtime.resolve('a')).toEqual({ x: 2 })
+      expect(await runtime.resolve('b')).toEqual({ y: 2 })
+    })
+
+    it('rejects an empty path', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { draft: { kind: 'state', initialValue: {} } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+      await expect(runtime.setStatePath('draft', '', 'x')).rejects.toThrow('non-empty path')
+    })
+
+    it('rejects a resolve node target, same as setState', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { computed: { kind: 'resolve', binding: { source: 'test' } } } },
+        resolve: async () => ({}),
+      })
+      await runtime.start()
+      await expect(runtime.setStatePath('computed', 'x', 1)).rejects.toThrow('not writable state')
+    })
+  })
+
+  describe('invalidate / refetch', () => {
+    it('invalidate marks a resolve node stale without re-executing it', async () => {
+      const resolve = vi.fn(async () => 'v1')
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { customers: { kind: 'resolve', binding: { source: 'test' } } } },
+        resolve,
+      })
+      await runtime.start()
+      expect(resolve).toHaveBeenCalledTimes(1)
+
+      await runtime.invalidate(['customers'])
+
+      expect(resolve).toHaveBeenCalledTimes(1) // still just the initial run
+      const snapshot = await runtime.read('customers')
+      expect(snapshot).toEqual(expect.objectContaining({ status: 'ready', value: 'v1', isStale: true }))
+    })
+
+    it('refetch re-runs a resolve node and its descendants even with no dependency change', async () => {
+      const calls: string[] = []
+      let version = 0
+      const runtime = createDataflowRuntime({
+        graph: {
+          nodes: {
+            customers: { kind: 'resolve', binding: { source: 'test', id: 'customers' } },
+            summary: { kind: 'resolve', binding: { source: 'test', id: 'summary', rows: { $data: 'customers' } } },
+          },
+        },
+        resolve: async (binding) => {
+          const b = binding as DataBinding & { id: string }
+          calls.push(b.id)
+          if (b.id === 'customers') return ++version
+          return `derived-from-${version}`
+        },
+      })
+      await runtime.start()
+      calls.length = 0
+
+      await runtime.refetch(['customers'])
+
+      expect(calls).toEqual(['customers', 'summary'])
+      expect(await runtime.resolve('customers')).toBe(2)
+      expect(await runtime.resolve('summary')).toBe('derived-from-2')
+    })
+
+    it('refetch clears an isStale flag set by a prior invalidate', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { customers: { kind: 'resolve', binding: { source: 'test' } } } },
+        resolve: async () => 'value',
+      })
+      await runtime.start()
+      await runtime.invalidate(['customers'])
+      expect((await runtime.read('customers'))?.isStale).toBe(true)
+
+      await runtime.refetch(['customers'])
+      expect((await runtime.read('customers'))?.isStale).toBeUndefined()
+    })
+
+    it('rejects a state node target for both invalidate and refetch', async () => {
+      const runtime = createDataflowRuntime({
+        graph: { nodes: { selected: { kind: 'state', initialValue: 'a' } } },
+        resolve: async () => undefined,
+      })
+      await runtime.start()
+      await expect(runtime.invalidate(['selected'])).rejects.toThrow('not a resolve node')
+      await expect(runtime.refetch(['selected'])).rejects.toThrow('not a resolve node')
+    })
   })
 })
