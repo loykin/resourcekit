@@ -58,8 +58,9 @@ import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapte
 import { createPlaygroundConnectionProvider, createPlaygroundDatasourceManager } from './demoDatasourceKit'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
 import { scenarioExamples } from './scenarios'
+import { designkitParityExamples } from './designkitParity'
 
-export type PlaygroundExampleCategory = 'scenario' | 'mcp-generated' | 'runtime' | 'fragment'
+export type PlaygroundExampleCategory = 'scenario' | 'mcp-generated' | 'runtime' | 'fragment' | 'designkit-parity'
 
 export interface PlaygroundExample {
   id: string
@@ -1893,6 +1894,7 @@ const githubOrgReposPage: Resource = {
 
 export const examples: readonly PlaygroundExample[] = [
   ...scenarioExamples,
+  ...designkitParityExamples,
   {
     id: 'service-operations-command-center',
     name: 'Service operations command center',
@@ -2838,10 +2840,12 @@ const categoryLabels: Record<PlaygroundExampleCategory, string> = {
   'mcp-generated': 'MCP generated',
   runtime: 'Runtime demo',
   fragment: 'Component fragment',
+  'designkit-parity': 'DesignKit parity',
 }
 
 function compositionTitle(category: PlaygroundExampleCategory): string {
   if (category === 'scenario' || category === 'mcp-generated') return 'How AI built this'
+  if (category === 'designkit-parity') return 'How this parity sample is composed'
   return category === 'fragment' ? 'How this fragment is composed' : 'How this demo is composed'
 }
 

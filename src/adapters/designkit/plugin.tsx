@@ -27,6 +27,8 @@ interface ListDetailSpec {
 }
 
 interface WorkbenchSpec {
+  title?: string
+  description?: string
   leftPaneWidth?: number
   rightPaneWidth?: number
   bottomPaneHeight?: number
@@ -46,7 +48,7 @@ interface DataBodySpec {
   title?: string
   description?: string
   defaultTab?: string
-  status?: ReactNode
+  status?: string
 }
 
 interface PageTopBarSpec {
@@ -64,12 +66,14 @@ interface DataBodyTabSpec {
   id: string
   label: string
   count?: number
+  disabled?: boolean
 }
 
 interface DataBodySectionSpec {
   id: string
   label: string
   description?: string
+  disabled?: boolean
 }
 
 interface DataBodySummarySpec {
@@ -81,6 +85,7 @@ interface DataBodyGroupSpec {
   description?: string
   layout?: string
   variant?: string
+  danger?: boolean
 }
 
 interface DataBodyRowSpec {
@@ -100,6 +105,11 @@ interface DataBodyFieldSpec {
 interface PanelSpec {
   title?: string
   eyebrow?: string
+}
+
+interface PanelSectionSpec {
+  title?: string
+  description?: string
 }
 
 interface TextSpec {
@@ -174,6 +184,7 @@ const KitInput = Input as ComponentType<Record<string, unknown>>
 const KitListDetail = ListDetailBodyTemplate as unknown as ComponentType<Record<string, unknown>>
 const KitPageTopBar = PageTopBar as ComponentType<Record<string, unknown>>
 const KitPanel = PanelTemplate as ComponentType<Record<string, unknown>>
+const KitPanelSection = PanelTemplate.Section as ComponentType<Record<string, unknown>>
 const KitWorkbench = WorkbenchBodyTemplate as ComponentType<Record<string, unknown>>
 const KitDataBodyBody = DataBodyTemplate.Body as ComponentType<Record<string, unknown>>
 const KitDataBodyTab = DataBodyTemplate.Tab as unknown as ComponentType<Record<string, unknown>>
@@ -196,7 +207,7 @@ function dataBodyChildren(ctx: RenderContext): ReactNode {
     if (resource.kind === 'DataBodyTab' || resource.kind === 'DesignKitDataBodyTab') {
       const spec = resource.spec as DataBodyTabSpec
       return (
-        <KitDataBodyTab key={`${resource.kind}-${index}`} id={spec.id} label={spec.label} count={spec.count}>
+        <KitDataBodyTab key={`${resource.kind}-${index}`} id={spec.id} label={spec.label} count={spec.count} disabled={spec.disabled}>
           {node}
         </KitDataBodyTab>
       )
@@ -204,7 +215,13 @@ function dataBodyChildren(ctx: RenderContext): ReactNode {
     if (resource.kind === 'DataBodySection' || resource.kind === 'DesignKitDataBodySection') {
       const spec = resource.spec as DataBodySectionSpec
       return (
-        <KitDataBodySection key={`${resource.kind}-${index}`} id={spec.id} label={spec.label} description={spec.description}>
+        <KitDataBodySection
+          key={`${resource.kind}-${index}`}
+          id={spec.id}
+          label={spec.label}
+          description={spec.description}
+          disabled={spec.disabled}
+        >
           {node}
         </KitDataBodySection>
       )
@@ -269,6 +286,7 @@ function InputNode({ spec, ctx }: { spec: InputSpec; ctx: RenderContext }) {
       placeholder={spec.placeholder}
       style={{ minWidth: 256, width: '100%' }}
       type={spec.type ?? 'text'}
+      onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
     />
   )
 }
@@ -289,7 +307,7 @@ function SheetNode({ spec, ctx }: { spec: SheetSpec; ctx: RenderContext }) {
         style={spec.width ? { width: spec.width, maxWidth: spec.width } : undefined}
         className="flex flex-col gap-0 p-0"
       >
-        <SheetHeader className="border-b px-4 py-3">
+        <SheetHeader className="border-b border-border px-4 py-3">
           <SheetTitle className="text-sm font-semibold">{spec.title}</SheetTitle>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">{ctx.slots.children()}</div>
@@ -368,7 +386,7 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
       }}
     >
       {spec.sections.map((section) => (
-        <div key={section.id} className="border-b px-4 py-4 last:border-b-0">
+        <div key={section.id} className="border-b border-border px-4 py-4 last:border-b-0">
           {section.label && <h3 className="mb-1 text-sm font-medium">{section.label}</h3>}
           {section.description && <p className="mb-3 text-xs text-muted-foreground">{section.description}</p>}
           <div className="grid gap-3">
@@ -474,8 +492,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           slots: {
             right: {
               min: 0,
-              max: 1,
-              accepts: ['FilterControl'],
+              accepts: ['FilterControl', 'ActionButton'],
               description: 'Controls rendered at the right edge of the top bar, e.g. a filter or search control.',
             },
           },
@@ -561,6 +578,8 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           type: 'object',
           additionalProperties: true,
           properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
             leftPaneWidth: { type: 'number' },
             rightPaneWidth: { type: 'number' },
             bottomPaneHeight: { type: 'number' },
@@ -586,40 +605,44 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             },
             headerRight: {
               min: 0,
-              max: 1,
               acceptsLevels: ['organism', 'leaf'],
               description: 'Controls rendered at the right of the header, alongside topBar.',
             },
             actions: {
               min: 0,
-              max: 1,
               acceptsLevels: ['organism', 'leaf'],
               description: 'Primary action buttons for the workbench, typically near the header.',
             },
             leftPane: {
               min: 0,
               max: 1,
-              accepts: ['FilterControl', 'Panel', 'DataBody'],
+              acceptsLevels: ['organism', 'leaf'],
               description: 'Secondary content to the left of mainPane — typically filters, navigation, or a list.',
             },
             mainPane: {
               min: 1,
               max: 1,
-              accepts: ['TableView', 'Panel'],
+              acceptsLevels: ['organism', 'leaf'],
               description: 'The primary content of the workbench (required) — the main table, editor, or view the user works in.',
             },
             rightPane: {
               min: 0,
               max: 1,
-              accepts: ['Panel'],
+              acceptsLevels: ['organism', 'leaf'],
               description:
                 'Secondary content to the right of mainPane — typically an inspector, detail panel, or contextual info for the current selection.',
             },
             bottomPane: {
               min: 0,
               max: 1,
-              accepts: ['ChartView'],
+              acceptsLevels: ['organism', 'leaf'],
               description: 'Secondary content below mainPane — typically a chart, log, or console tied to the main content.',
+            },
+            status: {
+              min: 0,
+              max: 1,
+              accepts: ['Badge'],
+              description: 'Compact status shown in the workbench header.',
             },
           },
         },
@@ -628,6 +651,9 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           return (
             <KitWorkbench
               topBar={ctx.slots.one('topBar')}
+              title={spec.title}
+              description={spec.description}
+              status={ctx.slots.one('status')}
               headerRight={ctx.slots.one('headerRight')}
               actions={ctx.slots.one('actions')}
               leftPane={ctx.slots.one('leftPane')}
@@ -664,7 +690,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             title: { type: 'string' },
             description: { type: 'string' },
             defaultTab: { type: 'string' },
-            status: {},
+            status: { type: 'string' },
           },
         },
         slotPolicy: {
@@ -706,9 +732,14 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             },
             toolbarRight: {
               min: 0,
-              max: 1,
               acceptsLevels: ['organism', 'leaf'],
               description: 'Toolbar controls right-aligned above the body content.',
+            },
+            status: {
+              min: 0,
+              max: 1,
+              accepts: ['Badge'],
+              description: 'Compact status shown next to the DataBody heading.',
             },
           },
         },
@@ -764,6 +795,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             id: { type: 'string' },
             label: { type: 'string' },
             count: { type: 'number' },
+            disabled: { type: 'boolean' },
           },
         },
         slotPolicy: {
@@ -791,6 +823,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             id: { type: 'string' },
             label: { type: 'string' },
             description: { type: 'string' },
+            disabled: { type: 'boolean' },
           },
         },
         slotPolicy: {
@@ -842,19 +875,35 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             description: { type: 'string' },
             layout: { type: 'string' },
             variant: { type: 'string' },
+            danger: { type: 'boolean' },
           },
         },
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['ObjectFields', 'DataBodyField', 'DataBodyRow'],
-            description: 'The rows or fields belonging to this group.',
+            accepts: ['ObjectFields', 'DataBodyField', 'DataBodyRow', 'SelectableList', 'DetailView'],
+            description:
+              'The rows or fields belonging to this group. A split-layout group may instead pair SelectableList with DetailView.',
+          },
+          slots: {
+            actions: {
+              min: 0,
+              accepts: ['ActionButton'],
+              description: 'Actions shown in the group header.',
+            },
           },
         },
         render: (resource, ctx) => {
           const spec = resource.spec as DataBodyGroupSpec
           return (
-            <KitDataBodyGroup title={spec.title} description={spec.description} layout={spec.layout} variant={spec.variant}>
+            <KitDataBodyGroup
+              title={spec.title}
+              description={spec.description}
+              layout={spec.layout}
+              variant={spec.variant}
+              danger={spec.danger}
+              actions={ctx.slots.one('actions')}
+            >
               {ctx.slots.children()}
             </KitDataBodyGroup>
           )
@@ -911,8 +960,8 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['Badge'],
-            description: 'Optional override content instead of the plain text value, e.g. a Badge.',
+            accepts: ['Badge', 'ActionButton'],
+            description: 'Optional override content instead of the plain text value, e.g. a Badge or field-level action.',
           },
         },
         bindingPolicy: {
@@ -942,6 +991,12 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: { min: 0, acceptsLevels: ['organism', 'leaf'], description: 'The panel\'s content.' },
           slots: {
+            status: {
+              min: 0,
+              max: 1,
+              accepts: ['Badge'],
+              description: 'Compact status shown in the panel header.',
+            },
             actions: {
               min: 0,
               accepts: ['ActionButton'],
@@ -953,9 +1008,51 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         render: (resource, ctx) => {
           const spec = resource.spec as PanelSpec
           return (
-            <KitPanel title={spec.title} eyebrow={spec.eyebrow} actions={ctx.slots.one('actions')} footer={ctx.slots.one('footer')}>
+            <KitPanel
+              title={spec.title}
+              eyebrow={spec.eyebrow}
+              status={ctx.slots.one('status')}
+              actions={ctx.slots.one('actions')}
+              footer={ctx.slots.one('footer')}
+            >
               {ctx.slots.children()}
             </KitPanel>
+          )
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitPanelSection',
+        level: ['organism'],
+        description: 'A labeled section inside a Panel, with optional section actions.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
+          },
+        },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            acceptsLevels: ['organism', 'leaf'],
+            description: 'Section content.',
+          },
+          slots: {
+            actions: {
+              min: 0,
+              accepts: ['ActionButton'],
+              description: 'Actions shown in the section header.',
+            },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as PanelSectionSpec
+          return (
+            <KitPanelSection title={spec.title} description={spec.description} actions={ctx.slots.one('actions')}>
+              {ctx.slots.children()}
+            </KitPanelSection>
           )
         },
       },
@@ -1034,6 +1131,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             type: { type: 'string' },
             value: { type: 'string', description: 'A literal prefill value.' },
             fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
+            events: { type: 'object' },
           },
         },
         bindingPolicy: {
@@ -1158,6 +1256,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     ['DesignKitDataBodyRow', 'DataBodyRow'],
     ['DesignKitDataBodyField', 'DataBodyField'],
     ['DesignKitPanel', 'Panel'],
+    ['DesignKitPanelSection', 'PanelSection'],
     ['DesignKitText', 'Text'],
     ['DesignKitBadge', 'Badge'],
     ['DesignKitButton', 'ActionButton'],

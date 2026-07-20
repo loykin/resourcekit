@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getValueAtPath } from '../../path'
 import type { DataBinding, FieldSpec, ResourceKitPlugin, ViewStateSpec } from '../../types'
-import type { KindRenderFn, RenderContext } from '../../react/types'
+import type { KindRenderFn, RenderContext } from '../../react'
 import { useBindingValue } from '../internal/bindings'
 
 interface FieldRefSpec {
@@ -21,6 +21,10 @@ interface DetailViewSpec {
   data?: DataBinding
   fields: FieldSpec[]
   state?: ViewStateSpec
+  layout?: 'list' | 'cards'
+  titleField?: string
+  subtitleField?: string
+  statusField?: string
 }
 
 interface ObjectFieldsSpec {
@@ -95,7 +99,7 @@ function SelectableList({ spec, ctx }: { spec: SelectableListSpec; ctx: RenderCo
           <button
             key={id || index}
             type="button"
-            className={`block w-full border-b px-4 py-3 text-left transition-colors last:border-b-0 ${
+            className={`block w-full border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 ${
               active ? 'bg-muted' : 'bg-background hover:bg-muted/60'
             }`}
             onClick={() => ctx.events.emit('select', { row })}
@@ -157,6 +161,38 @@ function DetailView({ spec, ctx }: { spec: DetailViewSpec; ctx: RenderContext })
   if (rows.length === 0) return <div className="resourcekit-state p-4">{spec.state?.emptyMessage ?? 'No data'}</div>
 
   const record = rows[0]
+  if (spec.layout === 'cards') {
+    const title = spec.titleField ? getValueAtPath(record, spec.titleField) : undefined
+    const subtitle = spec.subtitleField ? getValueAtPath(record, spec.subtitleField) : undefined
+    const status = spec.statusField ? getValueAtPath(record, spec.statusField) : undefined
+    return (
+      <div className="grid gap-4 p-4 text-sm">
+        {(title != null || subtitle != null || status != null) && (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              {title != null && <h2 className="truncate text-base font-semibold">{String(title)}</h2>}
+              {subtitle != null && <p className="truncate text-sm text-muted-foreground">{String(subtitle)}</p>}
+            </div>
+            {status != null && (
+              <span className="inline-flex shrink-0 items-center rounded-md border border-border px-2 py-0.5 text-xs capitalize">
+                {String(status)}
+              </span>
+            )}
+          </div>
+        )}
+        <dl className="grid gap-3 sm:grid-cols-2">
+          {spec.fields.map((field) => (
+            <div key={field.field} className="rounded-md border border-border p-3">
+              <dt className="text-xs text-muted-foreground">{field.label ?? field.field}</dt>
+              <dd className={`mt-1 ${field.emphasis === 'strong' ? 'font-semibold' : 'font-medium'}`}>
+                {renderFieldValue(getValueAtPath(record, field.field), field)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    )
+  }
   return (
     <dl className="grid gap-3 p-4 text-sm">
       {spec.fields.map((field) => (
@@ -256,6 +292,10 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
             data: { type: 'object' },
             fields: { type: 'array', items: fieldSpecSchema },
             state: viewStateSchema,
+            layout: { enum: ['list', 'cards'] },
+            titleField: { type: 'string' },
+            subtitleField: { type: 'string' },
+            statusField: { type: 'string' },
           },
         },
         render: (resource, ctx) => <DetailView spec={resource.spec as DetailViewSpec} ctx={ctx} />,

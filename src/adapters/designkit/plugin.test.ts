@@ -54,3 +54,48 @@ describe('DesignKit forms', () => {
     consoleError.mockRestore()
   })
 })
+
+describe('DesignKit adapter parity', () => {
+  it('exposes public status, section, and flexible workbench placement contracts', () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+
+    const dataBody = registry.getKind('resourcekit.dev/v1alpha1', 'DataBody')
+    const workbench = registry.getKind('resourcekit.dev/v1alpha1', 'Workbench')
+    const panel = registry.getKind('resourcekit.dev/v1alpha1', 'Panel')
+    const panelSection = registry.getKind('resourcekit.dev/v1alpha1', 'PanelSection')
+    const dataBodyField = registry.getKind('resourcekit.dev/v1alpha1', 'DataBodyField')
+
+    expect(dataBody?.slotPolicy?.slots?.status?.accepts).toEqual(['Badge'])
+    expect(workbench?.slotPolicy?.slots?.status?.accepts).toEqual(['Badge'])
+    expect(workbench?.slotPolicy?.slots?.mainPane?.acceptsLevels).toEqual(['organism', 'leaf'])
+    expect(workbench?.slotPolicy?.slots?.bottomPane?.acceptsLevels).toEqual(['organism', 'leaf'])
+    expect(panel?.slotPolicy?.slots?.status?.accepts).toEqual(['Badge'])
+    expect(panelSection?.level).toEqual(['organism'])
+    expect(dataBodyField?.slotPolicy?.defaultSlot?.accepts).toEqual(['Badge', 'ActionButton'])
+  })
+
+  it('emits live InputControl changes through the resource event policy', () => {
+    const onEvent = vi.fn()
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+
+    render(
+      createElement(ResourceRenderer, {
+        registry,
+        onEvent,
+        resource: {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'InputControl',
+          spec: {
+            name: 'query',
+            events: { change: { kind: 'emit', event: 'queryChanged' } },
+          },
+        },
+      }),
+    )
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'query' }), { target: { value: 'resourcekit' } })
+    expect(onEvent).toHaveBeenCalledWith('queryChanged', { value: 'resourcekit' })
+  })
+})
