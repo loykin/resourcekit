@@ -2,7 +2,7 @@ import { createElement, Fragment, useCallback, useEffect, useMemo, useReducer, u
 import type { ReactNode } from 'react'
 import { createDataflowRuntime, isDataRef, scanDataRefs } from '../dataflow'
 import type { DataflowRuntime, DataRef, DataStore, ResourceDocument } from '../dataflow'
-import type { ConfirmSpec, DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration } from '../types'
+import type { ConfirmSpec, DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration, VariableValue, VisibilityCondition } from '../types'
 import type { ResourceRegistry, ScopedRegistry } from '../registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../variables'
 import type { VariableEngine } from '../variables'
@@ -89,13 +89,19 @@ function renderNodes(
   )
 }
 
-function isVisible(resource: Resource, runtime: Runtime): boolean {
-  const condition = resource.visible
+function evaluateVisibility(condition: VisibilityCondition | undefined, get: (name: string) => VariableValue): boolean {
   if (!condition) return true
-  const value = runtime.engine.get(condition.$variable)
+  if ('$and' in condition) return condition.$and.every((child) => evaluateVisibility(child, get))
+  if ('$or' in condition) return condition.$or.some((child) => evaluateVisibility(child, get))
+  if ('$not' in condition) return !evaluateVisibility(condition.$not, get)
+  const value = get(condition.$variable)
   if (condition.equals !== undefined) return value === condition.equals
   if (condition.contains !== undefined) return Array.isArray(value) && value.includes(condition.contains)
   return Array.isArray(value) ? value.length > 0 : Boolean(value)
+}
+
+function isVisible(resource: Resource, runtime: Runtime): boolean {
+  return evaluateVisibility(resource.visible, (name) => runtime.engine.get(name))
 }
 
 function resolveThroughRuntime(

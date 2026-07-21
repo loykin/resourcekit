@@ -79,9 +79,10 @@ export type { BuildResourceDocumentSchemaOptions } from './schema'
 export { createVariableEngine, scanVariableRefs, interpolate } from './variables'
 export type { VariableEngine } from './variables'
 
-export { restResolver, staticResolver, createConnectionDataResolver } from './resolvers'
-export { restConnectionAdapter } from './connectionAdapters'
-export type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
+export { restResolver, staticResolver, createConnectionDataResolver, createRestResolver } from './resolvers'
+export type { RestResolverOptions } from './resolvers'
+export { restConnectionAdapter, createRestConnectionAdapter } from './connectionAdapters'
+export type { RestConnectionConfig, RestConnectionRequest, RestConnectionAdapterOptions } from './connectionAdapters'
 
 export { getValueAtPath, setValueAtPath, coerceVariableValue } from './path'
 export { runSubmit, SUBMIT_CANCELLED } from './submit'

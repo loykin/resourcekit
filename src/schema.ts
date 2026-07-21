@@ -272,7 +272,7 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
   }
   defs.valueBinding = { oneOf: [{ $ref: '#/$defs/dataRef' }, { $ref: '#/$defs/variableRef' }] }
   const visibleVariableNames = scoped.options.variables?.allow
-  defs.visibilityCondition = {
+  const visibilityLeaf = {
     type: 'object',
     additionalProperties: false,
     required: ['$variable'],
@@ -285,6 +285,29 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
       { required: ['$variable'], not: { anyOf: [{ required: ['equals'] }, { required: ['contains'] }] } },
       { required: ['$variable', 'equals'], not: { required: ['contains'] } },
       { required: ['$variable', 'contains'], not: { required: ['equals'] } },
+    ],
+  }
+  defs.visibilityCondition = {
+    oneOf: [
+      visibilityLeaf,
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['$and'],
+        properties: { $and: { type: 'array', items: { $ref: '#/$defs/visibilityCondition' } } },
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['$or'],
+        properties: { $or: { type: 'array', items: { $ref: '#/$defs/visibilityCondition' } } },
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        required: ['$not'],
+        properties: { $not: { $ref: '#/$defs/visibilityCondition' } },
+      },
     ],
   }
 

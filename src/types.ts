@@ -40,6 +40,9 @@ export type VisibilityCondition =
   | { $variable: string; equals?: never; contains?: never }
   | { $variable: string; equals: string; contains?: never }
   | { $variable: string; contains: string; equals?: never }
+  | { $and: VisibilityCondition[] }
+  | { $or: VisibilityCondition[] }
+  | { $not: VisibilityCondition }
 
 export interface Metadata {
   name?: string
@@ -474,6 +477,19 @@ export interface KindManifest<TSpec = unknown, TRender = unknown> {
    * as the nearest record scope (`ctx.record`, `fieldRef` reads).
    */
   recordScope?: boolean
+  /**
+   * When true, `registry.scope()` unconditionally drops this kind — even if
+   * a scope's `kinds.include` explicitly names it. For kinds whose spec is
+   * itself schema-shaped (e.g. a hypothetical `JSONSchemaForm`-style adapter
+   * with an open `jsonSchema` property) rather than schema-*conforming*
+   * data: exposing such a kind to AI/MCP generation would let the generator
+   * define an arbitrary field set, bypassing the enumerable, reviewable kind
+   * catalog `ScopedRegistry`/`kinds.include` exists to enforce
+   * (provisr-poc-findings.md #9, docs/schema-shaped-kind-scoping.md). The
+   * kind still renders normally when a host hand-authors it into a
+   * document — this only affects the AI-facing scoped schema.
+   */
+  hostAuthoredOnly?: boolean
   /**
    * "This kind is used like this" — the minimal single-node teaching unit
    * (generation-quality.md hallucination surface (c) / example

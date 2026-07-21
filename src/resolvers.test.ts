@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createConnectionDataResolver, restResolver } from './resolvers'
+import { createConnectionDataResolver, createRestResolver, restResolver } from './resolvers'
 import type { ConnectionAdapter, RegisteredConnection } from './types'
 
 describe('restResolver', () => {
@@ -42,6 +42,41 @@ describe('restResolver', () => {
     await expect(restResolver({ source: 'rest', url: '/api/items' }, { variables: {} })).rejects.toThrow(
       'REST resolver request failed: 500 Server Error',
     )
+  })
+})
+
+describe('createRestResolver', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('merges dynamic headers under the binding\'s static headers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: '1' }]), { status: 200 }))
+    const resolver = createRestResolver({
+      headers: () => ({ Authorization: 'Bearer rotating-token', 'X-Trace': 'dynamic' }),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    await resolver({ source: 'rest', url: '/api/items', headers: { 'X-Trace': 'static' } }, { variables: {} })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/items', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer rotating-token', 'X-Trace': 'static' },
+      body: undefined,
+      signal: undefined,
+    })
+  })
+
+  it('supports an async headers provider', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: '1' }]), { status: 200 }))
+    const resolver = createRestResolver({
+      headers: async () => ({ Authorization: 'Bearer async-token' }),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    await resolver({ source: 'rest', url: '/api/items' }, { variables: {} })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/items', expect.objectContaining({ headers: { Authorization: 'Bearer async-token' } }))
   })
 })
 

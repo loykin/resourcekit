@@ -228,6 +228,42 @@ describe('validateResource', () => {
     expect(result.issues.map((issue) => issue.path)).toContain('/visible/equals')
   })
 
+  it('validates recursive $and/$or/$not visibility conditions, including nested scope violations', () => {
+    const scoped = registry().scope({ variables: { allow: ['roles'] } })
+    const ok = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        visible: { $or: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'roles', contains: 'operator' }] },
+        spec: { text: 'Admin' },
+      },
+      scoped,
+    )
+    expect(ok).toEqual({ valid: true, issues: [] })
+
+    const badShape = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        visible: { $and: [{ $variable: 'roles', equals: 'admin', contains: 'admin' }] },
+        spec: { text: 'Admin' },
+      } as unknown as import('./types').Resource,
+      scoped,
+    )
+    expect(badShape.issues.map((issue) => issue.path)).toContain('/visible/$and/0')
+
+    const scopeViolation = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        visible: { $not: { $variable: 'notAllowed' } },
+        spec: { text: 'Admin' },
+      },
+      scoped,
+    )
+    expect(scopeViolation.issues.map((issue) => issue.path)).toContain('/visible/$not/$variable')
+  })
+
   it('enforces connections.allow on a bare Resource, not just a ResourceDocument data graph', () => {
     // The ResourceDocument data-graph path (validateResourceDocument) already
     // checks `connections.allow` for `resolve` nodes — this covers the same

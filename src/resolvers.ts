@@ -23,29 +23,47 @@ function asRows(value: unknown): Record<string, unknown>[] {
   return value as Record<string, unknown>[]
 }
 
-export const restResolver: DataResolver = async (binding, ctx) => {
-  const b = binding as RestBinding
-  const response = await fetch(b.url, {
-    method: b.method ?? 'GET',
-    headers: b.headers,
-    body: b.body === undefined ? undefined : JSON.stringify(b.body),
-    signal: ctx.signal,
-  })
-
-  if (!response.ok) {
-    throw new Error(`REST resolver request failed: ${response.status} ${response.statusText}`)
-  }
-
-  const json: unknown = await response.json()
-  if (b.rowsPath) return asRows(getPath(json, b.rowsPath))
-  if (Array.isArray(json)) return asRows(json)
-  const rows = getPath(json, 'rows')
-  if (rows !== undefined) return asRows(rows)
-  // A single-resource endpoint (e.g. GET /users/:id) returns the record
-  // itself, not wrapped in an array or a "rows" property — treat it as one row.
-  if (typeof json === 'object' && json !== null) return [json as Record<string, unknown>]
-  throw new Error('REST resolver expected rows to be an array of objects, a { rows: [...] } object, or a single object')
+export interface RestResolverOptions {
+  /**
+   * Called before each request; merged under the binding's static `headers`
+   * (binding headers win on conflict). Lets a host supply rotating/session
+   * auth (a JWT refreshed out-of-band, e.g.) that a `RestBinding` can't hold
+   * statically without going stale (provisr-poc-findings.md #7).
+   */
+  headers?: () => Record<string, string> | Promise<Record<string, string>>
+  fetchImpl?: typeof fetch
 }
+
+export function createRestResolver(options: RestResolverOptions = {}): DataResolver {
+  return async (binding, ctx) => {
+    const b = binding as RestBinding
+    const dynamicHeaders = options.headers ? await options.headers() : undefined
+    const headers = dynamicHeaders || b.headers ? { ...dynamicHeaders, ...b.headers } : undefined
+    const fetchImpl = options.fetchImpl ?? fetch
+    const response = await fetchImpl(b.url, {
+      method: b.method ?? 'GET',
+      headers,
+      body: b.body === undefined ? undefined : JSON.stringify(b.body),
+      signal: ctx.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`REST resolver request failed: ${response.status} ${response.statusText}`)
+    }
+
+    const json: unknown = await response.json()
+    if (b.rowsPath) return asRows(getPath(json, b.rowsPath))
+    if (Array.isArray(json)) return asRows(json)
+    const rows = getPath(json, 'rows')
+    if (rows !== undefined) return asRows(rows)
+    // A single-resource endpoint (e.g. GET /users/:id) returns the record
+    // itself, not wrapped in an array or a "rows" property — treat it as one row.
+    if (typeof json === 'object' && json !== null) return [json as Record<string, unknown>]
+    throw new Error('REST resolver expected rows to be an array of objects, a { rows: [...] } object, or a single object')
+  }
+}
+
+export const restResolver: DataResolver = createRestResolver()
 
 /**
  * Bridges the `connection` DataBinding source to a registered

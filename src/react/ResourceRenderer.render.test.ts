@@ -300,4 +300,81 @@ describe('ResourceRenderer visibility', () => {
     expect(view.getByTestId('counts').textContent).toBe('2:2')
     expect(view.queryByText('hidden')).toBeTruthy()
   })
+
+  it('evaluates $or across role membership, matching provisr\'s admin-OR-operator pattern', async () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'visibility',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div', { 'data-testid': 'root-probe' }, 'Visible')
+          },
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Probe',
+      visible: { $or: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'roles', contains: 'operator' }] },
+      // Starts visible so the kind's render() runs at least once and captures `context` —
+      // an invisible root never renders, so there would be no engine handle to flip it back.
+      spec: { variables: [{ name: 'roles', type: 'string[]', default: ['operator'] }] },
+    }
+
+    const view = render(createElement(ResourceRenderer, { resource, registry }))
+    expect(view.queryByTestId('root-probe')).toBeTruthy()
+
+    await act(async () => context?.variables.set('roles', ['viewer']))
+    expect(view.queryByTestId('root-probe')).toBeNull()
+
+    await act(async () => context?.variables.set('roles', ['admin']))
+    expect(view.queryByTestId('root-probe')).toBeTruthy()
+  })
+
+  it('evaluates $not over $and, e.g. hiding a field unless every guard condition holds', async () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'visibility',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div', { 'data-testid': 'root-probe' }, 'Visible')
+          },
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Probe',
+      visible: { $not: { $and: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'locked' }] } },
+      // Starts visible (locked unset, so $and is false and $not flips it to true) so the
+      // kind's render() runs at least once and captures `context`.
+      spec: {
+        variables: [
+          { name: 'roles', type: 'string[]', default: ['admin'] },
+          { name: 'locked', default: '' },
+        ],
+      },
+    }
+
+    const view = render(createElement(ResourceRenderer, { resource, registry }))
+    expect(view.queryByTestId('root-probe')).toBeTruthy()
+
+    await act(async () => context?.variables.set('locked', 'yes'))
+    expect(view.queryByTestId('root-probe')).toBeNull()
+
+    await act(async () => context?.variables.set('locked', ''))
+    expect(view.queryByTestId('root-probe')).toBeTruthy()
+  })
 })

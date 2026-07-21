@@ -143,6 +143,10 @@ function applySlotScope<T>(manifest: KindManifest<unknown, T>, options: ScopeOpt
 }
 
 function kindAllowed(manifest: KindManifest, options: ScopeOptions): boolean {
+  // hostAuthoredOnly is not overridable by kinds.include — a scope author
+  // naming the kind explicitly is exactly the mistake this flag exists to
+  // prevent (provisr-poc-findings.md #9).
+  if (manifest.hostAuthoredOnly) return false
   const apiVersionAllowed = !options.apiVersions || options.apiVersions.includes(manifest.apiVersion)
   const included = !options.kinds?.include || options.kinds.include.includes(manifest.kind)
   const excluded = options.kinds?.exclude?.includes(manifest.kind) ?? false

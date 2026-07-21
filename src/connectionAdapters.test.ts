@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { restConnectionAdapter } from './connectionAdapters'
+import { createRestConnectionAdapter, restConnectionAdapter } from './connectionAdapters'
 import type { RegisteredConnection } from './types'
 import type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
 
@@ -136,5 +136,30 @@ describe('restConnectionAdapter', () => {
 
     const cappedConnection = connection({ mcpPolicy: { maxResponseBytes: 100 } })
     await expect(restConnectionAdapter.resolve(cappedConnection, { path: '/customers' }, { variables: {} })).rejects.toThrow(/exceeded maxResponseBytes/)
+  })
+})
+
+describe('createRestConnectionAdapter', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("merges a dynamic headers provider under the connection's static config.headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('[]', { status: 200 }))
+    const adapter = createRestConnectionAdapter({
+      headers: () => ({ Authorization: 'Bearer rotating-token', 'X-Trace': 'dynamic' }),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    await adapter.resolve(
+      connection({ config: { baseUrl: 'https://api.example.com/crm', headers: { 'X-Trace': 'static' } } }),
+      { path: '/customers' },
+      { variables: {} },
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.com/crm/customers',
+      expect.objectContaining({ headers: { Authorization: 'Bearer rotating-token', 'X-Trace': 'static' } }),
+    )
   })
 })

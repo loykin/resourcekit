@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode } from 'react'
 import {
   Badge,
   Button,
+  Checkbox,
   DataBodyTemplate,
   Input,
   ListDetailBodyTemplate,
@@ -135,12 +136,57 @@ interface InputSpec {
   value?: string
   /** Dot-path into the nearest record scope — prefills the input. */
   fieldRef?: string
+  required?: boolean
+  disabled?: boolean
+}
+
+interface TextareaSpec {
+  name?: string
+  placeholder?: string
+  value?: string
+  /** Dot-path into the nearest record scope — prefills the textarea. */
+  fieldRef?: string
+  required?: boolean
+  disabled?: boolean
+  rows?: number
+}
+
+interface CheckboxSpec {
+  name?: string
+  label?: string
+  /** Value submitted when checked. Also used to test array membership when fieldRef resolves to an array (a checkbox-group pattern) — see checkbox prefill logic. */
+  value?: string
+  defaultChecked?: boolean
+  /** Dot-path into the nearest record scope — prefills the checked state. */
+  fieldRef?: string
+  required?: boolean
+  disabled?: boolean
+}
+
+interface SelectOption {
+  label: string
+  value: string
+}
+
+interface SelectSpec {
+  name?: string
+  placeholder?: string
+  value?: string
+  /** Dot-path into the nearest record scope — prefills the selected option. */
+  fieldRef?: string
+  required?: boolean
+  disabled?: boolean
+  options: SelectOption[]
 }
 
 interface FormSpec {
   submit: SubmitSpec
   submitLabel?: string
   successMessage?: string
+  /** Rendered as the <form> element's id, so a host can place `<button type="submit" form={id}>` elsewhere on the page. */
+  id?: string
+  /** Suppresses the built-in submit button, e.g. when the host renders its own via `form={id}`. */
+  hideSubmitButton?: boolean
 }
 
 interface FormViewFieldSpec {
@@ -166,6 +212,10 @@ interface FormViewSpec {
   submit: SubmitSpec
   submitLabel?: string
   successMessage?: string
+  /** Rendered as the <form> element's id, so a host can place `<button type="submit" form={id}>` elsewhere on the page. */
+  id?: string
+  /** Suppresses the built-in submit button, e.g. when the host renders its own via `form={id}`. */
+  hideSubmitButton?: boolean
 }
 
 interface SheetSpec {
@@ -175,6 +225,7 @@ interface SheetSpec {
 }
 
 const KitBadge = Badge as ComponentType<Record<string, unknown>>
+const KitCheckbox = Checkbox as ComponentType<Record<string, unknown>>
 const KitButton = Button as ComponentType<Record<string, unknown>>
 const KitDataBody = DataBodyTemplate as ComponentType<Record<string, unknown>>
 const KitDataBodyGroup = DataBodyTemplate.Group as ComponentType<Record<string, unknown>>
@@ -284,10 +335,97 @@ function InputNode({ spec, ctx }: { spec: InputSpec; ctx: RenderContext }) {
       defaultValue={value}
       name={spec.name}
       placeholder={spec.placeholder}
+      required={spec.required}
+      disabled={spec.disabled}
       style={{ minWidth: 256, width: '100%' }}
       type={spec.type ?? 'text'}
       onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
     />
+  )
+}
+
+function TextareaNode({ spec, ctx }: { spec: TextareaSpec; ctx: RenderContext }) {
+  const boundValue = useBindingValue(ctx, 'value', spec.value)
+  const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+  const raw = fieldValue ?? boundValue
+  const value = raw == null ? undefined : String(raw)
+  return (
+    <textarea
+      key={`${spec.name ?? ''}:${value ?? ''}`}
+      aria-label={spec.name ?? spec.placeholder}
+      className="w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+      defaultValue={value}
+      name={spec.name}
+      placeholder={spec.placeholder}
+      required={spec.required}
+      disabled={spec.disabled}
+      rows={spec.rows ?? 4}
+      style={{ minWidth: 256, width: '100%' }}
+      onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
+    />
+  )
+}
+
+/**
+ * `spec.value` doubles as the array-membership test when `fieldRef` resolves
+ * to an array (the checkbox-group pattern: several Checkbox kinds sharing
+ * `name`, each testing whether its own `value` is present in the prefilled
+ * array) — mirrors the extended `fieldRef` convention the provisr PoC used
+ * for `CheckboxGroup` (provisr-poc-findings.md, 2nd verification pass).
+ */
+function checkboxChecked(spec: CheckboxSpec, fieldValue: unknown): boolean {
+  if (fieldValue === undefined) return spec.defaultChecked ?? false
+  if (Array.isArray(fieldValue)) return spec.value !== undefined && fieldValue.map(String).includes(spec.value)
+  return spec.value !== undefined ? String(fieldValue) === spec.value : Boolean(fieldValue)
+}
+
+function CheckboxNode({ spec, ctx }: { spec: CheckboxSpec; ctx: RenderContext }) {
+  const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+  const checked = checkboxChecked(spec, fieldValue)
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <KitCheckbox
+        key={`${spec.name ?? ''}:${spec.value ?? ''}:${String(checked)}`}
+        name={spec.name}
+        value={spec.value}
+        defaultChecked={checked}
+        required={spec.required}
+        disabled={spec.disabled}
+        onCheckedChange={(next: boolean) => ctx.events.emit('change', { value: next })}
+      />
+      {spec.label}
+    </label>
+  )
+}
+
+function SelectNode({ spec, ctx }: { spec: SelectSpec; ctx: RenderContext }) {
+  const boundValue = useBindingValue(ctx, 'value', spec.value)
+  const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+  const raw = fieldValue ?? boundValue
+  const value = raw == null ? undefined : String(raw)
+  return (
+    <select
+      key={`${spec.name ?? ''}:${value ?? ''}`}
+      aria-label={spec.name ?? spec.placeholder}
+      className="h-8 w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+      defaultValue={value ?? ''}
+      name={spec.name}
+      required={spec.required}
+      disabled={spec.disabled}
+      style={{ minWidth: 256, width: '100%' }}
+      onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
+    >
+      {spec.placeholder && (
+        <option value="" disabled>
+          {spec.placeholder}
+        </option>
+      )}
+      {spec.options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   )
 }
 
@@ -327,6 +465,7 @@ function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
 
   return (
     <form
+      id={spec.id}
       onSubmit={(event) => {
         event.preventDefault()
         const payload = collectFormPayload(new FormData(event.currentTarget))
@@ -344,16 +483,20 @@ function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
       }}
     >
       {ctx.slots.children()}
-      <div className="flex items-center gap-3 px-4 py-3">
-        <KitButton type="submit" size="sm" disabled={busy}>
-          {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
-        </KitButton>
-        {message && (
-          <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
-            {message.text}
-          </span>
-        )}
-      </div>
+      {(!spec.hideSubmitButton || message) && (
+        <div className="flex items-center gap-3 px-4 py-3">
+          {!spec.hideSubmitButton && (
+            <KitButton type="submit" size="sm" disabled={busy}>
+              {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
+            </KitButton>
+          )}
+          {message && (
+            <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+              {message.text}
+            </span>
+          )}
+        </div>
+      )}
     </form>
   )
 }
@@ -369,6 +512,7 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
 
   return (
     <form
+      id={spec.id}
       onSubmit={(event) => {
         event.preventDefault()
         const payload = collectFormPayload(new FormData(event.currentTarget))
@@ -412,16 +556,20 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
           </div>
         </div>
       ))}
-      <div className="flex items-center gap-3 px-4 py-3">
-        <KitButton type="submit" size="sm" disabled={busy}>
-          {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
-        </KitButton>
-        {message && (
-          <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
-            {message.text}
-          </span>
-        )}
-      </div>
+      {(!spec.hideSubmitButton || message) && (
+        <div className="flex items-center gap-3 px-4 py-3">
+          {!spec.hideSubmitButton && (
+            <KitButton type="submit" size="sm" disabled={busy}>
+              {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
+            </KitButton>
+          )}
+          {message && (
+            <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+              {message.text}
+            </span>
+          )}
+        </div>
+      )}
     </form>
   )
 }
@@ -927,8 +1075,8 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['InputControl'],
-            description: 'The control for this row, typically InputControl.',
+            accepts: ['InputControl', 'Textarea', 'Checkbox', 'Select'],
+            description: 'The control for this row, typically InputControl (also Textarea/Checkbox/Select for those field types).',
           },
         },
         render: (resource, ctx) => {
@@ -1131,6 +1279,8 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             type: { type: 'string' },
             value: { type: 'string', description: 'A literal prefill value.' },
             fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
+            required: { type: 'boolean' },
+            disabled: { type: 'boolean' },
             events: { type: 'object' },
           },
         },
@@ -1142,6 +1292,103 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         render: (resource, ctx) => {
           const spec = resource.spec as InputSpec
           return <InputNode spec={spec} ctx={ctx} />
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitTextarea',
+        level: ['leaf'],
+        description:
+          'A multi-line text input control. Use bindings.value for shared runtime state, or value/fieldRef for a literal or record-scoped prefill.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            placeholder: { type: 'string' },
+            value: { type: 'string', description: 'A literal prefill value.' },
+            fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
+            required: { type: 'boolean' },
+            disabled: { type: 'boolean' },
+            rows: { type: 'number' },
+            events: { type: 'object' },
+          },
+        },
+        bindingPolicy: {
+          inputs: {
+            value: { description: 'Current textarea value.', schema: {} },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as TextareaSpec
+          return <TextareaNode spec={spec} ctx={ctx} />
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitCheckbox',
+        level: ['leaf'],
+        description:
+          "A checkbox control. `value`/`fieldRef` prefill the checked state — when `fieldRef` resolves to an array, checked is true if the array contains `value` (the checkbox-group pattern: several Checkbox kinds sharing `name`, each with its own `value`).",
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            label: { type: 'string' },
+            value: { type: 'string', description: 'Value submitted when checked, and the array-membership test value for checkbox-group prefill.' },
+            defaultChecked: { type: 'boolean' },
+            fieldRef: { type: 'string', description: 'Prefill checked state from this dot-path into the nearest record scope.' },
+            required: { type: 'boolean' },
+            disabled: { type: 'boolean' },
+            events: { type: 'object' },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as CheckboxSpec
+          return <CheckboxNode spec={spec} ctx={ctx} />
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitSelect',
+        level: ['leaf'],
+        description:
+          'A dropdown control for choosing one of a fixed set of options. Use bindings.value for shared runtime state, or value/fieldRef for a literal or record-scoped prefill.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['options'],
+          properties: {
+            name: { type: 'string' },
+            placeholder: { type: 'string' },
+            value: { type: 'string', description: 'A literal prefill value.' },
+            fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
+            required: { type: 'boolean' },
+            disabled: { type: 'boolean' },
+            options: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['label', 'value'],
+                properties: {
+                  label: { type: 'string' },
+                  value: { type: 'string' },
+                },
+              },
+            },
+            events: { type: 'object' },
+          },
+        },
+        bindingPolicy: {
+          inputs: {
+            value: { description: 'Current selected value.', schema: {} },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as SelectSpec
+          return <SelectNode spec={spec} ctx={ctx} />
         },
       },
       {
@@ -1211,12 +1458,14 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             submit: submitSpecSchema,
             submitLabel: { type: 'string' },
             successMessage: { type: 'string' },
+            id: { type: 'string', description: 'Rendered as the <form> id, so a host can place a submit button elsewhere via `form={id}`.' },
+            hideSubmitButton: { type: 'boolean', description: 'Suppress the built-in submit button.' },
           },
         },
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['DataBodySection', 'DataBodyGroup', 'DataBodyRow', 'InputControl'],
+            accepts: ['DataBodySection', 'DataBodyGroup', 'DataBodyRow', 'InputControl', 'Textarea', 'Checkbox', 'Select'],
             description: "The form's fields, typically DataBodySection/DataBodyRow/InputControl.",
           },
         },
@@ -1237,6 +1486,8 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             submit: submitSpecSchema,
             submitLabel: { type: 'string' },
             successMessage: { type: 'string' },
+            id: { type: 'string', description: 'Rendered as the <form> id, so a host can place a submit button elsewhere via `form={id}`.' },
+            hideSubmitButton: { type: 'boolean', description: 'Suppress the built-in submit button.' },
           },
         },
         render: (resource, ctx) => <FormView spec={resource.spec as FormViewSpec} ctx={ctx} />,
@@ -1261,6 +1512,9 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     ['DesignKitBadge', 'Badge'],
     ['DesignKitButton', 'ActionButton'],
     ['DesignKitInput', 'InputControl'],
+    ['DesignKitTextarea', 'Textarea'],
+    ['DesignKitCheckbox', 'Checkbox'],
+    ['DesignKitSelect', 'Select'],
     ['DesignKitSheet', 'Sheet'],
     ['DesignKitRecord', 'RecordScope'],
     ['DesignKitForm', 'ResourceForm'],

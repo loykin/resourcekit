@@ -244,7 +244,134 @@ const workbenchSqlEditor: Resource = {
   ],
 }
 
+const fieldKindsForm: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'RecordScope',
+  metadata: { name: 'designkit-field-kinds-parity' },
+  spec: { data: { source: 'static', rows: [{ bio: 'Loves cron jobs.\nHates flaky tests.', roles: ['admin', 'viewer'], concurrencyPolicy: 'Forbid' }] } },
+  slots: [
+    {
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DataBody',
+          spec: { title: 'Field kinds parity', description: 'required/disabled parity, Textarea, Checkbox, Select' },
+          slots: [
+            {
+              items: [
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'ResourceForm',
+                  spec: {
+                    id: 'field-kinds-form',
+                    submit: { mutation: { target: 'memory', collection: 'settings' } },
+                    successMessage: 'Saved in memory',
+                  },
+                  slots: [
+                    {
+                      items: [
+                        {
+                          apiVersion: 'resourcekit.dev/v1alpha1',
+                          kind: 'DataBodyGroup',
+                          spec: { title: 'Profile' },
+                          slots: [
+                            {
+                              items: [
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'DataBodyRow',
+                                  spec: { label: 'Username', required: true },
+                                  slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'InputControl', spec: { name: 'username', required: true } }] }],
+                                },
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'DataBodyRow',
+                                  spec: { label: 'Username (locked)' },
+                                  slots: [
+                                    { items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'InputControl', spec: { name: 'lockedUsername', value: 'skim', disabled: true } }] },
+                                  ],
+                                },
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'DataBodyRow',
+                                  spec: { label: 'Bio' },
+                                  slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Textarea', spec: { name: 'bio', fieldRef: 'bio', rows: 3 } }] }],
+                                },
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'DataBodyRow',
+                                  spec: { label: 'Concurrency policy' },
+                                  slots: [
+                                    {
+                                      items: [
+                                        {
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
+                                          kind: 'Select',
+                                          spec: {
+                                            name: 'concurrencyPolicy',
+                                            fieldRef: 'concurrencyPolicy',
+                                            options: [
+                                              { label: 'Allow', value: 'Allow' },
+                                              { label: 'Forbid', value: 'Forbid' },
+                                              { label: 'Replace', value: 'Replace' },
+                                            ],
+                                          },
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'DataBodyRow',
+                                  spec: { label: 'Roles' },
+                                  slots: [
+                                    {
+                                      items: [
+                                        {
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
+                                          kind: 'Checkbox',
+                                          spec: { name: 'roles', label: 'Admin', value: 'admin', fieldRef: 'roles' },
+                                        },
+                                        {
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
+                                          kind: 'Checkbox',
+                                          spec: { name: 'roles', label: 'Editor', value: 'editor', fieldRef: 'roles' },
+                                        },
+                                        {
+                                          apiVersion: 'resourcekit.dev/v1alpha1',
+                                          kind: 'Checkbox',
+                                          spec: { name: 'roles', label: 'Viewer', value: 'viewer', fieldRef: 'roles' },
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+}
+
 export const designkitParityExamples = [
+  {
+    id: 'parity-designkit-field-kinds',
+    name: 'Parity / Field kinds (Textarea, Checkbox, Select)',
+    description: 'required/disabled parity, and the new Textarea/Checkbox/Select kinds, submitting through ResourceForm.',
+    category: 'designkit-parity',
+    resource: fieldKindsForm,
+  },
   {
     id: 'parity-designkit-databody-detail',
     name: 'Parity / DataBody detail',

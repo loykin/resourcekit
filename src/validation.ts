@@ -79,26 +79,46 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   if ('slots' in resource && !Array.isArray(resource.slots)) {
     addIssue(issues, `${path}/slots`, 'slots must be an array', 'wrap slot entries in an array: [{ items: [...] }]')
   }
-  if ('visible' in resource) {
-    if (!isRecord(resource.visible) || typeof resource.visible.$variable !== 'string') {
-      addIssue(issues, `${path}/visible`, 'visible must reference a page variable', 'use { "$variable": "name" } with optional equals or contains')
-    } else {
-      const hasEquals = 'equals' in resource.visible
-      const hasContains = 'contains' in resource.visible
-      if (hasEquals && typeof resource.visible.equals !== 'string') {
-        addIssue(issues, `${path}/visible/equals`, 'visible.equals must be a string', 'use a string value that can be compared with the page variable')
-      }
-      if (hasContains && typeof resource.visible.contains !== 'string') {
-        addIssue(issues, `${path}/visible/contains`, 'visible.contains must be a string', 'use a string member expected in the page variable array')
-      }
-      if (hasEquals && hasContains) {
-        addIssue(issues, `${path}/visible`, 'visible cannot use equals and contains together', 'keep exactly one comparison operator')
-      }
-      const extra = Object.keys(resource.visible).filter((key) => !['$variable', 'equals', 'contains'].includes(key))
-      if (extra.length > 0) addIssue(issues, `${path}/visible`, `visible has unknown field ${extra[0]}`, 'use only $variable, equals, or contains')
-    }
-  }
+  if ('visible' in resource) validateVisibilityCondition(resource.visible, `${path}/visible`, issues)
   return typeof resource.apiVersion === 'string' && typeof resource.kind === 'string' && 'spec' in resource
+}
+
+function validateVisibilityCondition(condition: unknown, path: string, issues: ValidationIssue[]): void {
+  if (!isRecord(condition)) {
+    addIssue(issues, path, 'visible must reference a page variable or combine conditions with $and/$or/$not', 'use { "$variable": "name" } or { "$and": [...] }/{ "$or": [...] }/{ "$not": {...} }')
+    return
+  }
+  if ('$and' in condition || '$or' in condition) {
+    const key = '$and' in condition ? '$and' : '$or'
+    const children = (condition as Record<string, unknown>)[key]
+    if (!Array.isArray(children)) {
+      addIssue(issues, path, `visible.${key} must be an array of conditions`, `wrap the conditions in an array: { "${key}": [...] }`)
+      return
+    }
+    children.forEach((child, index) => validateVisibilityCondition(child, `${path}/${key}/${index}`, issues))
+    return
+  }
+  if ('$not' in condition) {
+    validateVisibilityCondition((condition as Record<string, unknown>).$not, `${path}/$not`, issues)
+    return
+  }
+  if (typeof condition.$variable !== 'string') {
+    addIssue(issues, path, 'visible must reference a page variable', 'use { "$variable": "name" } with optional equals or contains')
+    return
+  }
+  const hasEquals = 'equals' in condition
+  const hasContains = 'contains' in condition
+  if (hasEquals && typeof condition.equals !== 'string') {
+    addIssue(issues, `${path}/equals`, 'visible.equals must be a string', 'use a string value that can be compared with the page variable')
+  }
+  if (hasContains && typeof condition.contains !== 'string') {
+    addIssue(issues, `${path}/contains`, 'visible.contains must be a string', 'use a string member expected in the page variable array')
+  }
+  if (hasEquals && hasContains) {
+    addIssue(issues, path, 'visible cannot use equals and contains together', 'keep exactly one comparison operator')
+  }
+  const extra = Object.keys(condition).filter((key) => !['$variable', 'equals', 'contains'].includes(key))
+  if (extra.length > 0) addIssue(issues, path, `visible has unknown field ${extra[0]}`, 'use only $variable, equals, or contains')
 }
 
 function validateBindings(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
@@ -286,6 +306,30 @@ function scanValueRefs(value: unknown): Set<string> {
   return refs
 }
 
+function checkVisibilityScope(
+  condition: Resource['visible'],
+  path: string,
+  variableAllow: string[],
+  variableHint: () => string,
+  issues: ValidationIssue[],
+): void {
+  if (!condition || !isRecord(condition)) return
+  if ('$and' in condition || '$or' in condition) {
+    const key = '$and' in condition ? '$and' : '$or'
+    const children = (condition as Record<string, unknown>)[key]
+    if (!Array.isArray(children)) return
+    children.forEach((child, index) => checkVisibilityScope(child as Resource['visible'], `${path}/${key}/${index}`, variableAllow, variableHint, issues))
+    return
+  }
+  if ('$not' in condition) {
+    checkVisibilityScope((condition as Record<string, unknown>).$not as Resource['visible'], `${path}/$not`, variableAllow, variableHint, issues)
+    return
+  }
+  if (typeof condition.$variable === 'string' && !variableAllow.includes(condition.$variable)) {
+    addIssue(issues, `${path}/$variable`, `variable ${condition.$variable} is not allowed in this scope`, variableHint())
+  }
+}
+
 function sameJsonValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
@@ -299,9 +343,7 @@ function validateScopedCapabilities(resource: Resource, options: ScopeOptions | 
   const variableAllow = options.variables?.allow
   const variableHint = () => `use one of the scope's allowed variables: ${variableAllow?.join(', ') || '(none allowed)'}`
   if (variableAllow) {
-    if (resource.visible && typeof resource.visible.$variable === 'string' && !variableAllow.includes(resource.visible.$variable)) {
-      addIssue(issues, `${path}/visible/$variable`, `variable ${resource.visible.$variable} is not allowed in this scope`, variableHint())
-    }
+    if (resource.visible) checkVisibilityScope(resource.visible, `${path}/visible`, variableAllow, variableHint, issues)
     for (const name of scanVariableRefs(resource.spec)) {
       if (!variableAllow.includes(name)) addIssue(issues, `${path}/spec`, `variable ${name} is not allowed in this scope`, variableHint())
     }

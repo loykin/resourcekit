@@ -132,6 +132,33 @@ describe('createRegistry', () => {
     expect(registry.getKind('resourcekit.dev/v1alpha1', 'Panel')?.slotPolicy?.slots).toHaveProperty('aside')
   })
 
+  it('excludes a hostAuthoredOnly kind from scope() even when kinds.include names it explicitly', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'JSONSchemaForm',
+          specSchema: { type: 'object', properties: { jsonSchema: { type: 'object' } } },
+          hostAuthoredOnly: true,
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object' },
+        },
+      ],
+    })
+
+    // Renders normally when hand-authored (not gated by hostAuthoredOnly).
+    expect(registry.getKind('resourcekit.dev/v1alpha1', 'JSONSchemaForm')).toBeDefined()
+
+    const scoped = registry.scope({ kinds: { include: ['JSONSchemaForm', 'Panel'] } })
+    expect(scoped.getKind('resourcekit.dev/v1alpha1', 'JSONSchemaForm')).toBeUndefined()
+    expect(scoped.listKinds().map((kind) => kind.kind)).toEqual(['Panel'])
+  })
+
   it('registers, looks up, and unregisters connections dynamically without recreating the registry', async () => {
     const registry = createRegistry()
     registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })

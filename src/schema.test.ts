@@ -30,6 +30,33 @@ describe('buildDocumentSchema', () => {
     expect(ajv.compile(buildDocumentSchema(scoped))(invalid)).toBe(false)
   })
 
+  it('accepts recursive $and/$or/$not visibility conditions and still enforces the scope allowlist', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', specSchema: { type: 'object' } }],
+    })
+    const scoped = registry.scope({ variables: { allow: ['roles'] } })
+    const base = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: {} }
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(buildDocumentSchema(scoped))
+
+    const or = {
+      ...base,
+      visible: { $or: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'roles', contains: 'operator' }] },
+    }
+    expect(validate(or)).toBe(true)
+
+    const notAnd = {
+      ...base,
+      visible: { $not: { $and: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'roles', equals: 'x' }] } },
+    }
+    expect(validate(notAnd)).toBe(true)
+
+    const scopeViolation = { ...base, visible: { $or: [{ $variable: 'notAllowed' }] } }
+    expect(validate(scopeViolation)).toBe(false)
+  })
+
   it('constrains a connection/datasource binding to the scope allowlist, matching runtime validateResource', () => {
     // Generated schema is the AI-facing contract — it must reject the same
     // things validateResource() rejects at runtime, or an AI can "legally"
