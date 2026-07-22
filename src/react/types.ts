@@ -45,6 +45,12 @@ export interface RenderContext {
    * dot-paths (`fieldRef`). Undefined outside any record scope.
    */
   record?: Record<string, unknown>
+  /**
+   * `resource.disabled` evaluated against the page variable engine. Unlike
+   * `visible`, this never gates rendering — kinds with a natural disabled
+   * affordance (buttons, inputs, actions) opt into consuming it.
+   */
+  disabled: boolean
   actions: {
     /** Executes a declarative submit (optional confirmation + mutation binding + onSuccess effects). */
     submit: (submit: SubmitSpec, payload: unknown) => Promise<SubmitResult>

@@ -34,6 +34,8 @@ export interface Resource<TSpec = unknown> {
   slots?: Slot[]
   /** Runtime-owned conditional rendering against one flat page variable. */
   visible?: VisibilityCondition
+  /** Runtime-evaluated, kind-consumed: exposed via RenderContext, never gates rendering itself. */
+  disabled?: VisibilityCondition
 }
 
 export type VisibilityCondition =

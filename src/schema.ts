@@ -353,6 +353,7 @@ function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOpti
       metadata: metadataSchema,
       spec: embedSpecSchema(manifest, refOptions, defs),
       visible: { $ref: '#/$defs/visibilityCondition' },
+      disabled: { $ref: '#/$defs/visibilityCondition' },
       ...(bindings ? { bindings } : {}),
     },
     ...(manifest.description ? { description: manifest.description } : {}),
@@ -492,6 +493,7 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
       metadata: metadataSchema,
       spec: embedSpecSchema(manifest, refOptions, definitions),
       visible: { $ref: '#/$defs/visibilityCondition' },
+      disabled: { $ref: '#/$defs/visibilityCondition' },
     }
     const bindings = bindingsSchema(manifest)
     if (bindings) properties.bindings = bindings

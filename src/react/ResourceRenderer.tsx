@@ -332,6 +332,7 @@ function renderKindNode(
         set: runtime.engine.set,
       },
       record,
+      disabled: resource.disabled !== undefined && evaluateVisibility(resource.disabled, (name) => runtime.engine.get(name)),
       actions: {
         submit: (submit, payload) =>
           runSubmit(

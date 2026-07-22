@@ -378,3 +378,61 @@ describe('ResourceRenderer visibility', () => {
     expect(view.queryByTestId('root-probe')).toBeTruthy()
   })
 })
+
+describe('ResourceRenderer disabled', () => {
+  it('exposes disabled via RenderContext without gating rendering', async () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'disabled',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div', { 'data-testid': 'root-probe' }, ctx.disabled ? 'Disabled' : 'Enabled')
+          },
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Probe',
+      disabled: { $variable: 'roles', contains: 'admin' },
+      spec: { variables: [{ name: 'roles', type: 'string[]', default: [] }] },
+    }
+
+    const view = render(createElement(ResourceRenderer, { resource, registry }))
+    expect(view.getByTestId('root-probe').textContent).toBe('Enabled')
+    expect(context?.disabled).toBe(false)
+
+    await act(async () => context?.variables.set('roles', ['admin']))
+    expect(view.getByTestId('root-probe').textContent).toBe('Disabled')
+    expect(context?.disabled).toBe(true)
+  })
+
+  it('defaults disabled to false when the resource declares none', () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'disabled',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div', { 'data-testid': 'root-probe' }, 'Enabled')
+          },
+        },
+      ],
+    })
+    const resource: Resource = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} }
+
+    render(createElement(ResourceRenderer, { resource, registry }))
+    expect(context?.disabled).toBe(false)
+  })
+})

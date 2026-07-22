@@ -132,6 +132,14 @@ interface VariableRef {
   $variable: string
 }
 
+type VisibilityCondition =
+  | { $variable: string }
+  | { $variable: string; equals: string }
+  | { $variable: string; contains: string }
+  | { $and: VisibilityCondition[] }
+  | { $or: VisibilityCondition[] }
+  | { $not: VisibilityCondition }
+
 interface Resource<TSpec = unknown> {
   $schema?: string
   apiVersion: string
@@ -143,10 +151,8 @@ interface Resource<TSpec = unknown> {
   }
   spec: TSpec
   bindings?: Record<string, DataRef | VariableRef>
-  visible?:
-    | { $variable: string }
-    | { $variable: string; equals: string }
-    | { $variable: string; contains: string }
+  visible?: VisibilityCondition
+  disabled?: VisibilityCondition
   slots?: Array<{
     name?: string
     items: Resource[]
@@ -160,6 +166,10 @@ interface Resource<TSpec = unknown> {
   variables. Adapters access those values only through the runtime context.
 - `visible` conditionally renders the node from a flat page variable. The
   runtime owns this field, so kinds do not implement visibility themselves.
+- `disabled` shares the same `VisibilityCondition` shape and evaluator as
+  `visible`, but never gates rendering — the runtime evaluates it and exposes
+  the result as `RenderContext.disabled` for kinds with a natural disabled
+  affordance (buttons, inputs, submit actions) to consume.
 - `slots` belong to the parent. Omit `name` for the default slot.
 - Each parent's `SlotPolicy` controls accepted child kinds and cardinality.
 - A leaf kind has no slot policy and must not contain `slots`.
@@ -304,6 +314,29 @@ registry.use({
 must come from a datasourcekit adapter package or the host application; it is
 not bundled in resourcekit core.
 
+The same dot-path convention (`rowsPath`, `valuePath`, event `from`) is
+available standalone as `getValueAtPath`/`setValueAtPath` for a custom
+resolver, mutation resolver, or kind adapter to reuse instead of
+reimplementing path traversal.
+
+`createRestResolver({ headers, fetchImpl })` builds a custom REST resolver
+instead of using the default `restResolver`. `headers` is called before every
+request and merged under the binding's own static `headers` (the binding
+wins on conflict) — use it to attach auth that would go stale if baked into
+the document, e.g. a JWT refreshed out-of-band. `fetchImpl` swaps the
+underlying `fetch` (custom transport, tests).
+
+```ts
+import { createRestResolver } from '@loykin/resourcekit'
+
+registry.use({
+  name: 'core-data-resolvers',
+  dataResolvers: {
+    rest: createRestResolver({ headers: () => ({ authorization: `Bearer ${getCurrentToken()}` }) }),
+  },
+})
+```
+
 ## Resource bindings, variables, and events
 
 Variables are one flat page scope with `string | string[]` values. A variable
@@ -375,7 +408,8 @@ currently schema/validation vocabulary; use submit/mutation dispatch or an
 emitted host event when an action must execute.
 
 Nodes can reactively opt into rendering through the runtime-owned `visible`
-field:
+field, and mark themselves disabled — without hiding — through the parallel
+`disabled` field:
 
 ```json
 {
@@ -386,10 +420,32 @@ field:
 }
 ```
 
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "Button",
+  "disabled": { "$not": { "$variable": "roles", "contains": "admin" } },
+  "spec": { "label": "Delete" }
+}
+```
+
 `{ "$variable": "name" }` uses string truthiness or a non-empty array.
 `equals` compares a string variable, while `contains` checks membership in a
-`string[]` variable. Generated scoped schemas and runtime validation both
-enforce the scope's variable allowlist.
+`string[]` variable. Conditions compose recursively with `$and`/`$or`/`$not`,
+e.g. `{ "$or": [{ "$variable": "roles", "contains": "admin" }, { "$variable": "roles", "contains": "operator" }] }`.
+Generated scoped schemas and runtime validation both enforce the scope's
+variable allowlist for `visible` and `disabled` alike.
+
+`visible` gates whether a node renders at all; `disabled` never does — it is
+only forwarded to the kind as `RenderContext.disabled`, so a kind with no
+natural disabled affordance (a chart, a text block) can simply ignore it.
+Like `visible`, this is a rendering hint, not authorization: a disabled
+button is still just UX, and only the backend's own authorization enforcement
+can actually block the underlying request. `disabled` is unrelated to
+`GridKitTable`'s row-action `hideWhen`/`disabledWhen` (see
+[Grid row actions](#grid-row-actions)) — those compare a row's own field
+value, a data source the runtime has no access to, so they keep their own
+`RowCondition` shape instead of `VisibilityCondition`.
 
 ## Document dataflow
 
@@ -452,6 +508,21 @@ wave.
 
 The dataflow API is currently experimental. The v1 node vocabulary is limited
 to `state` and `resolve`; there is no general transform DSL.
+
+A `resolve` node can carry an AI-authored `QueryPolicy` — `refresh: { kind:
+'interval', ms }`, `staleForMs`, `retainPreviousData`, `retry: { maxAttempts
+}` — using resourcekit-generic vocabulary, never a specific query library's
+option names. A host clamps it against its own `QueryScopePolicy` ceiling
+(`allowPolling`, `minIntervalMs`/`maxIntervalMs`, `maxRetries`) with
+`clampQueryPolicy(policy, scope)` before running it; this never rejects, it
+only narrows an AI-authored policy down to what the host already allows.
+
+Internally, `resolve` execution goes through a swappable `QueryCoordinator`
+boundary rather than talking to a data source directly.
+`createDirectQueryCoordinator()` (the default) does one-shot resolves with no
+cache, polling, dedup, or retry of its own; a host that wants caching/polling
+can implement the same `QueryCoordinator` contract on top of something like
+TanStack Query instead.
 
 ## Mutations and submit
 
@@ -611,6 +682,11 @@ payload is buffered. Both apply to `resolve` (the render-path fetch), not
 just `preview` (the MCP inspection path) — a connection with no
 `timeoutMs`/`maxResponseBytes` set has neither limit.
 
+Like `createRestResolver`, `createRestConnectionAdapter({ headers, fetchImpl })`
+accepts a dynamic `headers` callback (merged under the connection's own
+`config.headers`, which wins on conflict) and a `fetchImpl` override, in place
+of the default `restConnectionAdapter`.
+
 Documents use only the UID and adapter-specific request:
 
 ```json
@@ -729,6 +805,27 @@ See [`examples/mcp-server/`](./examples/mcp-server/) for a working MCP server
 that exposes staged generation, connection discovery, request validation,
 preview, and final document validation as tools.
 
+A document a person hand-edits is source code shared with an LLM, which
+raises two more concerns a host's own regeneration loop should handle:
+
+- **Preserving human edits across full regeneration.** `markLocked(resource)`
+  sets the `resourcekit.dev/locked` annotation
+  (`LOCKED_ANNOTATION`/`isLocked`); `preserveLockedNodes(previous, next)`
+  then carries locked nodes forward from `previous` into a freshly
+  regenerated `next` document, matched by `apiVersion`/`kind`/
+  `metadata.name`. This is "keep what a human locked on a full rewrite," not
+  a patch/diff format — an unnamed node, or one the LLM dropped from `next`
+  entirely, cannot be reliably matched and is not preserved.
+- **Diff-stable serialization.** LLM output varies in key order and
+  explicit-`undefined` fields between otherwise-identical documents, which
+  turns `git diff` into noise. `canonicalizeJson`/`canonicalizeResource`
+  deep-sort object keys and drop `undefined` values (arrays keep their
+  order); `canonicalStringify(value, space)` canonicalizes and serializes in
+  one call. Apply this before a human reviews an LLM-produced diff.
+
+Both are standalone host-facing primitives — nothing in resourcekit's core
+or examples calls them automatically.
+
 ## Custom kinds
 
 A custom kind is an ordinary plugin manifest. The core contract stays
@@ -764,6 +861,43 @@ export const appKinds: ResourceKitPlugin<KindRenderFn> = {
 
 Register the plugin with `registry.use(appKinds)` and include the kind only in
 scopes where it is supported.
+
+A `KindManifest` has two more opt-in flags beyond what the example above
+uses:
+
+- `recordScope: true` resolves the kind's own `spec.data` binding to its
+  first row and publishes it to descendants as `ctx.record` (`RenderContext`)
+  — a nearest-ancestor scope, not a prop, so a deeply nested field-rendering
+  kind can read from it by dot-path without the parent passing anything
+  through slots. `DetailView`-style "one record, many mapped fields" kinds
+  are built on this.
+- `hostAuthoredOnly: true` makes `registry.scope()` drop the kind
+  unconditionally from the AI-facing schema — even if a scope's
+  `kinds.include` names it explicitly. The kind still renders normally when a
+  host hand-authors it into a document; this only closes it off from AI/MCP
+  generation. Use it for a kind whose spec is itself schema-*shaped* rather
+  than schema-*conforming* (e.g. an open `jsonSchema` property a generator
+  could otherwise use to define an arbitrary field set, bypassing the
+  reviewable kind catalog `kinds.include` exists to enforce).
+
+### Kind examples and generation quality
+
+`KindManifest.examples` (`KindExample[]`, each `{ description?, resource }`)
+and `ResourceKitPlugin.patternExamples` (`PatternExample[]`, each adding a
+`name`) are the "this kind/pattern is used like this" teaching unit for
+AI/MCP generation — a multi-kind pattern example teaches composition
+topology (master-detail, filter + table, form + submit) that no single
+kind's schema can. Examples are test fixtures as much as documentation:
+`validateAllExamples(registry)` runs every registered example through
+`validateResource` and reports failures, so CI catches an example rotting out
+from under an evolving schema instead of it silently going on teaching an AI
+(or a human) something that no longer works.
+
+`ScopedRegistry.selectExamples()` returns only the examples a given scope
+actually allows — already filtered by `kinds.include` and re-validated
+against that scope — for assembling into a generation prompt. Never hand an
+AI/MCP client examples pulled from the unrestricted registry, for the same
+reason as the schema itself.
 
 ## Playground examples
 

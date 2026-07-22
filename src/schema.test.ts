@@ -30,6 +30,28 @@ describe('buildDocumentSchema', () => {
     expect(ajv.compile(buildDocumentSchema(scoped))(invalid)).toBe(false)
   })
 
+  it('reuses the same visibilityCondition $def for disabled', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', specSchema: { type: 'object' } }],
+    })
+    const scoped = registry.scope({ variables: { allow: ['roles'] } })
+    const resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Text',
+      disabled: { $variable: 'roles', contains: 'admin' },
+      spec: {},
+    }
+    const ajv = new Ajv2020({ strict: false })
+
+    expect(ajv.compile(buildDocumentSchema(scoped))(resource)).toBe(true)
+    expect(ajv.compile(singleKindSchema(scoped, 'resourcekit.dev/v1alpha1', 'Text')!)(resource)).toBe(true)
+
+    const invalid = { ...resource, disabled: { $variable: 'other' } }
+    expect(ajv.compile(buildDocumentSchema(scoped))(invalid)).toBe(false)
+  })
+
   it('accepts recursive $and/$or/$not visibility conditions and still enforces the scope allowlist', () => {
     const registry = createRegistry()
     registry.use({

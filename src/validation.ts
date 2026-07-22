@@ -79,46 +79,48 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   if ('slots' in resource && !Array.isArray(resource.slots)) {
     addIssue(issues, `${path}/slots`, 'slots must be an array', 'wrap slot entries in an array: [{ items: [...] }]')
   }
-  if ('visible' in resource) validateVisibilityCondition(resource.visible, `${path}/visible`, issues)
+  if ('visible' in resource) validateVisibilityCondition(resource.visible, `${path}/visible`, 'visible', issues)
+  if ('disabled' in resource) validateVisibilityCondition(resource.disabled, `${path}/disabled`, 'disabled', issues)
   return typeof resource.apiVersion === 'string' && typeof resource.kind === 'string' && 'spec' in resource
 }
 
-function validateVisibilityCondition(condition: unknown, path: string, issues: ValidationIssue[]): void {
+/** Shared by `visible` and `disabled` — both are `VisibilityCondition` envelopes evaluated the same way. `field` only affects message text. */
+function validateVisibilityCondition(condition: unknown, path: string, field: 'visible' | 'disabled', issues: ValidationIssue[]): void {
   if (!isRecord(condition)) {
-    addIssue(issues, path, 'visible must reference a page variable or combine conditions with $and/$or/$not', 'use { "$variable": "name" } or { "$and": [...] }/{ "$or": [...] }/{ "$not": {...} }')
+    addIssue(issues, path, `${field} must reference a page variable or combine conditions with $and/$or/$not`, 'use { "$variable": "name" } or { "$and": [...] }/{ "$or": [...] }/{ "$not": {...} }')
     return
   }
   if ('$and' in condition || '$or' in condition) {
     const key = '$and' in condition ? '$and' : '$or'
     const children = (condition as Record<string, unknown>)[key]
     if (!Array.isArray(children)) {
-      addIssue(issues, path, `visible.${key} must be an array of conditions`, `wrap the conditions in an array: { "${key}": [...] }`)
+      addIssue(issues, path, `${field}.${key} must be an array of conditions`, `wrap the conditions in an array: { "${key}": [...] }`)
       return
     }
-    children.forEach((child, index) => validateVisibilityCondition(child, `${path}/${key}/${index}`, issues))
+    children.forEach((child, index) => validateVisibilityCondition(child, `${path}/${key}/${index}`, field, issues))
     return
   }
   if ('$not' in condition) {
-    validateVisibilityCondition((condition as Record<string, unknown>).$not, `${path}/$not`, issues)
+    validateVisibilityCondition((condition as Record<string, unknown>).$not, `${path}/$not`, field, issues)
     return
   }
   if (typeof condition.$variable !== 'string') {
-    addIssue(issues, path, 'visible must reference a page variable', 'use { "$variable": "name" } with optional equals or contains')
+    addIssue(issues, path, `${field} must reference a page variable`, 'use { "$variable": "name" } with optional equals or contains')
     return
   }
   const hasEquals = 'equals' in condition
   const hasContains = 'contains' in condition
   if (hasEquals && typeof condition.equals !== 'string') {
-    addIssue(issues, `${path}/equals`, 'visible.equals must be a string', 'use a string value that can be compared with the page variable')
+    addIssue(issues, `${path}/equals`, `${field}.equals must be a string`, 'use a string value that can be compared with the page variable')
   }
   if (hasContains && typeof condition.contains !== 'string') {
-    addIssue(issues, `${path}/contains`, 'visible.contains must be a string', 'use a string member expected in the page variable array')
+    addIssue(issues, `${path}/contains`, `${field}.contains must be a string`, 'use a string member expected in the page variable array')
   }
   if (hasEquals && hasContains) {
-    addIssue(issues, path, 'visible cannot use equals and contains together', 'keep exactly one comparison operator')
+    addIssue(issues, path, `${field} cannot use equals and contains together`, 'keep exactly one comparison operator')
   }
   const extra = Object.keys(condition).filter((key) => !['$variable', 'equals', 'contains'].includes(key))
-  if (extra.length > 0) addIssue(issues, path, `visible has unknown field ${extra[0]}`, 'use only $variable, equals, or contains')
+  if (extra.length > 0) addIssue(issues, path, `${field} has unknown field ${extra[0]}`, 'use only $variable, equals, or contains')
 }
 
 function validateBindings(resource: Resource, registry: ResourceRegistry | ScopedRegistry, path: string, issues: ValidationIssue[]): void {
@@ -344,6 +346,7 @@ function validateScopedCapabilities(resource: Resource, options: ScopeOptions | 
   const variableHint = () => `use one of the scope's allowed variables: ${variableAllow?.join(', ') || '(none allowed)'}`
   if (variableAllow) {
     if (resource.visible) checkVisibilityScope(resource.visible, `${path}/visible`, variableAllow, variableHint, issues)
+    if (resource.disabled) checkVisibilityScope(resource.disabled, `${path}/disabled`, variableAllow, variableHint, issues)
     for (const name of scanVariableRefs(resource.spec)) {
       if (!variableAllow.includes(name)) addIssue(issues, `${path}/spec`, `variable ${name} is not allowed in this scope`, variableHint())
     }

@@ -264,6 +264,38 @@ describe('validateResource', () => {
     expect(scopeViolation.issues.map((issue) => issue.path)).toContain('/visible/$not/$variable')
   })
 
+  it('validates disabled with the same shape and scope rules as visible', () => {
+    const scoped = registry().scope({ variables: { allow: ['isAdmin'] } })
+    expect(
+      validateResource(
+        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', disabled: { $variable: 'isAdmin' }, spec: { text: 'Admin' } },
+        scoped,
+      ),
+    ).toEqual({ valid: true, issues: [] })
+
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        disabled: { $variable: 'roles', equals: 'admin', contains: 'admin' },
+        spec: { text: 'Admin' },
+      } as unknown as import('./types').Resource,
+      scoped,
+    )
+    expect(result.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(['/disabled', '/disabled/$variable']))
+
+    const scopeViolation = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Text',
+        disabled: { $or: [{ $variable: 'notAllowed' }] },
+        spec: { text: 'Admin' },
+      },
+      scoped,
+    )
+    expect(scopeViolation.issues.map((issue) => issue.path)).toContain('/disabled/$or/0/$variable')
+  })
+
   it('enforces connections.allow on a bare Resource, not just a ResourceDocument data graph', () => {
     // The ResourceDocument data-graph path (validateResourceDocument) already
     // checks `connections.allow` for `resolve` nodes — this covers the same
