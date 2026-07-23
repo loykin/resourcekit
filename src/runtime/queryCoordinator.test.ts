@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDataflowRuntime } from './dataflow'
-import type { DataBinding } from './types'
+import type { DataBinding } from '../core/types'
 import { createDirectQueryCoordinator, type QueryHandle, type QuerySnapshot } from './queryCoordinator'
 
 function deferred<T>() {

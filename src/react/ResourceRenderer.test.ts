@@ -1,9 +1,9 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import { createRegistry } from '../registry'
-import type { ResourceDocument } from '../dataflow'
-import type { DataResolver, Resource } from '../types'
+import { createRegistry } from '../core/registry'
+import type { ResourceDocument } from '../runtime/dataflow'
+import type { DataResolver, Resource } from '../core/types'
 import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
 

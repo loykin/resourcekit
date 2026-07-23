@@ -2,10 +2,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRegistry } from '../../registry'
+import { createRegistry } from '../../core/registry'
 import { ResourceRenderer } from '../../react'
 import type { KindRenderFn } from '../../react'
-import { staticResolver } from '../../resolvers'
+import { staticResolver } from '../../connection/resolvers'
 import { createDesignKitPlugin } from './plugin'
 
 afterEach(cleanup)

@@ -1,6 +1,6 @@
 import { interpolate } from './variables'
-import { coerceVariableValue, getValueAtPath } from './path'
-import type { ConfirmSpec, MutationBinding, MutationResolver, SubmitSpec, VariableValue } from './types'
+import { coerceVariableValue, getValueAtPath } from '../core/path'
+import type { ConfirmSpec, MutationBinding, MutationResolver, SubmitSpec, VariableValue } from '../core/types'
 
 export const SUBMIT_CANCELLED = Symbol('resourcekit.submit.cancelled')
 export type SubmitResult = unknown | typeof SUBMIT_CANCELLED

@@ -1,7 +1,7 @@
 import { FilterInput } from '@loykin/filter-input'
 import type { ComponentType } from 'react'
-import type { JsonSchema, ResourceKitPlugin } from '../../types'
-import type { KindRenderFn, RenderContext } from '../../react/types'
+import type { JsonSchema, ResourceKitPlugin } from '../../core/types'
+import type { KindRenderFn, RenderContext } from '../../react'
 import { useBindingValue } from '../internal/bindings'
 import { withKindAliases } from '../internal/shared'
 

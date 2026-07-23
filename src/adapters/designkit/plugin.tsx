@@ -15,9 +15,9 @@ import {
   SheetTitle,
   WorkbenchBodyTemplate,
 } from '@loykin/designkit'
-import { getValueAtPath } from '../../path'
-import type { ResourceKitPlugin, SubmitSpec } from '../../types'
-import { SUBMIT_CANCELLED } from '../../submit'
+import { getValueAtPath } from '../../core/path'
+import type { ResourceKitPlugin, SubmitSpec } from '../../core/types'
+import { SUBMIT_CANCELLED } from '../../runtime/submit'
 import type { KindRenderFn, RenderContext } from '../../react'
 import { useBindingValue } from '../internal/bindings'
 import { withKindAliases } from '../internal/shared'

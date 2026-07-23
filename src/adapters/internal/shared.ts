@@ -1,5 +1,5 @@
-import type { ResourceKitPlugin } from '../../types'
-import type { KindRenderFn } from '../../react/types'
+import type { ResourceKitPlugin } from '../../core/types'
+import type { KindRenderFn } from '../../react'
 
 export function variableName(ref: string | undefined): string | undefined {
   return ref?.startsWith('variables.') ? ref.slice('variables.'.length) : undefined

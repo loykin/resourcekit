@@ -1,5 +1,5 @@
-import { getValueAtPath } from './path'
-import type { ConnectionAdapter, ConnectionMcpPolicy, ConnectionPolicy, JsonSchema, RegisteredConnection } from './types'
+import { getValueAtPath } from '../core/path'
+import type { ConnectionAdapter, ConnectionMcpPolicy, ConnectionPolicy, JsonSchema, RegisteredConnection } from '../core/types'
 
 /**
  * Built-in connection adapters. Only `rest` lives in core — like the plain

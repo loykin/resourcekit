@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRegistry } from './registry'
-import { staticResolver } from './resolvers'
+import { staticResolver } from '../connection/resolvers'
 import { validateResource } from './validation'
 
 const panel = {

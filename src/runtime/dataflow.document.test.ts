@@ -1,10 +1,10 @@
 import Ajv2020 from 'ajv/dist/2020'
 import { describe, expect, it } from 'vitest'
-import { createDesignKitPlugin } from './adapters'
+import { createDesignKitPlugin } from '../adapters'
 import type { ResourceDocument } from './dataflow'
-import { createRegistry } from './registry'
-import { buildResourceDocumentSchema } from './schema'
-import { validateResourceDocument } from './validation'
+import { createRegistry } from '../core/registry'
+import { buildResourceDocumentSchema } from '../core/schema'
+import { validateResourceDocument } from '../core/validation'
 
 function setup() {
   const registry = createRegistry()

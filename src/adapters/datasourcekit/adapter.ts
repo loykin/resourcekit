@@ -1,6 +1,6 @@
 import { tableFrameToRows } from '@loykin/datasourcekit'
 import type { DatasourceContext, DatasourceFrame, DatasourceManager } from '@loykin/datasourcekit'
-import type { ConnectionAdapter, ConnectionContext, DataResolveContext, JsonSchema } from '../../types'
+import type { ConnectionAdapter, ConnectionContext, DataResolveContext, JsonSchema } from '../../core/types'
 
 /**
  * DatasourceKit is a frontend contract layer, not a datasource type itself —

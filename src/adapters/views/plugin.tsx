@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { getValueAtPath } from '../../path'
-import type { DataBinding, FieldSpec, ResourceKitPlugin, ViewStateSpec } from '../../types'
+import { getValueAtPath } from '../../core/path'
+import type { DataBinding, FieldSpec, ResourceKitPlugin, ViewStateSpec } from '../../core/types'
 import type { KindRenderFn, RenderContext } from '../../react'
 import { useBindingValue } from '../internal/bindings'
 

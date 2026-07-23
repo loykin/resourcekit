@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runSubmit, SUBMIT_CANCELLED } from './submit'
 import type { SubmitRuntime } from './submit'
-import type { VariableValue } from './types'
+import type { VariableValue } from '../core/types'
 
 function makeRuntime(overrides: Partial<SubmitRuntime> = {}): SubmitRuntime & { values: Map<string, VariableValue> } {
   const values = new Map<string, VariableValue>([['customerId', '7']])

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createConnectionDataResolver, createRestResolver, restResolver } from './resolvers'
-import type { ConnectionAdapter, RegisteredConnection } from './types'
+import type { ConnectionAdapter, RegisteredConnection } from '../core/types'
 
 describe('restResolver', () => {
   afterEach(() => {

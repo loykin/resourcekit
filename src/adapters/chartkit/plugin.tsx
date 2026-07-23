@@ -1,7 +1,7 @@
 import { CHART_SPEC_SCHEMA, ChartRenderer } from '@loykin/chartkit'
 import type { ComponentType } from 'react'
-import type { JsonSchema, ResourceKitPlugin } from '../../types'
-import type { KindRenderFn } from '../../react/types'
+import type { JsonSchema, ResourceKitPlugin } from '../../core/types'
+import type { KindRenderFn } from '../../react'
 import { withKindAliases } from '../internal/shared'
 
 interface ChartSpecResource {

@@ -3,9 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { createElement } from 'react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRegistry } from '../../registry'
+import { createRegistry } from '../../core/registry'
 import { ResourceRenderer } from '../../react'
-import { staticResolver } from '../../resolvers'
+import { staticResolver } from '../../connection/resolvers'
 import type { KindRenderFn } from '../../react'
 import { createGridKitPlugin } from './plugin'
 

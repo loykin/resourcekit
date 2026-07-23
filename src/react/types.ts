@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import type { DataRef } from '../types'
-import type { DataBinding, Resource, SubmitSpec } from '../types'
-import type { SubmitResult } from '../submit'
+import type { DataRef } from '../core/types'
+import type { DataBinding, Resource, SubmitSpec } from '../core/types'
+import type { SubmitResult } from '../runtime/submit'
 
 /**
  * React narrowing of the manifest's generic `render` member.

@@ -1,4 +1,4 @@
-import type { VariableDeclaration, VariableValue } from './types'
+import type { VariableDeclaration, VariableValue } from '../core/types'
 
 /**
  * v1 variable engine — deliberately flat.

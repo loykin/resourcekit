@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createRegistry } from '../../registry'
-import { staticResolver } from '../../resolvers'
-import { validateResource } from '../../validation'
-import type { Resource, ResourceKitPlugin } from '../../types'
+import { createRegistry } from '../../core/registry'
+import { staticResolver } from '../../connection/resolvers'
+import { validateResource } from '../../core/validation'
+import type { Resource, ResourceKitPlugin } from '../../core/types'
 import type { KindRenderFn } from '../../react'
 import { composeResourceKitPlugins, createFirstPartyResourceAdapters } from './kits'
 

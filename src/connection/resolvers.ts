@@ -1,4 +1,4 @@
-import type { ConnectionAdapter, ConnectionBinding, DataResolver, RegisteredConnection, RestBinding, StaticBinding } from './types'
+import type { ConnectionAdapter, ConnectionBinding, DataResolver, RegisteredConnection, RestBinding, StaticBinding } from '../core/types'
 
 /**
  * Built-in resolvers. Only `rest` and `static` live in core — the

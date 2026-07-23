@@ -1,7 +1,7 @@
 import { tableRowsToFrame } from '@loykin/datasourcekit'
 import type { DatasourceManager } from '@loykin/datasourcekit'
 import { describe, expect, it, vi } from 'vitest'
-import type { RegisteredConnection } from '../../types'
+import type { RegisteredConnection } from '../../core/types'
 import { createDatasourceKitConnectionAdapter, type DatasourceKitConnectionConfig } from './adapter'
 
 function testConnection(overrides: Partial<RegisteredConnection<DatasourceKitConnectionConfig>> = {}): RegisteredConnection<DatasourceKitConnectionConfig> {

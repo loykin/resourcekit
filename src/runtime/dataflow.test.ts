@@ -8,7 +8,7 @@ import {
   scanDataRefs,
   validateDataGraph,
 } from './dataflow'
-import type { DataBinding } from './types'
+import type { DataBinding } from '../core/types'
 
 describe('clampQueryPolicy', () => {
   it('passes an undefined policy through', () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRestConnectionAdapter, restConnectionAdapter } from './connectionAdapters'
-import type { RegisteredConnection } from './types'
+import type { RegisteredConnection } from '../core/types'
 import type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
 
 function connection(overrides: Partial<RegisteredConnection<RestConnectionConfig>> = {}): RegisteredConnection<RestConnectionConfig> {

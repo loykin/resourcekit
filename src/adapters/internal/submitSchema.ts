@@ -1,4 +1,4 @@
-import type { JsonSchema } from '../../types'
+import type { JsonSchema } from '../../core/types'
 
 export const confirmSpecSchema: JsonSchema = {
   type: 'object',

@@ -2,9 +2,9 @@
 import { act, cleanup, render } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ResourceDocument } from '../dataflow'
-import { createRegistry } from '../registry'
-import type { Resource } from '../types'
+import type { ResourceDocument } from '../runtime/dataflow'
+import { createRegistry } from '../core/registry'
+import type { Resource } from '../core/types'
 import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
 

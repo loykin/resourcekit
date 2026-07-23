@@ -1,7 +1,7 @@
-import { getValueAtPath, setValueAtPath } from './path'
-import type { DataBinding, DataRef, QueryScopePolicy, Resource } from './types'
+import { getValueAtPath, setValueAtPath } from '../core/path'
+import type { DataBinding, DataRef, QueryScopePolicy, Resource } from '../core/types'
 
-export type { DataRef } from './types'
+export type { DataRef } from '../core/types'
 
 export interface StateDataNode {
   kind: 'state'
