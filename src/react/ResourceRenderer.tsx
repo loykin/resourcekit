@@ -2,6 +2,8 @@ import { createElement, Fragment, useCallback, useEffect, useMemo, useReducer, u
 import type { ReactNode } from 'react'
 import { createDataflowRuntime, isDataRef, scanDataRefs } from '../runtime/dataflow'
 import type { DataflowRuntime, DataRef, DataStore, ResourceDocument } from '../runtime/dataflow'
+import { createCoordinatorResolve } from '../runtime/queryCoordinator'
+import type { CoordinatorResolveBridge, QueryCoordinator } from '../runtime/queryCoordinator'
 import type { ConfirmSpec, DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration, VariableValue, VisibilityCondition } from '../core/types'
 import type { ResourceRegistry, ScopedRegistry } from '../core/registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../runtime/variables'
@@ -28,6 +30,8 @@ export interface ResourceRendererProps {
    */
   onEvent?: (event: string, payload?: unknown) => void
   onDataError?: (error: unknown, node: string) => void
+  /** When provided, resolve nodes are routed through this coordinator (caching/polling/dedup) instead of resolving once per dataflow epoch directly. Omitted preserves today's exact one-shot behavior. */
+  queryCoordinator?: QueryCoordinator
 }
 
 interface Runtime {
@@ -35,6 +39,7 @@ interface Runtime {
   dataCache: Map<string, Promise<Record<string, unknown>[]>>
   bindingRefs: Map<string, Set<string>>
   dataflow?: DataflowRuntime
+  coordinatorResolve?: CoordinatorResolveBridge
   subscribeVersion: (listener: () => void) => () => void
   getVersion: () => number
 }
@@ -149,6 +154,17 @@ function applyValuePath(rows: Record<string, unknown>[], binding: DataBinding): 
     if (isRecord(value)) return [value]
     return [{ value }]
   })
+}
+
+/** Looks up and invokes the plain `DataResolver` registered for a binding's source — the row-fetching step shared by both the direct and coordinator-routed resolve paths. */
+function callResolver(
+  registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>,
+  binding: DataBinding,
+  ctx: { variables: Record<string, VariableValue>; signal?: AbortSignal },
+): Promise<Record<string, unknown>[]> {
+  const resolver = registry.getDataResolver(binding.source)
+  if (!resolver) throw new Error(`data resolver ${binding.source} is not registered`)
+  return resolver(binding, ctx)
 }
 
 function eventPolicy(resource: Resource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
@@ -483,6 +499,31 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
       notify()
     })
 
+    // `onUpdate` below references `dataflow`, defined further down — safe:
+    // it's only *called* later (async, once a background update actually
+    // arrives), well after this whole block has finished running and
+    // `dataflow` has been assigned.
+    const coordinatorResolve = props.queryCoordinator
+      ? createCoordinatorResolve({
+          coordinator: props.queryCoordinator,
+          registry: props.registry,
+          resolve: async (b, ctx) => applyValuePath(await callResolver(props.registry, b, ctx), b),
+          getPolicy: (nodeId) => {
+            const node = document?.data?.nodes[nodeId]
+            return node?.kind === 'resolve' ? node.policy : undefined
+          },
+          scopePolicy: 'options' in props.registry ? props.registry.options.queryPolicy : undefined,
+          // The only path a coordinator's own background activity (a poll
+          // tick, an out-of-band invalidate/refetch) has back into the
+          // rendered document — `resolve` below only ever delivers the
+          // *first* value for a given evaluation.
+          onUpdate: (nodeId, snapshot) => {
+            if (snapshot.status === 'ready') void dataflow?.publish(nodeId, { status: 'ready', value: snapshot.value })
+            else if (snapshot.status === 'error') void dataflow?.publish(nodeId, { status: 'error', error: snapshot.error, value: snapshot.value })
+          },
+        })
+      : undefined
+
     const dataflow = document?.data
       ? createDataflowRuntime({
           graph: document.data,
@@ -491,10 +532,10 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
             const resolved = interpolate(binding, engine.snapshot())
             if (resolved.unresolved.size > 0) return []
             const resolvedBinding = resolved.value as DataBinding
-            const resolver = props.registry.getDataResolver(resolvedBinding.source)
-            if (!resolver) throw new Error(`data resolver ${resolvedBinding.source} is not registered`)
-            const rows = await resolver(resolvedBinding, { variables: engine.snapshot(), signal: context.signal })
-            return applyValuePath(rows, resolvedBinding)
+            if (coordinatorResolve) {
+              return coordinatorResolve.resolve(resolvedBinding, { variables: engine.snapshot(), signal: context.signal, nodeId: context.nodeId })
+            }
+            return applyValuePath(await callResolver(props.registry, resolvedBinding, { variables: engine.snapshot(), signal: context.signal }), resolvedBinding)
           },
         })
       : undefined
@@ -503,8 +544,8 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
     // to its own `$data` dependencies directly via useNodeVersion, so a
     // document-wide polling node updating doesn't force a full-tree re-render.
 
-    return { engine, dataCache, bindingRefs, dataflow, subscribeVersion, getVersion: () => version }
-  }, [props.dataStore, props.registry, document, resource])
+    return { engine, dataCache, bindingRefs, dataflow, coordinatorResolve, subscribeVersion, getVersion: () => version }
+  }, [props.dataStore, props.registry, props.queryCoordinator, document, resource])
 
   useEffect(() => {
     const dataflow = runtime.dataflow
@@ -520,6 +561,11 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
       })
     }
   }, [onDataError, runtime])
+
+  useEffect(() => {
+    const coordinatorResolve = runtime.coordinatorResolve
+    return () => coordinatorResolve?.dispose()
+  }, [runtime])
 
   return createElement(RootResourceNode, { ...props, resource, runtime })
 }

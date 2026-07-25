@@ -8,13 +8,23 @@
  * `createDirectQueryCoordinator` is the only implementation here: no cache,
  * no polling, no dedup, no retry — it preserves today's one-shot resolve
  * behavior. A TanStack Query (or other) coordinator is a separate,
- * pluggable implementation of the same `QueryCoordinator` contract.
+ * pluggable implementation of the same `QueryCoordinator` contract (see
+ * `createCoordinatorResolve` below for how either kind actually plugs into
+ * `DataflowRuntime.resolve`, and `@loykin/resourcekit/connectors/tanstack-query`
+ * for the TanStack-backed one).
  */
+
+import { clampQueryPolicy } from './dataflow'
+import type { QueryPolicy } from './dataflow'
+import type { DataBinding, DataResolveContext, QueryScopePolicy } from '../core/types'
+import type { ResourceRegistry } from '../core/registry'
 
 export interface QueryRequest {
   nodeId: string
   key: readonly unknown[]
   execute(signal: AbortSignal): Promise<unknown>
+  /** Host-clamped policy (see `clampQueryPolicy`) — `createDirectQueryCoordinator` ignores it; a scheduling coordinator (e.g. TanStack) reads it to configure polling/staleness/retry. */
+  policy?: QueryPolicy
 }
 
 export type QueryStatus = 'pending' | 'ready' | 'error'
@@ -132,6 +142,177 @@ function run(entry: DirectEntry) {
       for (const nodeId of nodeIds) {
         for (const entry of entriesByNodeId.get(nodeId) ?? []) run(entry)
       }
+    },
+  }
+}
+
+// Object-key order in an AI-authored binding is incidental, not semantic —
+// sorting keys before stringifying keeps the fallback query key stable
+// across two bindings that only differ in property order.
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const keys = Object.keys(value as Record<string, unknown>).sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`).join(',')}}`
+}
+
+export interface CreateCoordinatorResolveOptions {
+  coordinator: QueryCoordinator
+  registry: Pick<ResourceRegistry, 'getDataSourceAdapter'>
+  /** The actual row-fetching call (e.g. a plain `DataResolver` invocation) — this helper only adds coordinator semantics around it, it doesn't know how to fetch anything itself. */
+  resolve: (binding: DataBinding, ctx: DataResolveContext) => Promise<unknown>
+  /** Per-node AI-authored policy, looked up by nodeId (e.g. from a `DataGraphSpec`'s resolve node). */
+  getPolicy?: (nodeId: string) => QueryPolicy | undefined
+  /** Host ceiling applied via `clampQueryPolicy` before the policy reaches the coordinator. */
+  scopePolicy?: QueryScopePolicy
+  /**
+   * Called whenever a node's coordinator-backed snapshot changes *after* the
+   * value already delivered through `resolve`'s return promise — the only
+   * way a coordinator's own background activity (a poll tick, an
+   * out-of-band `invalidate`/`refetch`) reaches anything, since `resolve` is
+   * otherwise a one-shot call. Wire this to `DataflowRuntime.publish(nodeId,
+   * ...)`. Safe to ignore (e.g. a coordinator with no polling policy never
+   * calls this after the first snapshot).
+   */
+  onUpdate?: (nodeId: string, snapshot: QuerySnapshot) => void
+}
+
+export interface CoordinatorResolveBridge {
+  resolve: (binding: DataBinding, ctx: DataResolveContext & { nodeId: string }) => Promise<unknown>
+  /** Disposes every handle this bridge has opened — call when the owning runtime is torn down. */
+  dispose: () => void
+}
+
+interface CachedHandle {
+  /** Stringified form of `rawKey`, used only for this bridge's own "did the query key change" comparison — never sent to the coordinator. */
+  cacheKey: string
+  binding: DataBinding
+  ctx: DataResolveContext
+  handle: QueryHandle
+  unsubscribeUpdates: () => void
+}
+
+/**
+ * Bridges any `QueryCoordinator` (direct or a scheduling one like TanStack
+ * Query) into the `(binding, ctx) => Promise<unknown>` shape
+ * `DataflowRuntime`'s `resolve` option needs
+ * (docs/dataflow-and-server-state-direction.md P1 item 1). Query key comes
+ * from a registered `DataSourceAdapter.queryKey` when one exists for the
+ * binding's source; otherwise falls back to `[nodeId, stableStringify(binding)]`
+ * — the only path that actually runs today, since nothing registers a
+ * `DataSourceAdapter` yet.
+ *
+ * Keeps exactly one `QueryHandle` per nodeId, reused across repeated
+ * `resolve` calls for that node — not reopened every call. This is what
+ * makes a scheduling coordinator's background updates actually reach
+ * `onUpdate` (a fresh handle per call would settle its own promise once and
+ * be abandoned, so a poll tick between calls would have nothing listening).
+ * The cached handle is replaced (old one disposed) only when the computed
+ * key changes — i.e. the node's binding now refers to a genuinely different
+ * query, not just a re-evaluation with the same one. Note that resolve-node
+ * bindings don't react to page `${variable}` changes in the first place
+ * (docs/dataflow-and-server-state-direction.md "Variable과의 차이" —
+ * dataflow only tracks `$data` refs), so this key-change path exists for
+ * correctness (e.g. an upstream `$data` dependency actually changed) rather
+ * than as the common case.
+ */
+export function createCoordinatorResolve(options: CreateCoordinatorResolveOptions): CoordinatorResolveBridge {
+  const handles = new Map<string, CachedHandle>()
+
+  function openHandle(
+    nodeId: string,
+    binding: DataBinding,
+    rawKey: readonly unknown[],
+    cacheKey: string,
+    policy: QueryPolicy | undefined,
+    ctx: DataResolveContext,
+  ): CachedHandle {
+    const cached: CachedHandle = {
+      cacheKey,
+      binding,
+      ctx,
+      // Placeholder until `coordinator.open()` returns below — `execute` only
+      // reads `cached.binding`/`cached.ctx` (kept fresh on reuse), never
+      // `cached.handle`, so the forward reference is safe.
+      handle: undefined as unknown as QueryHandle,
+      unsubscribeUpdates: () => {},
+    }
+    const handle = options.coordinator.open({
+      nodeId,
+      key: rawKey,
+      policy,
+      execute: (execSignal) => options.resolve(cached.binding, { ...cached.ctx, signal: execSignal }),
+    })
+    cached.handle = handle
+    cached.unsubscribeUpdates = handle.subscribe(() => {
+      const snapshot = handle.getSnapshot()
+      if (snapshot.status === 'ready' || snapshot.status === 'error') options.onUpdate?.(nodeId, snapshot)
+    })
+    handles.set(nodeId, cached)
+    return cached
+  }
+
+  return {
+    resolve(binding, ctx) {
+      const adapter = options.registry.getDataSourceAdapter(binding.source)
+      const rawKey = adapter ? adapter.queryKey(binding, ctx) : [ctx.nodeId, stableStringify(binding)]
+      const cacheKey = stableStringify(rawKey)
+      const policy = clampQueryPolicy(options.getPolicy?.(ctx.nodeId), options.scopePolicy)
+
+      const existing = handles.get(ctx.nodeId)
+      let cached: CachedHandle
+      if (existing && existing.cacheKey === cacheKey) {
+        existing.binding = binding
+        existing.ctx = ctx
+        cached = existing
+      } else {
+        existing?.unsubscribeUpdates()
+        existing?.handle.dispose()
+        cached = openHandle(ctx.nodeId, binding, rawKey, cacheKey, policy, ctx)
+      }
+      const handle = cached.handle
+
+      return new Promise<unknown>((resolvePromise, rejectPromise) => {
+        let settled = false
+        const cleanup = () => {
+          unsubscribeSettle()
+          ctx.signal?.removeEventListener('abort', onAbort)
+        }
+        const trySettle = () => {
+          if (settled) return
+          const snapshot = handle.getSnapshot()
+          if (snapshot.status === 'ready') {
+            settled = true
+            cleanup()
+            resolvePromise(snapshot.value)
+          } else if (snapshot.status === 'error') {
+            settled = true
+            cleanup()
+            rejectPromise(snapshot.error)
+          }
+        }
+        const onAbort = () => {
+          // Only this call's wait is cancelled — the handle stays cached and
+          // subscribed (via unsubscribeUpdates) for the next resolve() call
+          // or background update, matching `DataflowRuntime`'s own
+          // per-evaluation (not per-node) cancellation model.
+          if (settled) return
+          settled = true
+          cleanup()
+          rejectPromise(ctx.signal?.reason ?? new Error('aborted'))
+        }
+
+        const unsubscribeSettle = handle.subscribe(trySettle)
+        ctx.signal?.addEventListener('abort', onAbort, { once: true })
+        trySettle()
+      })
+    },
+    dispose() {
+      for (const cached of handles.values()) {
+        cached.unsubscribeUpdates()
+        cached.handle.dispose()
+      }
+      handles.clear()
     },
   }
 }

@@ -36,7 +36,7 @@ function kindsIn(resource: Resource): string[] {
 
 describe('playground example catalog', () => {
   it('classifies every demo without exposing internal legacy kind names', () => {
-    expect(app.examples).toHaveLength(24)
+    expect(app.examples).toHaveLength(25)
     expect(app.examples.filter((example) => example.category === 'scenario')).toHaveLength(3)
     expect(app.examples.filter((example) => example.category === 'mcp-generated')).toHaveLength(3)
     expect(app.examples.filter((example) => example.category === 'designkit-parity')).toHaveLength(4)
@@ -44,6 +44,7 @@ describe('playground example catalog', () => {
       'coin-market-cap-top10',
       'metrics-chart',
       'from-value-binding',
+      'tanstack-query-polling-demo',
     ])
 
     const internalKind = /^(DesignKit|GridKit|ChartKit|BaseKit)[A-Z]/

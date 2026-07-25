@@ -55,6 +55,8 @@ import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { publicKindNames } from '@loykin/resourcekit/adapters'
 import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapters/datasourcekit'
+import { createTanStackQueryCoordinator } from '@loykin/resourcekit/connectors/tanstack-query'
+import { QueryClient } from '@tanstack/query-core'
 import { createPlaygroundConnectionProvider, createPlaygroundDatasourceManager } from './demoDatasourceKit'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
 import { scenarioExamples } from './scenarios'
@@ -126,6 +128,16 @@ const playgroundDatasourceResolver: DataResolver = async (binding) => {
 // full read → edit → mutate → refetch loop can run inside the playground.
 const memoryUsers: Record<string, unknown>[] = userRows.map((row, index) => ({ id: String(index + 1), ...row }))
 let nextMemoryUserId = memoryUsers.length + 1
+
+// Ticks every call — has nothing to do with the DOM/actual clock, just a
+// visibly-changing value so the TanStack Query coordinator's polling is
+// obviously live in the "TanStack Query polling demo" example below (see
+// docs/dataflow-and-server-state-direction.md P1 item 1).
+let liveClockTick = 0
+const liveClockResolver: DataResolver = async () => {
+  liveClockTick += 1
+  return [{ tick: liveClockTick, time: new Date().toLocaleTimeString() }]
+}
 
 const memoryDataResolver: DataResolver = async (rawBinding) => {
   const binding = rawBinding as Record<string, unknown>
@@ -1631,6 +1643,43 @@ const dynamicDatasourceKitPage: ResourceDocument = {
   resource: dynamicDatasourceKitResource,
 }
 
+// docs/dataflow-and-server-state-direction.md P1 item 1 — proves the
+// TanStack Query coordinator actually polls: `tick`/`time` change on their
+// own every 2s with zero user interaction, driven entirely by `policy`.
+const tanStackPollingDemoPage: ResourceDocument = {
+  data: {
+    nodes: {
+      liveTick: {
+        kind: 'resolve',
+        binding: { source: 'liveClock' },
+        policy: { refresh: { kind: 'interval', ms: 2000 } },
+      },
+    },
+  },
+  resource: {
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'Panel',
+    spec: { title: 'TanStack Query polling demo' },
+    slots: [
+      {
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'DetailView',
+            spec: {
+              data: { $data: 'liveTick' },
+              fields: [
+                { field: 'tick', label: 'Tick count (increments every poll)' },
+                { field: 'time', label: 'Resolved at' },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  },
+}
+
 export const serviceOperationsPage: ResourceDocument = {
   data: {
     nodes: {
@@ -2026,6 +2075,13 @@ export const examples: readonly PlaygroundExample[] = [
     category: 'runtime',
     resource: userManagement,
   },
+  {
+    id: 'tanstack-query-polling-demo',
+    name: 'TanStack Query polling demo',
+    description: 'Component fragment: a resolve node with policy.refresh actually polls via the TanStack Query coordinator — tick/time update every 2s on their own (docs/dataflow-and-server-state-direction.md P1 item 1).',
+    category: 'fragment',
+    resource: tanStackPollingDemoPage,
+  },
 ]
 
 export const registry = createRegistry<KindRenderFn>()
@@ -2038,12 +2094,20 @@ registry.use({
     static: staticResolver,
     memory: memoryDataResolver,
     connection: createConnectionDataResolver(registry),
+    liveClock: liveClockResolver,
   },
   mutationResolvers: { memory: memoryMutationResolver, rest: restMutationResolver, operations: operationsMutationResolver },
   connectionAdapters: { rest: restConnectionAdapter, datasourcekit: createDatasourceKitConnectionAdapter(playgroundDatasourceManager) },
 })
 registry.use(createPlaygroundResourceAdapters())
 registry.setConnectionProvider(createPlaygroundConnectionProvider())
+
+// docs/dataflow-and-server-state-direction.md P1 item 1 — a real,
+// polling-capable QueryCoordinator. Wired into the main ResourceRenderer
+// below; any resolve node's `policy.refresh` (e.g. serviceOperationsPage's
+// `incidents` node, already authored with one) actually polls now instead of
+// resolving once and never again.
+const tanStackCoordinator = createTanStackQueryCoordinator(new QueryClient())
 
 // Same "demo-users" connection as examples/mcp-server, but backed by
 // vite.config.ts's demoUsersApiPlugin middleware (same origin, no separate
@@ -3548,6 +3612,7 @@ export function App() {
         renderLoading={() => <div className="fallback">Loading kind...</div>}
         renderUnknownKind={(resource) => <div className="fallback">Unknown kind: {resource.kind}</div>}
         resource={resource}
+        queryCoordinator={tanStackCoordinator}
       />
       {toast && <div className="rk-toast">{toast}</div>}
     </>

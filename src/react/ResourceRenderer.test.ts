@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { createRegistry } from '../core/registry'
 import type { ResourceDocument } from '../runtime/dataflow'
+import { createDirectQueryCoordinator } from '../runtime/queryCoordinator'
 import type { DataResolver, Resource } from '../core/types'
 import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
@@ -319,5 +320,50 @@ describe('ResourceRenderer', () => {
 
     await expect(captured?.bindings.read('command')).resolves.toBe('nginx -g daemon off;')
     await expect(captured?.data.read({ $data: 'draft' })).resolves.toEqual({ command: 'nginx -g daemon off;', name: 'nginx' })
+  })
+
+  it('routes resolve nodes through a queryCoordinator prop when provided, matching the direct path\'s results (docs/dataflow-and-server-state-direction.md P1 item 1)', async () => {
+    let captured: RenderContext | undefined
+    const resolver: DataResolver = vi.fn(async (binding) => {
+      const request = (binding as { request: { cluster: string } }).request
+      return [{ cluster: request.cluster, cpu: 72 }]
+    })
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      dataResolvers: { metrics: resolver },
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+
+    const document: ResourceDocument = {
+      data: {
+        nodes: {
+          selectedCluster: { kind: 'state', initialValue: 'cluster-a' },
+          metrics: {
+            kind: 'resolve',
+            binding: { source: 'metrics', request: { cluster: { $data: 'selectedCluster' } } },
+            policy: { refresh: { kind: 'interval', ms: 1000 } },
+          },
+        },
+      },
+      resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} },
+    }
+
+    renderToStaticMarkup(createElement(ResourceRenderer, { resource: document, registry, queryCoordinator: createDirectQueryCoordinator() }))
+
+    await expect(captured?.data.resolve({ $data: 'metrics' })).resolves.toEqual([{ cluster: 'cluster-a', cpu: 72 }])
+    await captured?.data.set('selectedCluster', 'cluster-b')
+    await expect(captured?.data.resolve({ $data: 'metrics' })).resolves.toEqual([{ cluster: 'cluster-b', cpu: 72 }])
+    expect(resolver).toHaveBeenCalledTimes(2)
   })
 })

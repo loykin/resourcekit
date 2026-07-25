@@ -16,6 +16,7 @@
     "@loykin/filter-input": "0.0.1-dev.0",
     "@loykin/gridkit": "^0.2.0",
     "@loykin/resourcekit": "workspace:*",
+    "@tanstack/query-core": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.5",
     "@uiw/react-codemirror": "^4.25.10",
