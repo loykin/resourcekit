@@ -3,11 +3,13 @@ import {
   DataGraphValidationError,
   clampQueryPolicy,
   createDataflowRuntime,
-  createMemoryDataStore,
   resolveDataRefs,
   scanDataRefs,
   validateDataGraph,
 } from './dataflow'
+import { createMemoryRuntimeStore, runtimeKeys } from './store'
+import type { RuntimeStore } from './store'
+import { createVariableEngine } from './variables'
 import type { DataBinding } from '../core/types'
 
 describe('clampQueryPolicy', () => {
@@ -63,11 +65,127 @@ describe('data references', () => {
       resolveDataRefs(
         value,
         new Map([
-          ['selection', { status: 'ready', value: 'cluster-a', version: 1, epoch: 1 }],
-          ['metadata', { status: 'ready', value: { region: { name: 'apne2' } }, version: 2, epoch: 1 }],
+          ['selection', { status: 'ready', value: 'cluster-a', revision: 1, updatedAt: 1, epoch: 1 }],
+          ['metadata', { status: 'ready', value: { region: { name: 'apne2' } }, revision: 2, updatedAt: 1, epoch: 1 }],
         ]),
       ),
     ).toEqual({ request: { cluster: 'cluster-a', region: 'apne2' } })
+  })
+})
+
+describe('common runtime store propagation', () => {
+  it('does not install store subscriptions until start and disposes every installed subscription', async () => {
+    const memory = createMemoryRuntimeStore()
+    let subscriptions = 0
+    let activeSubscriptions = 0
+    const store: RuntimeStore = {
+      read: memory.read,
+      publish: memory.publish,
+      remove: memory.remove,
+      subscribe(selector, listener) {
+        subscriptions++
+        activeSubscriptions++
+        const unsubscribe = memory.subscribe(selector, listener)
+        return () => {
+          activeSubscriptions--
+          unsubscribe()
+        }
+      },
+    }
+    const runtime = createDataflowRuntime({
+      store,
+      graph: { nodes: { selected: { kind: 'state', initialValue: 'a' } } },
+      resolve: async () => undefined,
+    })
+
+    expect(subscriptions).toBe(0)
+    await runtime.start()
+    await runtime.start()
+    expect(subscriptions).toBe(2)
+    expect(activeSubscriptions).toBe(2)
+
+    runtime.dispose()
+    runtime.dispose()
+    expect(activeSubscriptions).toBe(0)
+  })
+
+  it('reports store-triggered reconciliation failures through onError', async () => {
+    const memory = createMemoryRuntimeStore()
+    const initializationFailure = new Error('data store unavailable')
+    const store: RuntimeStore = {
+      read: memory.read,
+      publish(key, update, options) {
+        if (key.namespace === 'data') throw initializationFailure
+        return memory.publish(key, update, options)
+      },
+      remove: memory.remove,
+      subscribe: memory.subscribe,
+    }
+    const onError = vi.fn()
+    const runtime = createDataflowRuntime({
+      store,
+      graph: {
+        nodes: {
+          selected: { kind: 'state', initialValue: 'a' },
+          result: { kind: 'resolve', binding: { source: 'test', region: '${region}' } },
+        },
+      },
+      variables: () => ({ region: 'seoul' }),
+      resolve: async () => undefined,
+      onError,
+    })
+    await expect(runtime.start()).rejects.toThrow(initializationFailure)
+
+    memory.publish(runtimeKeys.variable('region'), { status: 'ready', value: 'busan' }, { origin: 'host' })
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(initializationFailure, 'region'))
+    runtime.dispose()
+  })
+
+  it('reconciles resolve nodes that subscribe to a changed variable key', async () => {
+    const store = createMemoryRuntimeStore()
+    const variables = createVariableEngine(store)
+    variables.declare([{ name: 'region', default: 'seoul' }])
+    const runtime = createDataflowRuntime({
+      store,
+      graph: {
+        nodes: {
+          result: { kind: 'resolve', binding: { source: 'test', region: '${region}' } },
+        },
+      },
+      variables: variables.snapshot,
+      resolve: async (binding) => (binding as DataBinding & { region: string }).region,
+    })
+
+    await runtime.start()
+    expect(await runtime.resolve('result')).toBe('seoul')
+
+    variables.set('region', 'busan')
+
+    await vi.waitFor(async () => expect(await runtime.resolve('result')).toBe('busan'))
+  })
+
+  it('invalidates variable-dependent resolve nodes when a variable key is removed', async () => {
+    const store = createMemoryRuntimeStore()
+    const variables = createVariableEngine(store)
+    variables.declare([{ name: 'region', default: 'seoul' }])
+    const runtime = createDataflowRuntime({
+      store,
+      graph: {
+        nodes: {
+          result: { kind: 'resolve', binding: { source: 'test', region: '${region}' } },
+        },
+      },
+      variables: variables.snapshot,
+      resolve: async (binding) => (binding as DataBinding & { region: string }).region,
+    })
+
+    await runtime.start()
+    store.remove(runtimeKeys.variable('region'), { origin: 'host' })
+
+    await vi.waitFor(async () => {
+      await expect(runtime.resolve('result')).rejects.toThrow('unresolved variables in data node result: region')
+    })
   })
 })
 
@@ -204,7 +322,7 @@ describe('createDataflowRuntime', () => {
   })
 
   it('can use a host-provided store', async () => {
-    const store = createMemoryDataStore()
+    const store = createMemoryRuntimeStore()
     const runtime = createDataflowRuntime({
       graph: { nodes: { selected: { kind: 'state', initialValue: 'a' } } },
       store,
@@ -213,7 +331,95 @@ describe('createDataflowRuntime', () => {
 
     await runtime.start()
     await runtime.setState('selected', 'b')
-    expect(await store.read('selected')).toEqual(expect.objectContaining({ status: 'ready', value: 'b' }))
+    expect(await store.read(runtimeKeys.data('selected'))).toEqual(expect.objectContaining({ status: 'ready', value: 'b' }))
+  })
+
+  it('reconciles an out-of-band state publish through downstream graph dependencies', async () => {
+    const store = createMemoryRuntimeStore()
+    const runtime = createDataflowRuntime({
+      graph: {
+        nodes: {
+          selected: { kind: 'state', initialValue: 'a' },
+          result: { kind: 'resolve', binding: { source: 'test', value: { $data: 'selected' } } },
+        },
+      },
+      store,
+      resolve: async (binding) => (binding as DataBinding & { value: string }).value,
+    })
+
+    await runtime.start()
+    store.publish(runtimeKeys.data('selected'), { status: 'ready', value: 'b' }, { origin: 'host' })
+
+    await vi.waitFor(async () => expect(await runtime.resolve('result')).toBe('b'))
+  })
+
+  it('reconciles an out-of-band resolve publish through downstream graph dependencies', async () => {
+    const store = createMemoryRuntimeStore()
+    const runtime = createDataflowRuntime({
+      graph: {
+        nodes: {
+          upstream: { kind: 'resolve', binding: { source: 'test', id: 'upstream' } },
+          downstream: { kind: 'resolve', binding: { source: 'test', id: 'downstream', value: { $data: 'upstream' } } },
+        },
+      },
+      store,
+      resolve: async (binding) => {
+        const current = binding as DataBinding & { id: string; value?: string }
+        return current.id === 'upstream' ? 'initial' : current.value
+      },
+    })
+
+    await runtime.start()
+    store.publish(runtimeKeys.data('upstream'), { status: 'ready', value: 'external' }, { origin: 'host' })
+
+    await vi.waitFor(async () => expect(await runtime.resolve('downstream')).toBe('external'))
+  })
+
+  it('propagates an out-of-band state error to downstream nodes', async () => {
+    const store = createMemoryRuntimeStore()
+    const runtime = createDataflowRuntime({
+      graph: {
+        nodes: {
+          selected: { kind: 'state', initialValue: 'a' },
+          result: { kind: 'resolve', binding: { source: 'test', value: { $data: 'selected' } } },
+        },
+      },
+      store,
+      resolve: async (binding) => (binding as DataBinding & { value: string }).value,
+    })
+
+    await runtime.start()
+    store.publish(
+      runtimeKeys.data('selected'),
+      { status: 'error', error: new Error('selection failed') },
+      { origin: 'host' },
+    )
+
+    await vi.waitFor(async () => {
+      await expect(runtime.resolve('result')).rejects.toThrow('selection failed')
+    })
+  })
+
+  it('propagates an out-of-band removal and rejects reads instead of waiting forever', async () => {
+    const store = createMemoryRuntimeStore()
+    const runtime = createDataflowRuntime({
+      graph: {
+        nodes: {
+          selected: { kind: 'state', initialValue: 'a' },
+          result: { kind: 'resolve', binding: { source: 'test', value: { $data: 'selected' } } },
+        },
+      },
+      store,
+      resolve: async (binding) => (binding as DataBinding & { value: string }).value,
+    })
+
+    await runtime.start()
+    store.remove(runtimeKeys.data('selected'), { origin: 'host' })
+
+    await expect(runtime.resolve('selected')).rejects.toThrow('Data node selected is not available')
+    await vi.waitFor(async () => {
+      await expect(runtime.resolve('result')).rejects.toThrow('Data node selected is not ready')
+    })
   })
 
   it('marks downstream nodes as errors instead of preserving stale results when an upstream fails', async () => {

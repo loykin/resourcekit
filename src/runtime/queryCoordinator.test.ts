@@ -90,6 +90,17 @@ describe('createDirectQueryCoordinator', () => {
     expect(other.getSnapshot().value).toBe('b1')
   })
 
+  it('coordinator.invalidate(nodeIds) does not execute because the direct coordinator has no cache metadata', async () => {
+    const execute = vi.fn(async () => 'value')
+    const coordinator = createDirectQueryCoordinator()
+    const handle = coordinator.open({ nodeId: 'a', key: ['a'], execute })
+    await waitFor(handle, (snapshot) => snapshot.status === 'ready')
+
+    await coordinator.invalidate(['a'])
+
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
   it('a stale execution that ignores cancellation cannot overwrite a newer result', async () => {
     const first = deferred<string>()
     let calls = 0
@@ -146,10 +157,34 @@ describe('createCoordinatorResolve', () => {
     const resolveFn = vi.fn(async () => [{ id: '1' }])
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: resolveFn })
 
-    const result = await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'processes', variables: {} })
+    const result = await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'processes', variables: {}, reason: 'initial' })
 
     expect(result).toEqual([{ id: '1' }])
     expect(resolveFn).toHaveBeenCalledWith({ source: 'processes' }, expect.objectContaining({ nodeId: 'processes' }))
+  })
+
+  it('supports handles whose subscribe callback fires synchronously', async () => {
+    let unsubscribeCalls = 0
+    const coordinator = stubCoordinator(() => ({
+      getSnapshot: () => ({ status: 'ready', value: 'synchronous' }),
+      subscribe(listener) {
+        listener()
+        return () => {
+          unsubscribeCalls++
+        }
+      },
+      refetch: async () => {},
+      dispose: () => {},
+    }))
+    const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => undefined })
+
+    await expect(
+      bridge.resolve(
+        { source: 'sync' } as DataBinding,
+        { nodeId: 'sync', variables: {}, reason: 'initial' },
+      ),
+    ).resolves.toBe('synchronous')
+    expect(unsubscribeCalls).toBe(1)
   })
 
   it('rejects when the coordinator reports an error', async () => {
@@ -162,7 +197,7 @@ describe('createCoordinatorResolve', () => {
       },
     })
 
-    await expect(bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'processes', variables: {} })).rejects.toThrow('backend down')
+    await expect(bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'processes', variables: {}, reason: 'initial' })).rejects.toThrow('backend down')
   })
 
   it("uses the registered DataSourceAdapter's queryKey when one exists for the binding source", async () => {
@@ -178,7 +213,7 @@ describe('createCoordinatorResolve', () => {
     }
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(adapter), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', status: 'running' } as DataBinding, { nodeId: 'n', variables: {} })
+    await bridge.resolve({ source: 'processes', status: 'running' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(opened[0]?.key).toEqual(['processes', 'running'])
   })
@@ -191,7 +226,7 @@ describe('createCoordinatorResolve', () => {
     })
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', a: 1, b: 2 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {} })
+    await bridge.resolve({ source: 'processes', a: 1, b: 2 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(opened[0]?.key).toEqual(['n', '{"a":1,"b":2,"source":"processes"}'])
   })
@@ -204,10 +239,27 @@ describe('createCoordinatorResolve', () => {
     })
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', a: 1, b: 2 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {} })
-    await bridge.resolve({ source: 'processes', b: 2, a: 1 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {} })
+    await bridge.resolve({ source: 'processes', a: 1, b: 2 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve({ source: 'processes', b: 2, a: 1 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(opened).toHaveLength(1) // second call reused the cached handle instead of opening a new one
+  })
+
+  it('forces a cached handle to refetch when the dataflow reason is refetch', async () => {
+    let value = 'first'
+    const resolveFn = vi.fn(async () => value)
+    const bridge = createCoordinatorResolve({
+      coordinator: createDirectQueryCoordinator(),
+      registry: fakeRegistry(),
+      resolve: resolveFn,
+    })
+    const binding = { source: 'processes' } as DataBinding
+
+    await expect(bridge.resolve(binding, { nodeId: 'n', variables: {}, reason: 'initial' })).resolves.toBe('first')
+    value = 'second'
+    await expect(bridge.resolve(binding, { nodeId: 'n', variables: {}, reason: 'refetch' })).resolves.toBe('second')
+
+    expect(resolveFn).toHaveBeenCalledTimes(2)
   })
 
   it('disposes the old handle and opens a new one when the computed key changes for the same nodeId', async () => {
@@ -225,8 +277,8 @@ describe('createCoordinatorResolve', () => {
     })
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', filter: 'a' } as DataBinding & { filter: string }, { nodeId: 'n', variables: {} })
-    await bridge.resolve({ source: 'processes', filter: 'b' } as DataBinding & { filter: string }, { nodeId: 'n', variables: {} })
+    await bridge.resolve({ source: 'processes', filter: 'a' } as DataBinding & { filter: string }, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve({ source: 'processes', filter: 'b' } as DataBinding & { filter: string }, { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(openCount).toBe(2)
     expect(disposed).toHaveLength(1)
@@ -246,7 +298,7 @@ describe('createCoordinatorResolve', () => {
       scopePolicy: { minIntervalMs: 5000 },
     })
 
-    await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {} })
+    await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(seenPolicy).toEqual({ refresh: { kind: 'interval', ms: 5000 } })
   })
@@ -264,7 +316,7 @@ describe('createCoordinatorResolve', () => {
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
     const controller = new AbortController()
 
-    const promise = bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, signal: controller.signal })
+    const promise = bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial', signal: controller.signal })
     controller.abort(new Error('cancelled'))
 
     await expect(promise).rejects.toThrow('cancelled')
@@ -290,13 +342,49 @@ describe('createCoordinatorResolve', () => {
     const onUpdate = vi.fn()
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v', onUpdate })
 
-    await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {} })
+    await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial' })
     expect(onUpdate).not.toHaveBeenCalled() // the initial value went through the resolve() return value, not onUpdate
 
     snapshot = { status: 'ready', value: 'second' } // simulate a background poll producing a new value
     for (const listener of listeners) listener()
 
     expect(onUpdate).toHaveBeenCalledWith('n', { status: 'ready', value: 'second' })
+  })
+
+  it('suppresses coordinator invalidation echoes while forwarding the invalidation itself', async () => {
+    const listeners = new Set<() => void>()
+    const invalidate = vi.fn(async () => {
+      for (const listener of listeners) listener()
+    })
+    const coordinator: QueryCoordinator = {
+      open: () => ({
+        getSnapshot: () => ({ status: 'ready', value: 'unchanged' }),
+        subscribe(listener) {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+        refetch: async () => {},
+        dispose: () => {},
+      }),
+      invalidate,
+      refetch: async () => {},
+    }
+    const onUpdate = vi.fn()
+    const bridge = createCoordinatorResolve({
+      coordinator,
+      registry: fakeRegistry(),
+      resolve: async () => 'unchanged',
+      onUpdate,
+    })
+    await bridge.resolve(
+      { source: 'processes' } as DataBinding,
+      { nodeId: 'n', variables: {}, reason: 'initial' },
+    )
+
+    await bridge.invalidate(['n'])
+
+    expect(invalidate).toHaveBeenCalledWith(['n'])
+    expect(onUpdate).not.toHaveBeenCalled()
   })
 
   it('dispose() tears down every cached handle', async () => {
@@ -309,8 +397,8 @@ describe('createCoordinatorResolve', () => {
     }))
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'a' } as DataBinding, { nodeId: 'a', variables: {} })
-    await bridge.resolve({ source: 'b' } as DataBinding, { nodeId: 'b', variables: {} })
+    await bridge.resolve({ source: 'a' } as DataBinding, { nodeId: 'a', variables: {}, reason: 'initial' })
+    await bridge.resolve({ source: 'b' } as DataBinding, { nodeId: 'b', variables: {}, reason: 'initial' })
     bridge.dispose()
 
     expect(disposedNodes.sort()).toEqual(['a', 'b'])

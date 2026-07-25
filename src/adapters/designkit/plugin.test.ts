@@ -6,7 +6,7 @@ import { createRegistry } from '../../core/registry'
 import { ResourceRenderer } from '../../react'
 import type { KindRenderFn } from '../../react'
 import { staticResolver } from '../../connection/resolvers'
-import { createMemoryDataStore } from '../../runtime/dataflow'
+import { createMemoryRuntimeStore, runtimeKeys } from '../../runtime/store'
 import type { ResourceDocument } from '../../runtime/dataflow'
 import { createDesignKitPlugin } from './plugin'
 
@@ -86,13 +86,16 @@ describe('DesignKit forms', () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
-    const dataStore = createMemoryDataStore()
+    const runtimeStore = createMemoryRuntimeStore()
     const document: ResourceDocument = {
       data: {
         nodes: {
           processDraft: {
             kind: 'state',
-            initialValue: { command: 'nginx -g daemon off;', name: 'nginx' },
+            initialValue: {
+              identity: 'process-7',
+              value: { command: 'nginx -g daemon off;', name: 'nginx' },
+            },
           },
         },
       },
@@ -108,7 +111,7 @@ describe('DesignKit forms', () => {
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, dataStore }))
+    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
 
     await waitFor(() =>
       expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('nginx -g daemon off;'),
@@ -117,7 +120,10 @@ describe('DesignKit forms', () => {
     fireEvent.change(input, { target: { value: 'nginx -t' } })
 
     await waitFor(async () => {
-      expect((await dataStore.read('processDraft'))?.value).toEqual({ command: 'nginx -t', name: 'nginx' })
+      expect(runtimeStore.read(runtimeKeys.data('processDraft', 'form'))?.value).toEqual({
+        identity: 'process-7',
+        value: { command: 'nginx -t', name: 'nginx' },
+      })
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -129,9 +135,16 @@ describe('DesignKit forms', () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
-    const dataStore = createMemoryDataStore()
+    const runtimeStore = createMemoryRuntimeStore()
     const document: ResourceDocument = {
-      data: { nodes: { draft: { kind: 'state', initialValue: { command: 'initial' } } } },
+      data: {
+        nodes: {
+          draft: {
+            kind: 'state',
+            initialValue: { identity: 'process-1', value: { command: 'initial' } },
+          },
+        },
+      },
       resource: {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'FormView',
@@ -144,21 +157,118 @@ describe('DesignKit forms', () => {
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, dataStore }))
+    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
     await waitFor(() =>
       expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('initial'),
     )
     const input = screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement
     fireEvent.change(input, { target: { value: 'local edit' } })
 
-    await dataStore.write('draft', {
+    runtimeStore.publish(runtimeKeys.data('draft', 'form'), {
       status: 'ready',
-      value: { command: 'server refresh' },
-      version: 99,
+      value: { identity: 'process-1', value: { command: 'server refresh' } },
       epoch: 99,
     })
 
     await waitFor(() => expect(input.value).toBe('local edit'))
+  })
+
+  it('resets a dirty FormView when the draft identity changes', async () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    const runtimeStore = createMemoryRuntimeStore()
+    const document: ResourceDocument = {
+      data: {
+        nodes: {
+          draft: {
+            kind: 'state',
+            initialValue: { identity: 'process-a', value: { command: 'command-a' } },
+          },
+        },
+      },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'FormView',
+        bindings: { draft: { $data: 'draft' } },
+        spec: {
+          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+          submit: { mutation: { target: 'memory' } },
+        },
+      },
+    }
+
+    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    const input = await screen.findByRole('textbox', { name: 'Command' }) as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('command-a'))
+    fireEvent.change(input, { target: { value: 'dirty-a' } })
+
+    runtimeStore.publish(runtimeKeys.data('draft', 'form'), {
+      status: 'ready',
+      value: { identity: 'process-b', value: { command: 'command-b' } },
+      epoch: 100,
+    })
+
+    await waitFor(() => expect(input.value).toBe('command-b'))
+  })
+
+  it('keeps a malformed controlled draft error local to FormView', async () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    const runtimeStore = createMemoryRuntimeStore()
+    const document: ResourceDocument = {
+      data: {
+        nodes: {
+          draft: { kind: 'state', initialValue: { command: 'legacy-flat-draft' } },
+        },
+      },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'FormView',
+        bindings: { draft: { $data: 'draft' } },
+        spec: {
+          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+          submit: { mutation: { target: 'memory' } },
+        },
+      },
+    }
+
+    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+
+    expect(await screen.findByText('Draft binding must contain { identity: string, value: object }')).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: 'Command' })).toBeTruthy()
+  })
+
+  it('treats a null controlled draft as hydration readiness and accepts a later envelope', async () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    const runtimeStore = createMemoryRuntimeStore()
+    const document: ResourceDocument = {
+      data: { nodes: { draft: { kind: 'state', initialValue: null } } },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'FormView',
+        bindings: { draft: { $data: 'draft' } },
+        spec: {
+          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+          submit: { mutation: { target: 'memory' } },
+        },
+      },
+    }
+
+    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    expect(screen.queryByText('Draft binding must contain { identity: string, value: object }')).toBeNull()
+
+    runtimeStore.publish(runtimeKeys.data('draft', 'form'), {
+      status: 'ready',
+      value: { identity: 'process-1', value: { command: 'hydrated' } },
+    })
+
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('hydrated'),
+    )
   })
 
   it('renders RHF pending/error state for a named submit action', async () => {

@@ -1620,8 +1620,8 @@ const dynamicDatasourceKitResource: Resource = {
 const dynamicDatasourceKitPage: ResourceDocument = {
   data: {
     nodes: {
-      region: { kind: 'state', initialValue: 'us-east', lifecycle: 'page' },
-      selectedHost: { kind: 'state', initialValue: 'web-1', lifecycle: 'page' },
+      region: { kind: 'state', initialValue: 'us-east' },
+      selectedHost: { kind: 'state', initialValue: 'web-1' },
       hostCpu: {
         kind: 'resolve',
         binding: {
@@ -1683,8 +1683,8 @@ const tanStackPollingDemoPage: ResourceDocument = {
 export const serviceOperationsPage: ResourceDocument = {
   data: {
     nodes: {
-      incidentStatus: { kind: 'state', initialValue: 'all', lifecycle: 'page' },
-      selectedIncident: { kind: 'state', initialValue: 'INC-2048', lifecycle: 'page' },
+      incidentStatus: { kind: 'state', initialValue: 'all' },
+      selectedIncident: { kind: 'state', initialValue: 'INC-2048' },
       incidents: {
         kind: 'resolve',
         binding: {

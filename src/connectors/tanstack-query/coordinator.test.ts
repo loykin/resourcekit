@@ -88,20 +88,21 @@ describe('createTanStackQueryCoordinator', () => {
     })
   })
 
-  it('invalidate(nodeIds) forces a re-run of every open handle for those node ids', async () => {
-    const execute = vi.fn().mockResolvedValueOnce('first').mockResolvedValueOnce('second')
-    const coordinator = createTanStackQueryCoordinator(freshClient())
+  it('invalidate(nodeIds) marks matching cache entries stale without re-running them', async () => {
+    const execute = vi.fn(async () => 'first')
+    const client = freshClient()
+    const coordinator = createTanStackQueryCoordinator(client)
     const handle = openTracked(coordinator, { nodeId: 'a', key: ['a'], execute })
     const other = openTracked(coordinator, { nodeId: 'b', key: ['b'], execute: async () => 'b1' })
 
     await waitForSnapshot(handle, (s) => s.status === 'ready')
     expect(handle.getSnapshot().value).toBe('first')
 
-    const done = waitForSnapshot(handle, (s) => s.value === 'second')
     await coordinator.invalidate(['a'])
-    await done
 
-    expect(execute).toHaveBeenCalledTimes(2)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(client.getQueryState(['a'])?.isInvalidated).toBe(true)
+    expect(client.getQueryState(['b'])?.isInvalidated).toBe(false)
     expect(other.getSnapshot().value).toBe('b1')
   })
 

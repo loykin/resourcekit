@@ -613,7 +613,6 @@ export function buildResourceDocumentSchema(scoped: ScopedRegistry, options: Bui
     properties: {
       kind: { const: 'state' },
       initialValue: {},
-      lifecycle: { enum: ['ephemeral', 'page', 'session', 'persistent'] },
     },
   }
   defs.resolveDataNode = executableDataBinding

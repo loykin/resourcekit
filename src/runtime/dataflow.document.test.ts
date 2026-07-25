@@ -57,6 +57,11 @@ describe('ResourceDocument authoring', () => {
 
     expect(validate(document), validate.errors?.map((error) => error.message).join(', ')).toBe(true)
     expect(JSON.stringify(schema)).not.toContain('transform')
+    expect(JSON.stringify(schema)).not.toContain('lifecycle')
+    expect(validate({
+      ...document,
+      data: { nodes: { selected: { kind: 'state', lifecycle: 'persistent' } } },
+    })).toBe(false)
   })
 
   it('validates graph references, resolver scope and writable setData targets', () => {

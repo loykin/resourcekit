@@ -30,6 +30,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), demoUsersApiPlugin(), serviceOperationsApiPlugin()],
   resolve: {
     alias: [
+      { find: '@loykin/resourcekit/adapters/styles', replacement: resolve(__dirname, '../styles/adapters/index.css') },
       { find: '@loykin/resourcekit/adapters/designkit', replacement: resolve(__dirname, '../src/adapters/designkit/index.ts') },
       { find: '@loykin/resourcekit/adapters/gridkit', replacement: resolve(__dirname, '../src/adapters/gridkit/index.ts') },
       { find: '@loykin/resourcekit/adapters/chartkit', replacement: resolve(__dirname, '../src/adapters/chartkit/index.ts') },

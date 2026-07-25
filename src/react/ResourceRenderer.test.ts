@@ -9,6 +9,42 @@ import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
 
 describe('ResourceRenderer', () => {
+  it('retains only the latest variable fingerprint for each direct data binding', async () => {
+    let captured: RenderContext | undefined
+    const resolve = vi.fn(async () => [])
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'cache',
+      dataResolvers: { search: resolve },
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div')
+          },
+        },
+      ],
+    })
+    const binding = { source: 'search', query: '${query}' }
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Probe',
+      spec: { variables: [{ name: 'query', default: 'a' }] },
+    }
+    renderToStaticMarkup(createElement(ResourceRenderer, { registry, resource }))
+
+    await captured?.data.resolve(binding)
+    captured?.variables.set('query', 'b')
+    await captured?.data.resolve(binding)
+    captured?.variables.set('query', 'a')
+    await captured?.data.resolve(binding)
+
+    expect(resolve).toHaveBeenCalledTimes(3)
+  })
+
   it('renders resources recursively through slot accessors', () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use({
@@ -243,6 +279,46 @@ describe('ResourceRenderer', () => {
     await vi.waitFor(async () => {
       await expect(captured?.data.resolve({ $data: 'selection' })).resolves.toEqual([{ id: 'cluster-a' }])
     })
+  })
+
+  it('forwards a scoped host action without interpreting adapter-owned semantics', async () => {
+    let captured: RenderContext | undefined
+    const handled = vi.fn(async () => undefined)
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'ActionProbe',
+          specSchema: { type: 'object' },
+          behaviorPolicy: { events: { activate: { kind: 'action', action: 'pipelines.open' } } },
+          render: (_resource, ctx) => {
+            captured = ctx
+            return createElement('div')
+          },
+        },
+      ],
+    })
+    const scope = registry.scope({ actions: { allow: ['pipelines.open'] } })
+
+    renderToStaticMarkup(
+      createElement(ResourceRenderer, {
+        resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} },
+        registry: scope,
+        onAction: handled,
+      }),
+    )
+    captured?.events.emit('activate', { id: 'pipeline-7' })
+
+    await vi.waitFor(() =>
+      expect(handled).toHaveBeenCalledWith({
+        scope: 'document',
+        action: 'pipelines.open',
+        resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} },
+        payload: { id: 'pipeline-7' },
+      }),
+    )
   })
 
   it('exposes kind-declared bindings through the central document store', async () => {

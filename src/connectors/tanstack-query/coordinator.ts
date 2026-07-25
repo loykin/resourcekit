@@ -51,7 +51,9 @@ export function createTanStackQueryCoordinator(queryClient: QueryClient): QueryC
     async invalidate(nodeIds) {
       for (const nodeId of nodeIds) {
         for (const observer of observersByNodeId.get(nodeId) ?? []) {
-          await queryClient.invalidateQueries({ queryKey: observer.options.queryKey, exact: true })
+          await queryClient.invalidateQueries(
+            { queryKey: observer.options.queryKey, exact: true, refetchType: 'none' },
+          )
         }
       }
     },

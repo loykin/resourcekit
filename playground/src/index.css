@@ -3,6 +3,7 @@
 @import "@loykin/chartkit/styles";
 @import "@loykin/filter-input/styles";
 @import "@loykin/gridkit/styles";
+@import "@loykin/resourcekit/adapters/styles";
 
 @theme inline {
   --color-background: var(--background);

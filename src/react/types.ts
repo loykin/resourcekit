@@ -3,6 +3,13 @@ import type { DataRef } from '../core/types'
 import type { DataBinding, Resource, SubmitSpec } from '../core/types'
 import type { SubmitResult } from '../runtime/submit'
 
+export interface HostActionRequest {
+  action: string
+  payload?: unknown
+  resource: Resource
+  scope: string
+}
+
 /**
  * React narrowing of the manifest's generic `render` member.
  * Kinds receive their resource plus a runtime context — they never touch

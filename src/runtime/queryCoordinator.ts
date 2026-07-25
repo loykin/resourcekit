@@ -15,7 +15,7 @@
  */
 
 import { clampQueryPolicy } from './dataflow'
-import type { QueryPolicy } from './dataflow'
+import type { DataNodeResolveContext, QueryPolicy } from './dataflow'
 import type { DataBinding, DataResolveContext, QueryScopePolicy } from '../core/types'
 import type { ResourceRegistry } from '../core/registry'
 
@@ -44,7 +44,9 @@ export interface QueryHandle {
 
 export interface QueryCoordinator {
   open(request: QueryRequest): QueryHandle
+  /** Marks matching cache entries stale without executing them. */
   invalidate(nodeIds: string[]): Promise<void>
+  /** Forces matching active handles to execute again. */
   refetch(nodeIds: string[]): Promise<void>
 }
 
@@ -132,11 +134,9 @@ function run(entry: DirectEntry) {
       }
     },
     async invalidate(nodeIds) {
-      // No cache to mark stale — refetching immediately is the closest
-      // equivalent for a coordinator that never retains a previous result.
-      for (const nodeId of nodeIds) {
-        for (const entry of entriesByNodeId.get(nodeId) ?? []) run(entry)
-      }
+      // A direct coordinator has no cache metadata to mark stale. Invalidation
+      // deliberately does not execute; callers use refetch() for that.
+      void nodeIds
     },
     async refetch(nodeIds) {
       for (const nodeId of nodeIds) {
@@ -178,7 +178,12 @@ export interface CreateCoordinatorResolveOptions {
 }
 
 export interface CoordinatorResolveBridge {
-  resolve: (binding: DataBinding, ctx: DataResolveContext & { nodeId: string }) => Promise<unknown>
+  resolve: (
+    binding: DataBinding,
+    ctx: DataResolveContext & Pick<DataNodeResolveContext, 'nodeId' | 'reason'>,
+  ) => Promise<unknown>
+  /** Invalidates coordinator cache entries while suppressing same-value update echoes back into dataflow. */
+  invalidate: (nodeIds: string[]) => Promise<void>
   /** Disposes every handle this bridge has opened — call when the owning runtime is torn down. */
   dispose: () => void
 }
@@ -190,6 +195,7 @@ interface CachedHandle {
   ctx: DataResolveContext
   handle: QueryHandle
   unsubscribeUpdates: () => void
+  activeWaits: number
 }
 
 /**
@@ -199,8 +205,7 @@ interface CachedHandle {
  * (docs/dataflow-and-server-state-direction.md P1 item 1). Query key comes
  * from a registered `DataSourceAdapter.queryKey` when one exists for the
  * binding's source; otherwise falls back to `[nodeId, stableStringify(binding)]`
- * — the only path that actually runs today, since nothing registers a
- * `DataSourceAdapter` yet.
+ * when a source has no richer adapter registration.
  *
  * Keeps exactly one `QueryHandle` per nodeId, reused across repeated
  * `resolve` calls for that node — not reopened every call. This is what
@@ -208,13 +213,9 @@ interface CachedHandle {
  * `onUpdate` (a fresh handle per call would settle its own promise once and
  * be abandoned, so a poll tick between calls would have nothing listening).
  * The cached handle is replaced (old one disposed) only when the computed
- * key changes — i.e. the node's binding now refers to a genuinely different
- * query, not just a re-evaluation with the same one. Note that resolve-node
- * bindings don't react to page `${variable}` changes in the first place
- * (docs/dataflow-and-server-state-direction.md "Variable과의 차이" —
- * dataflow only tracks `$data` refs), so this key-change path exists for
- * correctness (e.g. an upstream `$data` dependency actually changed) rather
- * than as the common case.
+ * key changes — i.e. the node's `$data` or variable-dependent binding now
+ * refers to a genuinely different query, not just a re-evaluation with the
+ * same one.
  */
 export function createCoordinatorResolve(options: CreateCoordinatorResolveOptions): CoordinatorResolveBridge {
   const handles = new Map<string, CachedHandle>()
@@ -236,6 +237,7 @@ export function createCoordinatorResolve(options: CreateCoordinatorResolveOption
       // `cached.handle`, so the forward reference is safe.
       handle: undefined as unknown as QueryHandle,
       unsubscribeUpdates: () => {},
+      activeWaits: 0,
     }
     const handle = options.coordinator.open({
       nodeId,
@@ -246,14 +248,16 @@ export function createCoordinatorResolve(options: CreateCoordinatorResolveOption
     cached.handle = handle
     cached.unsubscribeUpdates = handle.subscribe(() => {
       const snapshot = handle.getSnapshot()
-      if (snapshot.status === 'ready' || snapshot.status === 'error') options.onUpdate?.(nodeId, snapshot)
+      if (cached.activeWaits === 0 && (snapshot.status === 'ready' || snapshot.status === 'error')) {
+        options.onUpdate?.(nodeId, snapshot)
+      }
     })
     handles.set(nodeId, cached)
     return cached
   }
 
   return {
-    resolve(binding, ctx) {
+    async resolve(binding, ctx) {
       const adapter = options.registry.getDataSourceAdapter(binding.source)
       const rawKey = adapter ? adapter.queryKey(binding, ctx) : [ctx.nodeId, stableStringify(binding)]
       const cacheKey = stableStringify(rawKey)
@@ -271,41 +275,70 @@ export function createCoordinatorResolve(options: CreateCoordinatorResolveOption
         cached = openHandle(ctx.nodeId, binding, rawKey, cacheKey, policy, ctx)
       }
       const handle = cached.handle
+      cached.activeWaits++
 
-      return new Promise<unknown>((resolvePromise, rejectPromise) => {
-        let settled = false
-        const cleanup = () => {
-          unsubscribeSettle()
-          ctx.signal?.removeEventListener('abort', onAbort)
+      try {
+        if (existing && existing.cacheKey === cacheKey && ctx.reason === 'refetch') {
+          await handle.refetch()
         }
-        const trySettle = () => {
-          if (settled) return
-          const snapshot = handle.getSnapshot()
-          if (snapshot.status === 'ready') {
-            settled = true
-            cleanup()
-            resolvePromise(snapshot.value)
-          } else if (snapshot.status === 'error') {
-            settled = true
-            cleanup()
-            rejectPromise(snapshot.error)
+
+        return await new Promise<unknown>((resolvePromise, rejectPromise) => {
+          let settled = false
+          let unsubscribeSettle = () => {}
+          const cleanup = () => {
+            unsubscribeSettle()
+            ctx.signal?.removeEventListener('abort', onAbort)
           }
-        }
-        const onAbort = () => {
-          // Only this call's wait is cancelled — the handle stays cached and
-          // subscribed (via unsubscribeUpdates) for the next resolve() call
-          // or background update, matching `DataflowRuntime`'s own
-          // per-evaluation (not per-node) cancellation model.
-          if (settled) return
-          settled = true
-          cleanup()
-          rejectPromise(ctx.signal?.reason ?? new Error('aborted'))
-        }
+          const trySettle = () => {
+            if (settled) return
+            const snapshot = handle.getSnapshot()
+            if (snapshot.status === 'ready') {
+              settled = true
+              cleanup()
+              resolvePromise(snapshot.value)
+            } else if (snapshot.status === 'error') {
+              settled = true
+              cleanup()
+              rejectPromise(snapshot.error)
+            }
+          }
+          const onAbort = () => {
+            // Only this call's wait is cancelled — the handle stays cached and
+            // subscribed (via unsubscribeUpdates) for the next resolve() call
+            // or background update, matching `DataflowRuntime`'s own
+            // per-evaluation (not per-node) cancellation model.
+            if (settled) return
+            settled = true
+            cleanup()
+            rejectPromise(ctx.signal?.reason ?? new Error('aborted'))
+          }
 
-        const unsubscribeSettle = handle.subscribe(trySettle)
-        ctx.signal?.addEventListener('abort', onAbort, { once: true })
-        trySettle()
-      })
+          unsubscribeSettle = handle.subscribe(trySettle)
+          if (settled) {
+            unsubscribeSettle()
+            return
+          }
+          if (ctx.signal?.aborted) {
+            onAbort()
+            return
+          }
+          ctx.signal?.addEventListener('abort', onAbort, { once: true })
+          trySettle()
+        })
+      } finally {
+        cached.activeWaits--
+      }
+    },
+    async invalidate(nodeIds) {
+      const cachedHandles = nodeIds
+        .map((nodeId) => handles.get(nodeId))
+        .filter((cached): cached is CachedHandle => cached !== undefined)
+      for (const cached of cachedHandles) cached.activeWaits++
+      try {
+        await options.coordinator.invalidate(nodeIds)
+      } finally {
+        for (const cached of cachedHandles) cached.activeWaits--
+      }
     },
     dispose() {
       for (const cached of handles.values()) {

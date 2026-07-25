@@ -18,6 +18,7 @@ import {
   WorkbenchBodyTemplate,
 } from '@loykin/designkit'
 import { getValueAtPath, setValueAtPath } from '../../core/path'
+import { canonicalStringify } from '../../core/canonical'
 import type { ResourceKitPlugin, SubmitSpec } from '../../core/types'
 import { SUBMIT_CANCELLED } from '../../runtime/submit'
 import type { KindRenderFn, RenderContext } from '../../react'
@@ -217,8 +218,6 @@ interface FormViewSpec {
   draftPolicy?: {
     /** Delay before publishing edits to the writable draft binding. Defaults to 100ms. */
     syncDelayMs?: number
-    /** Ignore external draft refreshes while the user has local edits. Defaults to true. */
-    preserveDirty?: boolean
     /** Adopt the submitted payload as the new clean baseline after success. Defaults to true. */
     markCleanOnSuccess?: boolean
   }
@@ -543,14 +542,21 @@ function SheetNode({ spec, ctx }: { spec: SheetSpec; ctx: RenderContext }) {
   )
 }
 
-function asDraft(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined
+interface DraftEnvelope {
+  identity: string
+  value: Record<string, unknown>
 }
 
-function draftKey(value: Record<string, unknown> | undefined): string {
-  return JSON.stringify(value ?? null)
+function asDraft(value: unknown): DraftEnvelope | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const envelope = value as Record<string, unknown>
+  if (typeof envelope.identity !== 'string') return undefined
+  if (typeof envelope.value !== 'object' || envelope.value === null || Array.isArray(envelope.value)) return undefined
+  return { identity: envelope.identity, value: envelope.value as Record<string, unknown> }
+}
+
+function draftKey(value: unknown): string {
+  return canonicalStringify(value ?? null)
 }
 
 function errorMessage(error: unknown, fallback = 'Submit failed'): string {
@@ -662,13 +668,20 @@ function formViewDefaults(spec: FormViewSpec, record: Record<string, unknown> | 
 function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
   const hasDraft = ctx.bindings.has('draft')
   const boundDraft = useBindingValue(ctx, 'draft')
-  const boundDraftRecord = asDraft(boundDraft)
+  const boundDraftEnvelope = asDraft(boundDraft)
+  const draftEnvelopeError = hasDraft && boundDraft != null && !boundDraftEnvelope
+  const draftConnected = hasDraft && boundDraftEnvelope !== undefined
+  const draftContractError = draftEnvelopeError
+    ? 'Draft binding must contain { identity: string, value: object }'
+    : undefined
+  const boundDraftRecord = boundDraftEnvelope?.value
   const fallbackDefaults = formViewDefaults(spec, ctx.record)
   const sourceDefaults = hasDraft ? boundDraftRecord : fallbackDefaults
-  const sourceKey = draftKey(sourceDefaults)
+  const sourceKey = draftKey(boundDraftEnvelope ?? sourceDefaults)
   const form = useForm<FormValues>({ defaultValues: structuredClone(sourceDefaults ?? fallbackDefaults) })
   const [message, setMessage] = useState<string>()
   const acceptedDraftKeyRef = useRef<string | undefined>(undefined)
+  const acceptedIdentityRef = useRef<string | undefined>(undefined)
   const lastPublishedKeyRef = useRef<string | undefined>(undefined)
   const pendingDraftRef = useRef<Record<string, unknown> | undefined>(undefined)
   const publishTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -681,9 +694,12 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
     publishTimerRef.current = undefined
     const next = pendingDraftRef.current
     pendingDraftRef.current = undefined
-    if (!next || !hasDraft) return
-    lastPublishedKeyRef.current = draftKey(next)
-    await writeDraftRef.current?.(next)
+    if (!next || !draftConnected) return
+    const identity = boundDraftEnvelope?.identity ?? acceptedIdentityRef.current
+    if (!identity) throw new Error('FormView cannot publish a draft without an identity')
+    const envelope = { identity, value: next }
+    lastPublishedKeyRef.current = draftKey(envelope)
+    await writeDraftRef.current?.(envelope)
   }
 
   const scheduleDraftPublish = (next: Record<string, unknown>) => {
@@ -697,26 +713,38 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
   }
 
   useEffect(() => {
-    if (hasDraft && !boundDraftRecord) return
+    if (hasDraft && !boundDraftEnvelope) {
+      if (publishTimerRef.current) clearTimeout(publishTimerRef.current)
+      pendingDraftRef.current = undefined
+      return
+    }
+    if (boundDraftEnvelope && boundDraftEnvelope.identity !== acceptedIdentityRef.current) {
+      if (publishTimerRef.current) clearTimeout(publishTimerRef.current)
+      pendingDraftRef.current = undefined
+      form.reset(structuredClone(boundDraftEnvelope.value))
+      acceptedIdentityRef.current = boundDraftEnvelope.identity
+      acceptedDraftKeyRef.current = sourceKey
+      return
+    }
     if (sourceKey === lastPublishedKeyRef.current) {
       lastPublishedKeyRef.current = undefined
       return
     }
     if (sourceKey === acceptedDraftKeyRef.current) return
-    if (form.formState.isDirty && spec.draftPolicy?.preserveDirty !== false) return
+    if (form.formState.isDirty) return
 
     form.reset(structuredClone(sourceDefaults ?? {}))
     acceptedDraftKeyRef.current = sourceKey
-  }, [form, hasDraft, sourceDefaults, sourceKey, spec.draftPolicy?.preserveDirty, boundDraftRecord])
+  }, [form, hasDraft, sourceDefaults, sourceKey, boundDraftEnvelope])
 
   useEffect(() => {
-    if (!hasDraft) return
+    if (!draftConnected) return
     const subscription = form.watch((values, info) => {
       if (!info.name) return
       scheduleDraftPublish(structuredClone(values as FormValues))
     })
     return () => subscription.unsubscribe()
-  }, [form, hasDraft, spec.draftPolicy?.syncDelayMs]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [form, draftConnected, spec.draftPolicy?.syncDelayMs]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(
     () => () => {
@@ -733,6 +761,9 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
     setMessage(undefined)
     try {
       if (hasDraft) {
+        if (!boundDraftEnvelope) {
+          throw new Error(draftContractError ?? 'Draft is not ready')
+        }
         pendingDraftRef.current = structuredClone(values)
         await publishPendingDraft()
       }
@@ -740,7 +771,9 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
       if (result === SUBMIT_CANCELLED) return
       if (spec.draftPolicy?.markCleanOnSuccess !== false) {
         form.reset(values)
-        acceptedDraftKeyRef.current = draftKey(values)
+        acceptedDraftKeyRef.current = draftKey(
+          boundDraftEnvelope ? { identity: boundDraftEnvelope.identity, value: values } : values,
+        )
       }
       setMessage(spec.successMessage ?? 'Saved')
     } catch (nextError) {
@@ -785,7 +818,7 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
           busy={busy}
           submitLabel={spec.submitLabel}
           message={message}
-          error={error}
+          error={draftContractError ?? error}
         />
       </form>
     </FormProvider>
@@ -1700,7 +1733,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
               additionalProperties: false,
               properties: {
                 syncDelayMs: { type: 'integer', minimum: 0, maximum: 2000 },
-                preserveDirty: { type: 'boolean' },
                 markCleanOnSuccess: { type: 'boolean' },
               },
             },
@@ -1713,8 +1745,16 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           inputs: {
             draft: {
               description:
-                'Optional writable object containing the shared form draft. The form hydrates from it, publishes edits with a short debounce, and preserves dirty local edits from unrelated external refreshes.',
-              schema: { type: 'object' },
+                'Optional writable draft envelope `{ identity, value }`. A new identity resets the form; same-identity refreshes preserve dirty edits.',
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['identity', 'value'],
+                properties: {
+                  identity: { type: 'string' },
+                  value: { type: 'object' },
+                },
+              },
               writable: true,
             },
           },

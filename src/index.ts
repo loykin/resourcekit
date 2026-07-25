@@ -78,7 +78,20 @@ export type { BuildResourceDocumentSchemaOptions } from './core/schema'
 
 export { createVariableEngine, scanVariableRefs, interpolate } from './runtime/variables'
 export type { VariableEngine } from './runtime/variables'
-
+export { createMemoryRuntimeStore, runtimeKeys } from './runtime/store'
+export type {
+  RuntimeNamespace,
+  RuntimeOrigin,
+  RuntimeKey,
+  RuntimeStatus,
+  RuntimeSnapshot,
+  RuntimeSnapshotUpdate,
+  RuntimeMutationOptions,
+  RuntimeSelector,
+  RuntimeChange,
+  RuntimeStore,
+  FetchStatus,
+} from './runtime/store'
 export { restResolver, staticResolver, createConnectionDataResolver, createRestResolver } from './connection/resolvers'
 export type { RestResolverOptions } from './connection/resolvers'
 export { restConnectionAdapter, createRestConnectionAdapter } from './connection/connectionAdapters'
@@ -93,7 +106,6 @@ export { canonicalizeJson, canonicalizeResource, canonicalStringify } from './co
 
 export {
   createDataflowRuntime,
-  createMemoryDataStore,
   isDataRef,
   scanDataRefs,
   resolveDataRefs,
@@ -107,10 +119,6 @@ export type {
   DataNode,
   DataGraphSpec,
   ResourceDocument,
-  DataStatus,
-  DataSnapshot,
-  FetchStatus,
-  DataStore,
   DataGraphIssue,
   DataGraphValidationResult,
   DataNodeResolveContext,

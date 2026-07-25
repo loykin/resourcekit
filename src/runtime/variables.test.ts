@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
+import { createMemoryRuntimeStore } from './store'
 import { createVariableEngine, interpolate, scanVariableRefs } from './variables'
 
 describe('createVariableEngine', () => {
   it('declares defaults, snapshots values, and notifies changed variables', () => {
-    const engine = createVariableEngine()
+    const store = createMemoryRuntimeStore()
+    const engine = createVariableEngine(store)
     const changed: string[][] = []
-    engine.subscribe((names) => changed.push([...names]))
+    store.subscribe({ kind: 'namespace', namespace: 'variable' }, ({ key }) => changed.push([key.name]))
 
     engine.declare([
       { name: 'customerId', default: 'c1' },
@@ -15,7 +17,7 @@ describe('createVariableEngine', () => {
 
     expect(engine.get('customerId')).toBe('c2')
     expect(engine.snapshot()).toEqual({ customerId: 'c2', statuses: ['active'] })
-    expect(changed).toEqual([['customerId', 'statuses'], ['customerId']])
+    expect(changed).toEqual([['customerId'], ['statuses'], ['customerId']])
   })
 })
 

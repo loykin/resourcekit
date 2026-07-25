@@ -30,6 +30,22 @@ pnpm add react react-dom react-hook-form @loykin/designkit
 The kit and React packages are optional peer dependencies: headless consumers
 do not need them, and applications can install only the adapters they use.
 
+Tailwind CSS v4 consumers must import ResourceKit's source registration after
+their design-system styles. Import only the adapter entries the application
+actually uses:
+
+```css
+@import '@loykin/designkit/styles';
+@import '@loykin/resourcekit/adapters/designkit/styles';
+```
+
+For the combined first-party adapter entry, use its matching combined source
+registration:
+
+```css
+@import '@loykin/resourcekit/adapters/styles';
+```
+
 | Import | Purpose |
 | --- | --- |
 | `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, document dataflow, resolvers, connections, and submit runtime |
@@ -40,6 +56,14 @@ do not need them, and applications can install only the adapters they use.
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
 | `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionAdapter` bridging registered connections to `@loykin/datasourcekit` |
 | `@loykin/resourcekit/adapters` | All first-party kind adapters plus resource views; use when all required kit peers are installed. Connection adapters (e.g. `datasourcekit`) are not included — import them from their own subpath. |
+| `@loykin/resourcekit/connectors/tanstack-query` | `QueryCoordinator` backed by `@tanstack/query-core` (optional peer) for real polling/caching/dedup |
+
+The corresponding Tailwind v4 source entries are
+`@loykin/resourcekit/adapters/designkit/styles`,
+`@loykin/resourcekit/adapters/gridkit/styles`, and
+`@loykin/resourcekit/adapters/basekit/styles`. The chartkit and datasourcekit
+adapters add no ResourceKit-owned utility classes, so they need no ResourceKit
+style entry; continue importing the underlying kit's own styles where required.
 
 ## Quick start
 
@@ -402,10 +426,26 @@ A selectable kind can update the same variable through an event policy:
 
 The React runtime applies `setVariable` and `setData` policies and forwards
 `emit` policies through `ResourceRenderer`'s `onEvent` callback. A writable
-port dispatches through `ctx.bindings.write`; adapters never own a parallel
-integration store. `internal` behavior stays inside the kind. `action` is
-currently schema/validation vocabulary; use submit/mutation dispatch or an
-emitted host event when an action must execute.
+port writes through `ctx.bindings.write`; adapters never own a parallel
+integration store. `internal` behavior stays inside the kind. After the
+scoped action allowlist is checked, `action` crosses the React host boundary
+as an opaque request. ResourceKit does not interpret, register, or execute
+adapter-specific actions:
+
+```tsx
+<ResourceRenderer
+  registry={scope}
+  resource={document}
+  onAction={async ({ action, payload }) => {
+    if (action === 'process.restart') await restartProcess(payload)
+  }}
+/>
+```
+
+An action with no host handler is reported through `onDataError` instead of
+silently pretending that it ran. The request carries the renderer's `scope`
+and originating resource, so a host can isolate pages and route it through
+its own adapter-specific registry if needed.
 
 Nodes can reactively opt into rendering through the runtime-owned `visible`
 field, and mark themselves disabled — without hiding — through the parallel
@@ -500,9 +540,32 @@ const validation = validateResourceDocument(document, scope)
 ```
 
 `ResourceRenderer` accepts either a bare `Resource` or a `ResourceDocument`.
-Its default store is in memory; hosts can provide a `DataStore` through the
-`dataStore` prop to change physical persistence without changing document or
-adapter contracts. Same-microtask writes are batched, downstream resolves use
+Its default `RuntimeStore` is in memory; hosts can provide one through the
+`runtimeStore` prop. This is the common namespaced KV snapshot/watch plane for
+document-visible variables, data, named executions, and plugin namespaces.
+Consumers opt into exact keys or namespaces; the
+store does not own their subscription policy. A shared store must pair each
+renderer with a unique `runtimeScope` (or a root `metadata.name`) so pages do
+not collide.
+
+```ts
+const store = createMemoryRuntimeStore()
+
+store.subscribe(
+  { kind: 'key', key: runtimeKeys.data('processes', 'pipelines-page') },
+  ({ snapshot }) => renderProcesses(snapshot),
+)
+```
+
+External publishers may write or remove the same scoped keys. Dataflow watches
+its `data` namespace and reconciles external ready/error/removal changes
+through the same dependency graph; an optional opaque write `origin` prevents
+a subscriber from reacting to its own publication.
+
+The common runtime stops at storing snapshots and notifying subscribers.
+Variable, dataflow, form, query, and host integrations decide how to react to
+the keys they own; the store contains no adapter action registry or command
+semantics. Same-microtask data writes are batched, downstream resolves use
 latest-wins cancellation, and fan-in nodes observe a coherent propagation
 wave.
 
@@ -519,10 +582,37 @@ only narrows an AI-authored policy down to what the host already allows.
 
 Internally, `resolve` execution goes through a swappable `QueryCoordinator`
 boundary rather than talking to a data source directly.
-`createDirectQueryCoordinator()` (the default) does one-shot resolves with no
-cache, polling, dedup, or retry of its own; a host that wants caching/polling
-can implement the same `QueryCoordinator` contract on top of something like
-TanStack Query instead.
+`createDirectQueryCoordinator()` does one-shot resolves with no cache, polling,
+dedup, or retry. TanStack Query hosts can install `@tanstack/query-core` and use
+the supplied connector with their existing `QueryClient`:
+
+```ts
+import { createTanStackQueryCoordinator } from '@loykin/resourcekit/connectors/tanstack-query'
+
+const coordinator = createTanStackQueryCoordinator(queryClient)
+
+<ResourceRenderer
+  resource={document}
+  registry={scope}
+  runtimeStore={runtimeStore}
+  runtimeScope="pipelines-page"
+  queryCoordinator={coordinator}
+/>
+```
+
+Use the application's existing `QueryClient`. A data source adapter's
+`queryKey` determines cache identity; `refetchData` still names document node
+IDs, and the connector maps those nodes back to their active Query observers.
+This is the integration shape used by Piper-like hosts—ResourceKit owns graph
+propagation while TanStack Query owns server-state caching and scheduling.
+
+An explicit `refetchData` submit effect forces the cached coordinator handle to
+refetch; its new snapshot is then published into the common runtime store and
+propagated through the dataflow graph.
+
+`invalidateData` only marks the graph snapshot and coordinator cache stale;
+it does not execute a request. Use `refetchData` when the mutation must wait
+for fresh server data.
 
 ## Mutations and submit
 
@@ -554,9 +644,10 @@ Page variables use `${variableName}`. Submit payload fields use an explicit
 bindings and confirmation copy both support these references; unresolved
 references fail before confirmation or mutation.
 
-The runtime checks the scoped action allowlist, resolves references, verifies
+The submit runtime checks the scoped action allowlist, resolves references, verifies
 the mutation resolver and confirmation handler, waits for confirmation,
-dispatches the mutation, and only then applies success effects. A declared
+executes the mutation, and only then applies success effects through the
+variable engine, document dataflow, and runtime store that own those values. A declared
 confirmation fails closed when the host does not provide
 `ResourceRenderer.confirmDialog`:
 
@@ -584,10 +675,10 @@ same confirmation callback through `SubmitRuntime.confirm`.
 
 `FormView` is backed by React Hook Form and can optionally connect its `draft`
 binding port to a writable dataflow `state` node. Without this binding RHF
-keeps values local to the form. With it, the form hydrates from the shared
-object, publishes edits with a short debounce, flushes pending edits before
-submit, and submits the complete draft—including fields not currently
-rendered by the form.
+keeps values local to the form. A controlled draft is an identity-bearing
+envelope. A new identity always resets the form; a same-identity refresh
+preserves dirty edits. This distinguishes record navigation from polling
+without asking the form to infer host intent.
 
 ```ts
 const document: ResourceDocument = {
@@ -596,9 +687,12 @@ const document: ResourceDocument = {
       processDraft: {
         kind: 'state',
         initialValue: {
-          id: 'process-7',
-          command: 'nginx -g daemon off;',
-          name: 'nginx',
+          identity: 'process-7',
+          value: {
+            id: 'process-7',
+            command: 'nginx -g daemon off;',
+            name: 'nginx',
+          },
         },
       },
     },
@@ -620,7 +714,6 @@ const document: ResourceDocument = {
       ],
       draftPolicy: {
         syncDelayMs: 100,
-        preserveDirty: true,
         markCleanOnSuccess: true,
       },
       submit: {
@@ -633,12 +726,12 @@ const document: ResourceDocument = {
 ```
 
 The example assumes the host registered a `process-api` mutation resolver.
-`preserveDirty` defaults to `true`, so an external refresh of the same draft
-does not overwrite active edits. `markCleanOnSuccess` adopts the submitted
-payload as the new clean baseline; it does not clear the form.
+The mutation receives only the envelope's `value`, not `identity`.
+`markCleanOnSuccess` adopts the submitted payload as the new clean baseline;
+it does not clear the form.
 
 RHF's `formState.isSubmitting` and root errors drive the form's pending/error
-UI. The resource runtime continues to own mutation dispatch and success
+UI. The resource runtime continues to own mutation orchestration and success
 effects; it does not duplicate RHF's form lifecycle in a parallel store.
 
 `ResourceForm` also uses React Hook Form: its composed Input/Textarea/
@@ -646,12 +739,12 @@ Checkbox/Select children register through an RHF `FormProvider`. The shared
 `draft` binding currently applies only to `FormView`; `ResourceForm` keeps
 its RHF values local until submit.
 
-The current vertical slice assumes one logical writer for the draft object.
-It does not yet provide a document-level rebase/reset command for switching
-from one dirty record to another, field-level conflict resolution between
-multiple form resources, or an external submit-status Kind. Hosts should
-remount the form for a new record, or opt into `preserveDirty: false` when
-external values are authoritative.
+Use a new envelope identity for an explicit reset or record switch. Same-key
+multi-writer conflict policy belongs to the host or adapter that chooses to
+subscribe to that key; `RuntimeStore` deliberately does not assign ownership.
+An `undefined` or `null` controlled value is treated as hydration readiness.
+A non-null malformed envelope is reported inside that `FormView` and draft
+synchronization remains disabled; it does not fail the surrounding document.
 
 ### Grid row actions
 

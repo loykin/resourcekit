@@ -51,10 +51,15 @@
       "types": "./dist/connectors/tanstack-query.d.ts",
       "import": "./dist/connectors/tanstack-query.js",
       "require": "./dist/connectors/tanstack-query.cjs"
-    }
+    },
+    "./adapters/styles": "./styles/adapters/index.css",
+    "./adapters/designkit/styles": "./styles/adapters/designkit.css",
+    "./adapters/gridkit/styles": "./styles/adapters/gridkit.css",
+    "./adapters/basekit/styles": "./styles/adapters/basekit.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "styles"
   ],
   "scripts": {
     "build": "pnpm type-check && pnpm lint && tsup",

@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from '@testing-library/react'
+import { QueryClient } from '@tanstack/query-core'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createTanStackQueryCoordinator } from '../connectors/tanstack-query'
 import type { ResourceDocument } from '../runtime/dataflow'
+import { createDirectQueryCoordinator } from '../runtime/queryCoordinator'
+import type { QueryCoordinator } from '../runtime/queryCoordinator'
 import { createRegistry } from '../core/registry'
 import type { Resource } from '../core/types'
 import { ResourceRenderer } from './ResourceRenderer'
@@ -101,9 +105,10 @@ describe('ResourceRenderer node-level re-render scoping', () => {
     expect(renderCounts.probeA).toBe(countsAfterFirstA)
   })
 
-  it('still re-renders every resource on a variable change (unchanged, global)', async () => {
+  it('does not re-render resources that do not subscribe to a changed variable', async () => {
     const { registry, document, renderCounts, contexts } = setup()
     render(createElement(ResourceRenderer, { resource: document, registry }))
+    await act(async () => {})
 
     const [countsBeforeA, countsBeforeB] = [renderCounts.probeA, renderCounts.probeB]
 
@@ -111,8 +116,32 @@ describe('ResourceRenderer node-level re-render scoping', () => {
       contexts.probeA.events.emit('touch', { value: 'v2' })
     })
 
-    expect(renderCounts.probeA).toBeGreaterThan(countsBeforeA)
-    expect(renderCounts.probeB).toBeGreaterThan(countsBeforeB)
+    expect(renderCounts.probeA).toBe(countsBeforeA)
+    expect(renderCounts.probeB).toBe(countsBeforeB)
+  })
+
+  it('does not recreate document state when the host replaces its action callback', async () => {
+    const { registry, document, contexts } = setup()
+    const first = vi.fn()
+    const view = render(createElement(ResourceRenderer, {
+      resource: document,
+      registry,
+      onAction: first,
+    }))
+    await act(async () => {})
+    await act(async () => {
+      await contexts.probeA.data.set('a', 2)
+    })
+
+    const second = vi.fn()
+    view.rerender(createElement(ResourceRenderer, {
+      resource: document,
+      registry,
+      onAction: second,
+    }))
+    await act(async () => {})
+
+    expect(await contexts.probeA.data.read({ $data: 'a' })).toBe(2)
   })
 })
 
@@ -162,9 +191,22 @@ describe('RecordScopeNode refetches on a pure $data dependency change', () => {
 })
 
 describe('ResourceRenderer mutation-to-dataflow integration', () => {
-  it('runs submit effects through the renderer and exposes the updated graph state', async () => {
+  it.each([
+    ['direct', () => createDirectQueryCoordinator()],
+    [
+      'TanStack Query',
+      () => createTanStackQueryCoordinator(new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })),
+    ],
+  ] satisfies Array<[string, () => QueryCoordinator]>)(
+    'routes refetchData through the %s coordinator and exposes the fresh graph state',
+    async (_name, createCoordinator) => {
     let context: RenderContext | undefined
-    const query = vi.fn(async () => [{ id: 'row' }])
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 'before' }])
+      .mockResolvedValueOnce([{ id: 'after' }])
     const registry = createRegistry<KindRenderFn>()
     registry.use({
       name: 'e2e',
@@ -192,7 +234,13 @@ describe('ResourceRenderer mutation-to-dataflow integration', () => {
       resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} },
     }
 
-    render(createElement(ResourceRenderer, { resource: document, registry }))
+    const coordinator = createCoordinator()
+    const invalidate = vi.spyOn(coordinator, 'invalidate')
+    render(createElement(ResourceRenderer, {
+      resource: document,
+      registry,
+      queryCoordinator: coordinator,
+    }))
     await act(async () => {})
     expect(query).toHaveBeenCalledTimes(1)
 
@@ -211,8 +259,11 @@ describe('ResourceRenderer mutation-to-dataflow integration', () => {
     })
 
     expect(await context?.data.read({ $data: 'selected' })).toBe('saved')
+    expect(invalidate).toHaveBeenCalledWith(['rows'])
     expect(query).toHaveBeenCalledTimes(2)
-  })
+    expect(await context?.data.read({ $data: 'rows' })).toEqual([{ id: 'after' }])
+    },
+  )
 })
 
 describe('ResourceRenderer visibility', () => {

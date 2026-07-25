@@ -1,12 +1,14 @@
 import { getValueAtPath, setValueAtPath } from '../core/path'
-import type { DataBinding, DataRef, QueryScopePolicy, Resource } from '../core/types'
+import type { DataBinding, DataRef, QueryScopePolicy, Resource, VariableValue } from '../core/types'
+import { createMemoryRuntimeStore, runtimeKeys } from './store'
+import type { FetchStatus, RuntimeSnapshot, RuntimeStore } from './store'
+import { interpolate, scanVariableRefs } from './variables'
 
 export type { DataRef } from '../core/types'
 
 export interface StateDataNode {
   kind: 'state'
   initialValue?: unknown
-  lifecycle?: 'ephemeral' | 'page' | 'session' | 'persistent'
 }
 
 /**
@@ -67,33 +69,6 @@ export interface ResourceDocument {
   resource: Resource
 }
 
-export type DataStatus = 'idle' | 'pending' | 'ready' | 'error'
-
-/** Network activity, independent of `status` (data availability) — see docs/dataflow-and-server-state-direction.md "Snapshot 확장". */
-export type FetchStatus = 'idle' | 'fetching' | 'paused'
-
-export interface DataSnapshot<T = unknown> {
-  status: DataStatus
-  value?: T
-  error?: unknown
-  version: number
-  updatedAt?: number
-  epoch: number
-  /** Set by a `QueryCoordinator` via `publish()`; internal resolver-driven writes leave this unset. */
-  fetchStatus?: FetchStatus
-  /** True when `value`/`error` are from a previous, superseded fetch — a `retainPreviousData` policy keeps showing them while newer data loads or a refresh fails. */
-  isStale?: boolean
-}
-
-type MaybePromise<T> = T | Promise<T>
-
-export interface DataStore {
-  read(id: string): MaybePromise<DataSnapshot | undefined>
-  write(id: string, snapshot: DataSnapshot): MaybePromise<void>
-  remove(id: string): MaybePromise<void>
-  subscribe(id: string, listener: () => void): () => void
-}
-
 export interface DataGraphIssue {
   code: 'invalid-node' | 'invalid-ref' | 'missing-ref' | 'cycle'
   path: string
@@ -109,12 +84,17 @@ export interface DataNodeResolveContext {
   signal: AbortSignal
   nodeId: string
   epoch: number
+  reason: 'initial' | 'dependency' | 'refetch'
 }
 
 export interface CreateDataflowRuntimeOptions {
   graph: DataGraphSpec
-  store?: DataStore
+  store?: RuntimeStore
+  scope?: string
+  variables?: () => Record<string, VariableValue>
   resolve(binding: DataBinding, context: DataNodeResolveContext): Promise<unknown>
+  /** Receives failures from store-triggered reconciliation tasks that have no awaiting caller. */
+  onError?: (error: unknown, nodeId: string) => void
 }
 
 /**
@@ -136,7 +116,7 @@ export interface StatePatch {
 
 export interface DataflowRuntime {
   start(): Promise<void>
-  read(id: string): Promise<DataSnapshot | undefined>
+  read(id: string): Promise<RuntimeSnapshot | undefined>
   resolve(id: string): Promise<unknown>
   setState(id: string, value: unknown): Promise<void>
   setStates(values: Record<string, unknown>): Promise<void>
@@ -171,11 +151,9 @@ export interface DataflowRuntime {
    * This is a graph-level primitive, independent of whether a
    * `QueryCoordinator` is wired in: it operates only on this runtime's own
    * snapshots, never on a coordinator's cache. When a coordinator *is*
-   * wired (P1 item 1, not yet implemented), the coordinator-aware path is
-   * `options.resolve` itself calling into the coordinator — not this method
-   * reaching into `QueryCoordinator`. That keeps `DataflowRuntime` ignorant
-   * of `QueryCoordinator` by construction (see queryCoordinator.ts's own
-   * top-of-file note) rather than needing a special case here.
+   * wired, `options.resolve` receives `reason: 'refetch'`; the coordinator
+   * bridge uses that refetch intent to force its cached handle to refetch.
+   * Dataflow remains independent of any coordinator implementation.
    */
   invalidate(ids: string[]): Promise<void>
   /**
@@ -188,7 +166,6 @@ export interface DataflowRuntime {
    * note on why this stays graph-level rather than becoming coordinator-aware.
    */
   refetch(ids: string[]): Promise<void>
-  subscribe(listener: (id: string, snapshot: DataSnapshot) => void): () => void
   dispose(): void
 }
 
@@ -229,7 +206,7 @@ export function scanDataRefs(value: unknown): DataRef[] {
   return refs
 }
 
-export function resolveDataRefs(value: unknown, snapshots: ReadonlyMap<string, DataSnapshot>): unknown {
+export function resolveDataRefs(value: unknown, snapshots: ReadonlyMap<string, RuntimeSnapshot>): unknown {
   if (isDataRef(value)) {
     const snapshot = snapshots.get(value.$data)
     if (!snapshot || snapshot.status !== 'ready') {
@@ -295,60 +272,43 @@ export function validateDataGraph(graph: DataGraphSpec): DataGraphValidationResu
   return { valid: issues.length === 0, issues }
 }
 
-export function createMemoryDataStore(): DataStore {
-  const snapshots = new Map<string, DataSnapshot>()
-  const listeners = new Map<string, Set<() => void>>()
-
-  const notify = (id: string) => {
-    for (const listener of listeners.get(id) ?? []) listener()
-  }
-
-  return {
-    read: (id) => snapshots.get(id),
-    write(id, snapshot) {
-      snapshots.set(id, snapshot)
-      notify(id)
-    },
-    remove(id) {
-      snapshots.delete(id)
-      notify(id)
-    },
-    subscribe(id, listener) {
-      const nodeListeners = listeners.get(id) ?? new Set<() => void>()
-      nodeListeners.add(listener)
-      listeners.set(id, nodeListeners)
-      return () => {
-        nodeListeners.delete(listener)
-        if (nodeListeners.size === 0) listeners.delete(id)
-      }
-    },
-  }
-}
-
 class ObsoleteExecutionError extends Error {}
 
 export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): DataflowRuntime {
   const validation = validateDataGraph(options.graph)
   if (!validation.valid) throw new DataGraphValidationError(validation.issues)
 
-  const store = options.store ?? createMemoryDataStore()
+  const store = options.store ?? createMemoryRuntimeStore()
+  const scope = options.scope ?? 'document'
+  const storeOrigin = Symbol(`dataflow:${scope}`)
   const dependencies = new Map<string, Set<string>>()
   const dependents = new Map<string, Set<string>>()
+  const variableDependents = new Map<string, Set<string>>()
   const generations = new Map<string, number>()
   const controllers = new Map<string, AbortController>()
-  const listeners = new Set<(id: string, snapshot: DataSnapshot) => void>()
   let epoch = 0
-  let version = 0
   let initialized: Promise<void> | undefined
   let started: Promise<void> | undefined
   let disposed = false
+  let subscriptionsStarted = false
+  let unsubscribeVariables = () => {}
+  let unsubscribeData = () => {}
   // One ordered queue for both whole-value sets and path patches, so their
   // relative call order within a tick is preserved — see ensureScheduledWrite.
   const pendingOps: Array<{ kind: 'set'; id: string; value: unknown } | { kind: 'patch'; id: string; path: string; value: unknown }> = []
   let scheduledWrite: Promise<void> | undefined
 
+  const reportError = (error: unknown, nodeId: string) => {
+    try {
+      options.onError?.(error, nodeId)
+    } catch {
+      // An observer failure must not create a second unhandled rejection.
+    }
+  }
+
   for (const [id, node] of Object.entries(options.graph.nodes)) {
     const refs = node.kind === 'resolve' ? scanDataRefs(node.binding) : []
+    const variableRefs = node.kind === 'resolve' ? scanVariableRefs(node.binding) : new Set<string>()
     const nodeDependencies = new Set(refs.map((ref) => ref.$data))
     dependencies.set(id, nodeDependencies)
     generations.set(id, 0)
@@ -357,30 +317,43 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
       downstream.add(id)
       dependents.set(dependency, downstream)
     }
+    for (const variable of variableRefs) {
+      const downstream = variableDependents.get(variable) ?? new Set<string>()
+      downstream.add(id)
+      variableDependents.set(variable, downstream)
+    }
   }
 
-  const writeSnapshot = async (id: string, snapshot: Omit<DataSnapshot, 'version' | 'updatedAt'>) => {
-    version++
-    const next = { ...snapshot, version, updatedAt: Date.now() }
-    await store.write(id, next)
-    for (const listener of listeners) listener(id, next)
+  const writeSnapshot = async (id: string, snapshot: Omit<RuntimeSnapshot, 'revision' | 'updatedAt'>) => {
+    store.publish(runtimeKeys.data(id, scope), snapshot, { origin: storeOrigin })
   }
 
-  const waitForSettled = (id: string): Promise<DataSnapshot> => {
+  const waitForSettled = (id: string): Promise<RuntimeSnapshot> => {
     // Subscribe *before* checking the current snapshot — reading first and
     // subscribing second leaves a window where a node can settle between the
     // read and the subscribe call, so the notification that would have
     // resolved this promise fires into nothing and it hangs forever.
-    return new Promise((resolve) => {
-      const settleIfReady = (snapshot: DataSnapshot | undefined, unsubscribe: () => void) => {
-        if (!snapshot || snapshot.status === 'pending' || snapshot.status === 'idle') return
+    return new Promise((resolve, reject) => {
+      const settleIfReady = (
+        snapshot: RuntimeSnapshot | undefined,
+        unsubscribe: () => void,
+        missingIsTerminal: boolean,
+      ) => {
+        if (!snapshot) {
+          if (!missingIsTerminal) return
+          unsubscribe()
+          reject(new Error(`Data node ${id} is not available`))
+          return
+        }
+        if (snapshot.status === 'pending' || snapshot.status === 'idle') return
         unsubscribe()
         resolve(snapshot)
       }
-      const unsubscribe = store.subscribe(id, () => {
-        void Promise.resolve(store.read(id)).then((snapshot) => settleIfReady(snapshot, unsubscribe))
+      const key = runtimeKeys.data(id, scope)
+      const unsubscribe = store.subscribe({ kind: 'key', key }, () => {
+        settleIfReady(store.read(key), unsubscribe, true)
       })
-      void Promise.resolve(store.read(id)).then((snapshot) => settleIfReady(snapshot, unsubscribe))
+      settleIfReady(store.read(key), unsubscribe, true)
     })
   }
 
@@ -399,17 +372,21 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     return affected
   }
 
-  const evaluateAffected = async (affected: Set<string>, batchEpoch: number) => {
-    const memo = new Map<string, Promise<DataSnapshot>>()
+  const evaluateAffected = async (
+    affected: Set<string>,
+    batchEpoch: number,
+    reason: DataNodeResolveContext['reason'],
+  ) => {
+    const memo = new Map<string, Promise<RuntimeSnapshot>>()
 
-    const evaluate = (id: string): Promise<DataSnapshot> => {
+    const evaluate = (id: string): Promise<RuntimeSnapshot> => {
       const existing = memo.get(id)
       if (existing) return existing
 
       const promise = (async () => {
         const node = options.graph.nodes[id]
         if (node.kind === 'state' || !affected.has(id)) {
-          const snapshot = await store.read(id)
+          const snapshot = store.read(runtimeKeys.data(id, scope))
           // A dependency outside this batch's affected set (e.g. a resolve
           // node `publish()` just wrote directly) can itself be in `error`
           // status — propagate its real error instead of a generic "not
@@ -424,7 +401,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
         let controller: AbortController | undefined
 
         try {
-          const upstream = new Map<string, DataSnapshot>()
+          const upstream = new Map<string, RuntimeSnapshot>()
           await Promise.all(
             [...(dependencies.get(id) ?? [])].map(async (dependency) => {
               upstream.set(dependency, await evaluate(dependency))
@@ -432,13 +409,20 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
           )
           if (generation !== generations.get(id)) return Promise.reject(new ObsoleteExecutionError())
 
-          const binding = resolveDataRefs(node.binding, upstream) as DataBinding
+          const dataResolvedBinding = resolveDataRefs(node.binding, upstream)
+          const variableResolved = options.variables
+            ? interpolate(dataResolvedBinding, options.variables())
+            : { value: dataResolvedBinding, unresolved: new Set<string>() }
+          if (variableResolved.unresolved.size > 0) {
+            throw new Error(`unresolved variables in data node ${id}: ${[...variableResolved.unresolved].join(', ')}`)
+          }
+          const binding = variableResolved.value as DataBinding
           controller = new AbortController()
           controllers.set(id, controller)
-          const value = await options.resolve(binding, { signal: controller.signal, nodeId: id, epoch: batchEpoch })
+          const value = await options.resolve(binding, { signal: controller.signal, nodeId: id, epoch: batchEpoch, reason })
           if (generation !== generations.get(id) || controller.signal.aborted) return Promise.reject(new ObsoleteExecutionError())
           await writeSnapshot(id, { status: 'ready', value, epoch: batchEpoch })
-          return (await store.read(id)) as DataSnapshot
+          return store.read(runtimeKeys.data(id, scope)) as RuntimeSnapshot
         } catch (error) {
           if (error instanceof ObsoleteExecutionError || controller?.signal.aborted || generation !== generations.get(id)) {
             throw new ObsoleteExecutionError()
@@ -479,7 +463,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
       generations.set(id, (generations.get(id) ?? 0) + 1)
       controllers.get(id)?.abort()
     }
-    await evaluateAffected(affected, batchEpoch)
+    await evaluateAffected(affected, batchEpoch, 'dependency')
   }
 
   const publishResult = async (id: string, result: PublishResult) => {
@@ -501,7 +485,23 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
       generations.set(dependent, (generations.get(dependent) ?? 0) + 1)
       controllers.get(dependent)?.abort()
     }
-    await evaluateAffected(affected, batchEpoch)
+    await evaluateAffected(affected, batchEpoch, 'dependency')
+  }
+
+  const propagateExternalChange = async (id: string) => {
+    await requireActive()
+    epoch++
+    const batchEpoch = epoch
+
+    generations.set(id, (generations.get(id) ?? 0) + 1)
+    controllers.get(id)?.abort()
+
+    const affected = affectedFrom([id])
+    for (const dependent of affected) {
+      generations.set(dependent, (generations.get(dependent) ?? 0) + 1)
+      controllers.get(dependent)?.abort()
+    }
+    await evaluateAffected(affected, batchEpoch, 'dependency')
   }
 
   const requireResolveNodes = (ids: string[]) => {
@@ -517,9 +517,9 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     requireResolveNodes(ids)
     await Promise.all(
       ids.map(async (id) => {
-        const snapshot = await store.read(id)
+        const snapshot = store.read(runtimeKeys.data(id, scope))
         if (!snapshot) return
-        const { version: _version, updatedAt: _updatedAt, ...rest } = snapshot
+        const { revision: _revision, updatedAt: _updatedAt, ...rest } = snapshot
         await writeSnapshot(id, { ...rest, isStale: true })
       }),
     )
@@ -537,7 +537,32 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
       generations.set(id, (generations.get(id) ?? 0) + 1)
       controllers.get(id)?.abort()
     }
-    await evaluateAffected(affected, batchEpoch)
+    await evaluateAffected(affected, batchEpoch, 'refetch')
+  }
+
+  const startSubscriptions = () => {
+    if (subscriptionsStarted) return
+    subscriptionsStarted = true
+    unsubscribeVariables = store.subscribe(
+      { kind: 'namespace', namespace: 'variable', scope },
+      ({ key, snapshot }) => {
+        if (snapshot && snapshot.status !== 'ready' && snapshot.status !== 'error') return
+        const nodes = [...(variableDependents.get(key.name) ?? [])]
+        if (nodes.length > 0) {
+          void refetchNodes(nodes).catch((error: unknown) => reportError(error, key.name))
+        }
+      },
+    )
+    unsubscribeData = store.subscribe(
+      { kind: 'namespace', namespace: 'data', scope },
+      ({ key, snapshot, origin }) => {
+        if (origin === storeOrigin) return
+        const node = options.graph.nodes[key.name]
+        if (!node) return
+        if (snapshot && snapshot.status !== 'ready' && snapshot.status !== 'error') return
+        void propagateExternalChange(key.name).catch((error: unknown) => reportError(error, key.name))
+      },
+    )
   }
 
   // A same tick may mix whole-value setState calls and setStatePath patches
@@ -572,7 +597,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
         const bases = new Map<string, unknown>()
         await Promise.all(
           [...idsNeedingBase].map(async (id) => {
-            const snapshot = await store.read(id)
+            const snapshot = store.read(runtimeKeys.data(id, scope))
             bases.set(id, snapshot?.status === 'ready' ? snapshot.value : undefined)
           }),
         )
@@ -619,7 +644,7 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
       const initialEpoch = epoch
       for (const [id, node] of Object.entries(options.graph.nodes)) {
         if (node.kind !== 'state') continue
-        const existing = await store.read(id)
+        const existing = store.read(runtimeKeys.data(id, scope))
         if (!existing) await writeSnapshot(id, { status: 'ready', value: node.initialValue, epoch: initialEpoch })
       }
     })()
@@ -629,6 +654,8 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
   const ensureStarted = (): Promise<void> => {
     if (started) return started
     started = (async () => {
+      if (disposed) throw new Error('Dataflow runtime is disposed')
+      startSubscriptions()
       await ensureInitialized()
       const initialEpoch = epoch
       const resolvers = new Set(
@@ -636,14 +663,14 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
           .filter(([, node]) => node.kind === 'resolve')
           .map(([id]) => id),
       )
-      await evaluateAffected(resolvers, initialEpoch)
+      await evaluateAffected(resolvers, initialEpoch, 'initial')
     })()
     return started
   }
 
   return {
     start: ensureStarted,
-    read: (id) => Promise.resolve(store.read(id)),
+    read: (id) => Promise.resolve(store.read(runtimeKeys.data(id, scope))),
     async resolve(id) {
       if (!(id in options.graph.nodes)) throw new Error(`Data node ${id} does not exist`)
       await ensureStarted()
@@ -659,15 +686,18 @@ export function createDataflowRuntime(options: CreateDataflowRuntimeOptions): Da
     publish: publishResult,
     invalidate: invalidateNodes,
     refetch: refetchNodes,
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
     dispose() {
+      if (disposed) return
       disposed = true
       for (const controller of controllers.values()) controller.abort()
       controllers.clear()
-      listeners.clear()
+      if (subscriptionsStarted) {
+        unsubscribeVariables()
+        unsubscribeData()
+        unsubscribeVariables = () => {}
+        unsubscribeData = () => {}
+        subscriptionsStarted = false
+      }
     },
   }
 }

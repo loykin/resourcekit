@@ -5,4 +5,4 @@
 
 export { ResourceRenderer } from './ResourceRenderer'
 export type { ResourceRendererProps } from './ResourceRenderer'
-export type { KindRenderFn, RenderContext, SlotAccessor } from './types'
+export type { HostActionRequest, KindRenderFn, RenderContext, SlotAccessor } from './types'

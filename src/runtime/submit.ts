@@ -1,15 +1,24 @@
 import { interpolate } from './variables'
 import { coerceVariableValue, getValueAtPath } from '../core/path'
 import type { ConfirmSpec, MutationBinding, MutationResolver, SubmitSpec, VariableValue } from '../core/types'
+import { runtimeKeys } from './store'
+import type { RuntimeStore } from './store'
 
 export const SUBMIT_CANCELLED = Symbol('resourcekit.submit.cancelled')
 export type SubmitResult = unknown | typeof SUBMIT_CANCELLED
 
 export interface SubmitRuntime {
+  scope: string
   getMutationResolver(target: string): MutationResolver | undefined
   variables: {
     snapshot(): Record<string, VariableValue>
     set(name: string, value: VariableValue): void
+  }
+  store: Pick<RuntimeStore, 'publish'>
+  data?: {
+    set(node: string, value: unknown): Promise<void>
+    invalidate(nodes: string[]): Promise<void>
+    refetch(nodes: string[]): Promise<void>
   }
   /** When provided, submits whose `action` is not listed are rejected. */
   allowedActions?: string[]
@@ -17,12 +26,6 @@ export interface SubmitRuntime {
   confirm?: (options: ConfirmSpec) => Promise<boolean>
   /** Receives `emit` effects — the host app's external hook. */
   emit?: (event: string, payload: unknown) => void
-  /** Present only when the document has a data graph — required by `setData`/`invalidateData`/`refetchData` effects. */
-  dataflow?: {
-    setState(id: string, value: unknown): Promise<void>
-    invalidate(ids: string[]): Promise<void>
-    refetch(ids: string[]): Promise<void>
-  }
 }
 
 /**
@@ -60,37 +63,52 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
     if (!(await runtime.confirm!(options))) return SUBMIT_CANCELLED
   }
 
-  const result = await resolver(binding, payload, { variables: snapshot })
-
-  for (const effect of submit.onSuccess ?? []) {
-    if (effect.kind === 'setVariable') {
-      const next =
-        effect.value !== undefined
-          ? effect.value
-          : effect.from !== undefined
-            ? coerceVariableValue(getValueAtPath(result, effect.from))
-            : undefined
-      runtime.variables.set(effect.variable, next)
-    }
-    if (effect.kind === 'emit') {
-      runtime.emit?.(effect.event, result)
-    }
-    if (effect.kind === 'setData') {
-      if (!runtime.dataflow) throw new Error(`setData effect on node ${effect.node} requires a ResourceDocument data graph`)
-      const next = effect.value !== undefined ? effect.value : effect.from !== undefined ? getValueAtPath(result, effect.from) : result
-      await runtime.dataflow.setState(effect.node, next)
-    }
-    if (effect.kind === 'invalidateData') {
-      if (!runtime.dataflow) throw new Error(`invalidateData effect requires a ResourceDocument data graph`)
-      await runtime.dataflow.invalidate(effect.nodes)
-    }
-    if (effect.kind === 'refetchData') {
-      if (!runtime.dataflow) throw new Error(`refetchData effect requires a ResourceDocument data graph`)
-      await runtime.dataflow.refetch(effect.nodes)
-    }
+  const executionKey = submit.action ? runtimeKeys.execution(submit.action, runtime.scope) : undefined
+  if (executionKey) {
+    runtime.store.publish(executionKey, { status: 'pending' })
   }
 
-  return result
+  try {
+    const result = await resolver(binding, payload, { variables: snapshot })
+
+    for (const effect of submit.onSuccess ?? []) {
+      if (effect.kind === 'setVariable') {
+        const next =
+          effect.value !== undefined
+            ? effect.value
+            : effect.from !== undefined
+              ? coerceVariableValue(getValueAtPath(result, effect.from))
+              : undefined
+        runtime.variables.set(effect.variable, next)
+      }
+      if (effect.kind === 'emit') {
+        runtime.emit?.(effect.event, result)
+      }
+      if (effect.kind === 'setData') {
+        const next = effect.value !== undefined ? effect.value : effect.from !== undefined ? getValueAtPath(result, effect.from) : result
+        if (!runtime.data) throw new Error('setData requires a ResourceDocument data graph')
+        await runtime.data.set(effect.node, next)
+      }
+      if (effect.kind === 'invalidateData') {
+        if (!runtime.data) throw new Error('invalidateData requires a ResourceDocument data graph')
+        await runtime.data.invalidate(effect.nodes)
+      }
+      if (effect.kind === 'refetchData') {
+        if (!runtime.data) throw new Error('refetchData requires a ResourceDocument data graph')
+        await runtime.data.refetch(effect.nodes)
+      }
+    }
+
+    if (executionKey) {
+      runtime.store.publish(executionKey, { status: 'ready', value: result })
+    }
+    return result
+  } catch (error) {
+    if (executionKey) {
+      runtime.store.publish(executionKey, { status: 'error', error })
+    }
+    throw error
+  }
 }
 
 const PAYLOAD_REF_RE = /\$\{payload\.([^}]+)}/g

@@ -1,4 +1,6 @@
 import type { VariableDeclaration, VariableValue } from '../core/types'
+import { runtimeKeys } from './store'
+import type { RuntimeStore } from './store'
 
 /**
  * v1 variable engine — deliberately flat.
@@ -14,8 +16,6 @@ export interface VariableEngine {
   get(name: string): VariableValue
   set(name: string, value: VariableValue): void
   snapshot(): Record<string, VariableValue>
-  /** Notifies with the set of changed variable names. */
-  subscribe(listener: (changed: Set<string>) => void): () => void
 }
 
 const VARIABLE_REF_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)}/g
@@ -55,44 +55,37 @@ function writeUrlValue(name: string, value: VariableValue): void {
   history.replaceState(history.state, '', url)
 }
 
-export function createVariableEngine(): VariableEngine {
-  const values = new Map<string, VariableValue>()
+export function createVariableEngine(store: RuntimeStore, scope = 'document'): VariableEngine {
+  const declared = new Set<string>()
   const persisted = new Set<string>()
-  const listeners = new Set<(changed: Set<string>) => void>()
-
-  const notify = (changed: Set<string>) => {
-    if (changed.size === 0) return
-    for (const listener of listeners) listener(changed)
-  }
 
   return {
     declare(declarations) {
-      const changed = new Set<string>()
       for (const declaration of declarations) {
+        declared.add(declaration.name)
         if (declaration.persist === 'url') persisted.add(declaration.name)
         const next = readUrlValue(declaration) ?? declaration.default
-        if (!values.has(declaration.name) && !sameValue(values.get(declaration.name), next)) {
-          values.set(declaration.name, next)
-          changed.add(declaration.name)
+        const key = runtimeKeys.variable(declaration.name, scope)
+        if (!store.read(key)) {
+          store.publish(key, { status: 'ready', value: next })
         }
       }
-      notify(changed)
     },
     get(name) {
-      return values.get(name)
+      return store.read(runtimeKeys.variable(name, scope))?.value as VariableValue
     },
     set(name, value) {
-      if (sameValue(values.get(name), value)) return
-      values.set(name, value)
+      const key = runtimeKeys.variable(name, scope)
+      const current = store.read(key)?.value as VariableValue
+      if (sameValue(current, value)) return
+      declared.add(name)
+      store.publish(key, { status: 'ready', value })
       if (persisted.has(name)) writeUrlValue(name, value)
-      notify(new Set([name]))
     },
     snapshot() {
-      return Object.fromEntries(values.entries())
-    },
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
+      return Object.fromEntries(
+        [...declared].map((name) => [name, store.read(runtimeKeys.variable(name, scope))?.value as VariableValue]),
+      )
     },
   }
 }
@@ -115,6 +108,7 @@ export function scanVariableRefs(value: unknown): Set<string> {
       return
     }
     if (typeof current === 'object' && current !== null) {
+      if ('$variable' in current && typeof current.$variable === 'string') refs.add(current.$variable)
       for (const item of Object.values(current)) visit(item)
     }
   }

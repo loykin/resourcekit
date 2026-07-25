@@ -2,21 +2,49 @@ import { describe, expect, it, vi } from 'vitest'
 import { runSubmit, SUBMIT_CANCELLED } from './submit'
 import type { SubmitRuntime } from './submit'
 import type { VariableValue } from '../core/types'
+import { createMemoryRuntimeStore } from './store'
 
 function makeRuntime(overrides: Partial<SubmitRuntime> = {}): SubmitRuntime & { values: Map<string, VariableValue> } {
   const values = new Map<string, VariableValue>([['customerId', '7']])
   return {
     values,
+    scope: 'test',
     getMutationResolver: () => async (_binding, payload) => ({ id: '7', echoed: payload, version: 'v2' }),
     variables: {
       snapshot: () => Object.fromEntries(values.entries()),
-      set: (name, value) => void values.set(name, value),
+      set: (name, value) => {
+        if (value === undefined) values.delete(name)
+        else values.set(name, value)
+      },
     },
+    store: createMemoryRuntimeStore(),
     ...overrides,
   }
 }
 
 describe('runSubmit', () => {
+  it('publishes named execution pending and ready snapshots through the common store', async () => {
+    const store = createMemoryRuntimeStore()
+    const publish = vi.spyOn(store, 'publish')
+    const runtime = makeRuntime({ store })
+
+    await runSubmit(runtime, { action: 'customers.update', mutation: { target: 'memory' } }, { name: 'Ada' })
+
+    expect(publish).toHaveBeenNthCalledWith(
+      1,
+      { scope: 'test', namespace: 'execution', name: 'customers.update' },
+      { status: 'pending' },
+    )
+    expect(publish).toHaveBeenNthCalledWith(
+      2,
+      { scope: 'test', namespace: 'execution', name: 'customers.update' },
+      {
+        status: 'ready',
+        value: { id: '7', echoed: { name: 'Ada' }, version: 'v2' },
+      },
+    )
+  })
+
   it('interpolates the mutation binding and dispatches to the resolver', async () => {
     const resolver = vi.fn(async () => ({ ok: true }))
     const runtime = makeRuntime({ getMutationResolver: () => resolver })
@@ -106,11 +134,13 @@ describe('runSubmit', () => {
     expect(emitted[0][0]).toBe('users.created')
   })
 
-  it('applies setData/invalidateData/refetchData effects through runtime.dataflow', async () => {
-    const setState = vi.fn(async () => undefined)
-    const invalidate = vi.fn(async () => undefined)
-    const refetch = vi.fn(async () => undefined)
-    const runtime = makeRuntime({ dataflow: { setState, invalidate, refetch } })
+  it('delegates data effects directly to the document dataflow boundary', async () => {
+    const data = {
+      set: vi.fn(async () => undefined),
+      invalidate: vi.fn(async () => undefined),
+      refetch: vi.fn(async () => undefined),
+    }
+    const runtime = makeRuntime({ data })
 
     await runSubmit(
       runtime,
@@ -125,25 +155,29 @@ describe('runSubmit', () => {
       {},
     )
 
-    expect(setState).toHaveBeenCalledWith('selectedCustomer', '7')
-    expect(invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
-    expect(refetch).toHaveBeenCalledWith(['customers'])
+    expect(data.set).toHaveBeenCalledWith('selectedCustomer', '7')
+    expect(data.invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
+    expect(data.refetch).toHaveBeenCalledWith(['customers'])
   })
 
   it('setData falls back to the whole mutation result when no from/value is given', async () => {
-    const setState = vi.fn(async () => undefined)
-    const runtime = makeRuntime({ dataflow: { setState, invalidate: vi.fn(), refetch: vi.fn() } })
+    const data = {
+      set: vi.fn(async () => undefined),
+      invalidate: vi.fn(async () => undefined),
+      refetch: vi.fn(async () => undefined),
+    }
+    const runtime = makeRuntime({ data })
 
     await runSubmit(runtime, { mutation: { target: 'memory' }, onSuccess: [{ kind: 'setData', node: 'lastResult' }] }, {})
 
-    expect(setState).toHaveBeenCalledWith('lastResult', { id: '7', echoed: {}, version: 'v2' })
+    expect(data.set).toHaveBeenCalledWith('lastResult', { id: '7', echoed: {}, version: 'v2' })
   })
 
   it('rejects data effects when the document has no data graph', async () => {
     const runtime = makeRuntime()
     await expect(
       runSubmit(runtime, { mutation: { target: 'memory' }, onSuccess: [{ kind: 'invalidateData', nodes: ['x'] }] }, {}),
-    ).rejects.toThrow(/data graph/)
+    ).rejects.toThrow(/ResourceDocument data graph/)
   })
 
   it('rejects unresolved variables in the binding', async () => {

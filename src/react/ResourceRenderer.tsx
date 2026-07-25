@@ -1,22 +1,29 @@
 import { createElement, Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { createDataflowRuntime, isDataRef, scanDataRefs } from '../runtime/dataflow'
-import type { DataflowRuntime, DataRef, DataStore, ResourceDocument } from '../runtime/dataflow'
+import type { DataflowRuntime, DataRef, ResourceDocument } from '../runtime/dataflow'
 import { createCoordinatorResolve } from '../runtime/queryCoordinator'
 import type { CoordinatorResolveBridge, QueryCoordinator } from '../runtime/queryCoordinator'
 import type { ConfirmSpec, DataBinding, EventPolicy, KindManifest, Resource, VariableDeclaration, VariableValue, VisibilityCondition } from '../core/types'
 import type { ResourceRegistry, ScopedRegistry } from '../core/registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../runtime/variables'
 import type { VariableEngine } from '../runtime/variables'
+import { createMemoryRuntimeStore, runtimeKeys } from '../runtime/store'
+import type { RuntimeStore } from '../runtime/store'
 import { coerceVariableValue, getValueAtPath } from '../core/path'
+import { canonicalStringify } from '../core/canonical'
 import { runSubmit } from '../runtime/submit'
-import type { KindRenderFn, RenderContext } from './types'
+import type { HostActionRequest, KindRenderFn, RenderContext } from './types'
 
 export interface ResourceRendererProps {
   resource: Resource | ResourceDocument
   registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>
-  /** Optional physical store for an experimental ResourceDocument data graph. */
-  dataStore?: DataStore
+  /** Common scoped/namespaced KV snapshot/watch plane for document-visible state and extensions. */
+  runtimeStore?: RuntimeStore
+  /** Required with a shared runtimeStore unless the root resource has metadata.name. */
+  runtimeScope?: string
+  /** Opaque host-owned action boundary. ResourceKit validates scope but never interprets or executes the action. */
+  onAction?: (request: HostActionRequest) => void | Promise<void>
   /** Rendered for unregistered (or not-yet-loaded) kinds. Defaults to null. */
   renderUnknownKind?: (resource: Resource) => ReactNode
   renderLoading?: () => ReactNode
@@ -36,12 +43,11 @@ export interface ResourceRendererProps {
 
 interface Runtime {
   engine: VariableEngine
-  dataCache: Map<string, Promise<Record<string, unknown>[]>>
-  bindingRefs: Map<string, Set<string>>
+  store: RuntimeStore
+  scope: string
+  dataCache: Map<string, { fingerprint: string; promise: Promise<Record<string, unknown>[]> }>
   dataflow?: DataflowRuntime
   coordinatorResolve?: CoordinatorResolveBridge
-  subscribeVersion: (listener: () => void) => () => void
-  getVersion: () => number
 }
 
 interface ResourceNodeProps extends Omit<ResourceRendererProps, 'resource'> {
@@ -119,17 +125,19 @@ function resolveThroughRuntime(
     return runtime.dataflow.resolve(binding.$data).then((value) => asRuntimeRows(binding.path ? getValueAtPath(value, binding.path) : value))
   }
   const refs = scanVariableRefs(binding)
-  const key = JSON.stringify(binding)
-  runtime.bindingRefs.set(key, refs)
+  const bindingKey = canonicalStringify(binding)
+  const fingerprint = canonicalStringify(
+    Object.fromEntries([...refs].sort().map((name) => [name, runtime.engine.get(name) ?? null])),
+  )
   const resolved = interpolate(binding, runtime.engine.snapshot())
   if (resolved.unresolved.size > 0) return emptyRows
-  const cached = runtime.dataCache.get(key)
-  if (cached) return cached
+  const cached = runtime.dataCache.get(bindingKey)
+  if (cached?.fingerprint === fingerprint) return cached.promise
   const resolvedBinding = resolved.value as DataBinding
   const resolver = registry.getDataResolver(resolvedBinding.source)
   if (!resolver) return Promise.reject(new Error(`data resolver ${resolvedBinding.source} is not registered`))
   const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() }).then((rows) => applyValuePath(rows, resolvedBinding))
-  runtime.dataCache.set(key, promise)
+  runtime.dataCache.set(bindingKey, { fingerprint, promise })
   return promise
 }
 
@@ -181,34 +189,47 @@ function scanResourceDataNodeIds(resource: Resource): Set<string> {
   return ids
 }
 
-/**
- * Re-renders this node on its own variable changes (unchanged, global —
- * variables are page-scoped and cheap) and on dataflow-node changes
- * *specific to this resource's own `$data` references* (docs/dataflow-and-
- * server-state-direction.md "React 구독 모델"). A document-wide polling
- * node updating must not re-render resources that don't consume it.
- */
+function scanResourceVariableNames(resource: Resource): Set<string> {
+  const refs = scanVariableRefs({
+    spec: resource.spec,
+    bindings: resource.bindings,
+    visible: resource.visible,
+    disabled: resource.disabled,
+  })
+  for (const slot of resource.slots ?? []) {
+    for (const child of slot.items) {
+      for (const name of scanVariableRefs(child.visible)) refs.add(name)
+    }
+  }
+  return refs
+}
+
 function useNodeVersion(runtime: Runtime, resource: Resource): number {
-  const dependsOn = useMemo(() => (runtime.dataflow ? scanResourceDataNodeIds(resource) : undefined), [runtime.dataflow, resource])
+  const dataDependencies = useMemo(() => scanResourceDataNodeIds(resource), [resource])
+  const variableDependencies = useMemo(() => scanResourceVariableNames(resource), [resource])
   const versionRef = useRef(0)
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      const unsubscribeVariables = runtime.subscribeVersion(() => {
+      const notify = () => {
         versionRef.current++
         onStoreChange()
-      })
-      const unsubscribeDataflow = runtime.dataflow?.subscribe((id, snapshot) => {
-        if (snapshot.status === 'pending' || !dependsOn?.has(id)) return
-        versionRef.current++
-        onStoreChange()
-      })
+      }
+      const unsubscribers = [
+        ...[...dataDependencies].map((id) =>
+          runtime.store.subscribe({ kind: 'key', key: runtimeKeys.data(id, runtime.scope) }, ({ snapshot }) => {
+            if (snapshot?.status !== 'pending') notify()
+          }),
+        ),
+        ...[...variableDependencies].map((name) =>
+          runtime.store.subscribe({ kind: 'key', key: runtimeKeys.variable(name, runtime.scope) }, notify),
+        ),
+      ]
       return () => {
-        unsubscribeVariables()
-        unsubscribeDataflow?.()
+        for (const unsubscribe of unsubscribers) unsubscribe()
       }
     },
-    [runtime, dependsOn],
+    [runtime.store, runtime.scope, dataDependencies, variableDependencies],
   )
   const getSnapshot = useCallback(() => versionRef.current, [])
 
@@ -316,7 +337,9 @@ function renderKindNode(
           if (!binding) return Promise.reject(new Error(`Binding ${name} is not connected`))
           if (isDataRef(binding)) {
             if (!runtime.dataflow) return missingDataflow(`Data reference ${binding.$data}`)
-            return binding.path ? runtime.dataflow.setStatePath(binding.$data, binding.path, value) : runtime.dataflow.setState(binding.$data, value)
+            return binding.path
+              ? runtime.dataflow.setStatePath(binding.$data, binding.path, value)
+              : runtime.dataflow.setState(binding.$data, value)
           }
           runtime.engine.set(binding.$variable, coerceVariableValue(value))
           return Promise.resolve()
@@ -338,6 +361,17 @@ function renderKindNode(
                 .catch((error: unknown) => props.onDataError?.(error, policy.node))
             }
           }
+          if (policy?.kind === 'action') {
+            if (allowedActions && !allowedActions.includes(policy.action)) {
+              props.onDataError?.(new Error(`action ${policy.action} is not allowed in this scope`), policy.action)
+            } else if (!props.onAction) {
+              props.onDataError?.(new Error(`action ${policy.action} has no host handler`), policy.action)
+            } else {
+              void Promise.resolve()
+                .then(() => props.onAction!({ action: policy.action, scope: runtime.scope, resource, payload }))
+                .catch((error: unknown) => props.onDataError?.(error, policy.action))
+            }
+          }
           if (policy?.kind === 'emit') {
             props.onEvent?.(policy.event, payload)
           }
@@ -353,20 +387,26 @@ function renderKindNode(
         submit: (submit, payload) =>
           runSubmit(
             {
+              scope: runtime.scope,
               getMutationResolver: (target) => registry.getMutationResolver(target),
               variables: {
                 snapshot: () => runtime.engine.snapshot(),
-                set: (name, value) => runtime.engine.set(name, value),
+                set: runtime.engine.set,
               },
+              store: runtime.store,
+              data: runtime.dataflow
+                ? {
+                    set: runtime.dataflow.setState,
+                    invalidate: async (nodes) => {
+                      await runtime.coordinatorResolve?.invalidate(nodes)
+                      await runtime.dataflow!.invalidate(nodes)
+                    },
+                    refetch: runtime.dataflow.refetch,
+                  }
+                : undefined,
               allowedActions,
               confirm: props.confirmDialog,
               emit: (event, result) => props.onEvent?.(event, result),
-              dataflow: (() => {
-                const dataflow = runtime.dataflow
-                return dataflow
-                  ? { setState: dataflow.setState, invalidate: dataflow.invalidate, refetch: dataflow.refetch }
-                  : undefined
-              })(),
             },
             submit,
             payload,
@@ -459,7 +499,7 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
 }
 
 function RootResourceNode(props: ResourceNodeProps): ReactNode {
-  useSyncExternalStore(props.runtime.subscribeVersion, props.runtime.getVersion, props.runtime.getVersion)
+  useNodeVersion(props.runtime, props.resource)
   if (!isVisible(props.resource, props.runtime)) return null
   return createElement(ResourceNode, props)
 }
@@ -473,31 +513,19 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
   const document = isResourceDocument(props.resource) ? props.resource : undefined
   const resource: Resource = document ? document.resource : props.resource as Resource
   const onDataError = props.onDataError
+  const onDataErrorRef = useRef(props.onDataError)
+  onDataErrorRef.current = props.onDataError
   const dataflowUses = useRef(new WeakMap<DataflowRuntime, { count: number }>())
   const runtime = useMemo<Runtime>(() => {
-    const engine = createVariableEngine()
+    const scope = props.runtimeScope ?? resource.metadata?.name
+    if (props.runtimeStore && !scope) {
+      throw new Error('ResourceRenderer requires runtimeScope or root metadata.name when runtimeStore is shared')
+    }
+    const runtimeScope = scope ?? 'document'
+    const store = props.runtimeStore ?? createMemoryRuntimeStore()
+    const engine = createVariableEngine(store, runtimeScope)
     engine.declare(collectVariables(resource))
-    const dataCache = new Map<string, Promise<Record<string, unknown>[]>>()
-    const bindingRefs = new Map<string, Set<string>>()
-    const listeners = new Set<() => void>()
-    let version = 0
-
-    const subscribeVersion = (listener: () => void) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    }
-
-    const notify = () => {
-      version++
-      for (const listener of listeners) listener()
-    }
-
-    engine.subscribe((changed) => {
-      for (const [key, refs] of bindingRefs.entries()) {
-        if ([...changed].some((name) => refs.has(name))) dataCache.delete(key)
-      }
-      notify()
-    })
+    const dataCache = new Map<string, { fingerprint: string; promise: Promise<Record<string, unknown>[]> }>()
 
     // `onUpdate` below references `dataflow`, defined further down — safe:
     // it's only *called* later (async, once a background update actually
@@ -518,8 +546,12 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
           // rendered document — `resolve` below only ever delivers the
           // *first* value for a given evaluation.
           onUpdate: (nodeId, snapshot) => {
-            if (snapshot.status === 'ready') void dataflow?.publish(nodeId, { status: 'ready', value: snapshot.value })
-            else if (snapshot.status === 'error') void dataflow?.publish(nodeId, { status: 'error', error: snapshot.error, value: snapshot.value })
+            const publication = snapshot.status === 'ready'
+              ? dataflow?.publish(nodeId, { status: 'ready', value: snapshot.value })
+              : snapshot.status === 'error'
+                ? dataflow?.publish(nodeId, { status: 'error', error: snapshot.error, value: snapshot.value })
+                : undefined
+            void publication?.catch((error: unknown) => onDataErrorRef.current?.(error, nodeId))
           },
         })
       : undefined
@@ -527,15 +559,23 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
     const dataflow = document?.data
       ? createDataflowRuntime({
           graph: document.data,
-          store: props.dataStore,
+          store,
+          scope: runtimeScope,
+          variables: engine.snapshot,
+          onError: (error, nodeId) => onDataErrorRef.current?.(error, nodeId),
           resolve: async (binding, context) => {
-            const resolved = interpolate(binding, engine.snapshot())
-            if (resolved.unresolved.size > 0) return []
-            const resolvedBinding = resolved.value as DataBinding
             if (coordinatorResolve) {
-              return coordinatorResolve.resolve(resolvedBinding, { variables: engine.snapshot(), signal: context.signal, nodeId: context.nodeId })
+              return coordinatorResolve.resolve(binding, {
+                variables: engine.snapshot(),
+                signal: context.signal,
+                nodeId: context.nodeId,
+                reason: context.reason,
+              })
             }
-            return applyValuePath(await callResolver(props.registry, resolvedBinding, { variables: engine.snapshot(), signal: context.signal }), resolvedBinding)
+            return applyValuePath(
+              await callResolver(props.registry, binding, { variables: engine.snapshot(), signal: context.signal }),
+              binding,
+            )
           },
         })
       : undefined
@@ -544,8 +584,8 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
     // to its own `$data` dependencies directly via useNodeVersion, so a
     // document-wide polling node updating doesn't force a full-tree re-render.
 
-    return { engine, dataCache, bindingRefs, dataflow, coordinatorResolve, subscribeVersion, getVersion: () => version }
-  }, [props.dataStore, props.registry, props.queryCoordinator, document, resource])
+    return { engine, store, scope: runtimeScope, dataCache, dataflow, coordinatorResolve }
+  }, [props.runtimeStore, props.runtimeScope, props.registry, props.queryCoordinator, document, resource])
 
   useEffect(() => {
     const dataflow = runtime.dataflow
