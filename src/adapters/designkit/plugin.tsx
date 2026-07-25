@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
+import { FormProvider, useController, useForm, useFormContext } from 'react-hook-form'
+import type { FieldErrors, UseFormReturn } from 'react-hook-form'
 import {
   Badge,
   Button,
@@ -15,7 +17,7 @@ import {
   SheetTitle,
   WorkbenchBodyTemplate,
 } from '@loykin/designkit'
-import { getValueAtPath } from '../../core/path'
+import { getValueAtPath, setValueAtPath } from '../../core/path'
 import type { ResourceKitPlugin, SubmitSpec } from '../../core/types'
 import { SUBMIT_CANCELLED } from '../../runtime/submit'
 import type { KindRenderFn, RenderContext } from '../../react'
@@ -212,6 +214,14 @@ interface FormViewSpec {
   submit: SubmitSpec
   submitLabel?: string
   successMessage?: string
+  draftPolicy?: {
+    /** Delay before publishing edits to the writable draft binding. Defaults to 100ms. */
+    syncDelayMs?: number
+    /** Ignore external draft refreshes while the user has local edits. Defaults to true. */
+    preserveDirty?: boolean
+    /** Adopt the submitted payload as the new clean baseline after success. Defaults to true. */
+    markCleanOnSuccess?: boolean
+  }
   /** Rendered as the <form> element's id, so a host can place `<button type="submit" form={id}>` elsewhere on the page. */
   id?: string
   /** Suppresses the built-in submit button, e.g. when the host renders its own via `form={id}`. */
@@ -223,6 +233,8 @@ interface SheetSpec {
   side?: 'left' | 'right' | 'top' | 'bottom'
   width?: number
 }
+
+type FormValues = Record<string, unknown>
 
 const KitBadge = Badge as ComponentType<Record<string, unknown>>
 const KitCheckbox = Checkbox as ComponentType<Record<string, unknown>>
@@ -323,45 +335,59 @@ function DataBodyFieldNode({ spec, ctx }: { spec: DataBodyFieldSpec; ctx: Render
 }
 
 function InputNode({ spec, ctx }: { spec: InputSpec; ctx: RenderContext }) {
+  const form = useFormContext<FormValues>() as UseFormReturn<FormValues> | null
   const boundValue = useBindingValue(ctx, 'value', spec.value)
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const raw = fieldValue ?? boundValue
   const value = raw == null ? undefined : String(raw)
+  const registration = form && spec.name ? form.register(spec.name, { required: spec.required }) : undefined
   return (
     <KitInput
       key={`${spec.name ?? ''}:${value ?? ''}`}
       aria-label={spec.name ?? spec.placeholder}
       className="w-full min-w-[16rem]"
       defaultValue={value}
-      name={spec.name}
+      name={registration?.name ?? spec.name}
+      ref={registration?.ref}
+      onBlur={registration?.onBlur}
       placeholder={spec.placeholder}
       required={spec.required}
       disabled={spec.disabled}
       style={{ minWidth: 256, width: '100%' }}
       type={spec.type ?? 'text'}
-      onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
+      onChange={(event: { target: { value: string }; currentTarget: { value: string } }) => {
+        void registration?.onChange(event)
+        ctx.events.emit('change', { value: event.currentTarget.value })
+      }}
     />
   )
 }
 
 function TextareaNode({ spec, ctx }: { spec: TextareaSpec; ctx: RenderContext }) {
+  const form = useFormContext<FormValues>() as UseFormReturn<FormValues> | null
   const boundValue = useBindingValue(ctx, 'value', spec.value)
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const raw = fieldValue ?? boundValue
   const value = raw == null ? undefined : String(raw)
+  const registration = form && spec.name ? form.register(spec.name, { required: spec.required }) : undefined
   return (
     <textarea
       key={`${spec.name ?? ''}:${value ?? ''}`}
       aria-label={spec.name ?? spec.placeholder}
       className="w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
       defaultValue={value}
-      name={spec.name}
+      name={registration?.name ?? spec.name}
+      ref={registration?.ref}
+      onBlur={registration?.onBlur}
       placeholder={spec.placeholder}
       required={spec.required}
       disabled={spec.disabled}
       rows={spec.rows ?? 4}
       style={{ minWidth: 256, width: '100%' }}
-      onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
+      onChange={(event) => {
+        void registration?.onChange(event)
+        ctx.events.emit('change', { value: event.currentTarget.value })
+      }}
     />
   )
 }
@@ -380,8 +406,12 @@ function checkboxChecked(spec: CheckboxSpec, fieldValue: unknown): boolean {
 }
 
 function CheckboxNode({ spec, ctx }: { spec: CheckboxSpec; ctx: RenderContext }) {
+  const form = useFormContext<FormValues>() as UseFormReturn<FormValues> | null
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const checked = checkboxChecked(spec, fieldValue)
+  if (form && spec.name) {
+    return <RegisteredCheckbox spec={spec} ctx={ctx} form={form} initialValue={fieldValue} />
+  }
   return (
     <label className="flex items-center gap-2 text-sm">
       <KitCheckbox
@@ -398,22 +428,81 @@ function CheckboxNode({ spec, ctx }: { spec: CheckboxSpec; ctx: RenderContext })
   )
 }
 
+function nextCheckboxValue(current: unknown, spec: CheckboxSpec, checked: boolean): unknown {
+  if (spec.value === undefined) return checked
+  const values = Array.isArray(current) ? current.map(String) : current == null ? [] : [String(current)]
+  const next = checked
+    ? [...new Set([...values, spec.value])]
+    : values.filter((value) => value !== spec.value)
+  if (next.length === 0) return undefined
+  return next.length === 1 ? next[0] : next
+}
+
+function initialCheckboxValue(spec: CheckboxSpec, value: unknown): unknown {
+  if (value === undefined) return spec.defaultChecked ? spec.value ?? true : undefined
+  if (Array.isArray(value) || spec.value === undefined) return value
+  return checkboxChecked(spec, value) ? spec.value : undefined
+}
+
+function RegisteredCheckbox({
+  spec,
+  ctx,
+  form,
+  initialValue,
+}: {
+  spec: CheckboxSpec
+  ctx: RenderContext
+  form: UseFormReturn<FormValues>
+  initialValue: unknown
+}) {
+  const { field } = useController({
+    name: spec.name!,
+    control: form.control,
+    defaultValue: initialCheckboxValue(spec, initialValue),
+    rules: { required: spec.required },
+  })
+  const checked = checkboxChecked(spec, field.value)
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <KitCheckbox
+        name={field.name}
+        value={spec.value}
+        checked={checked}
+        required={spec.required}
+        disabled={spec.disabled}
+        onCheckedChange={(next: boolean) => {
+          field.onChange(nextCheckboxValue(field.value, spec, next))
+          ctx.events.emit('change', { value: next })
+        }}
+      />
+      {spec.label}
+    </label>
+  )
+}
+
 function SelectNode({ spec, ctx }: { spec: SelectSpec; ctx: RenderContext }) {
+  const form = useFormContext<FormValues>() as UseFormReturn<FormValues> | null
   const boundValue = useBindingValue(ctx, 'value', spec.value)
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const raw = fieldValue ?? boundValue
   const value = raw == null ? undefined : String(raw)
+  const registration = form && spec.name ? form.register(spec.name, { required: spec.required }) : undefined
   return (
     <select
       key={`${spec.name ?? ''}:${value ?? ''}`}
       aria-label={spec.name ?? spec.placeholder}
       className="h-8 w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
       defaultValue={value ?? ''}
-      name={spec.name}
+      name={registration?.name ?? spec.name}
+      ref={registration?.ref}
+      onBlur={registration?.onBlur}
       required={spec.required}
       disabled={spec.disabled}
       style={{ minWidth: 256, width: '100%' }}
-      onChange={(event: { currentTarget: { value: string } }) => ctx.events.emit('change', { value: event.currentTarget.value })}
+      onChange={(event) => {
+        void registration?.onChange(event)
+        ctx.events.emit('change', { value: event.currentTarget.value })
+      }}
     >
       {spec.placeholder && (
         <option value="" disabled>
@@ -454,133 +543,253 @@ function SheetNode({ spec, ctx }: { spec: SheetSpec; ctx: RenderContext }) {
   )
 }
 
+function asDraft(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function draftKey(value: Record<string, unknown> | undefined): string {
+  return JSON.stringify(value ?? null)
+}
+
+function errorMessage(error: unknown, fallback = 'Submit failed'): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+function rootFormError(errors: FieldErrors<FormValues>): string | undefined {
+  const root = errors.root
+  return root && typeof root.message === 'string' ? root.message : undefined
+}
+
+function fieldFormError(errors: FieldErrors<FormValues>, name: string): string | undefined {
+  const error = getValueAtPath(errors, name)
+  return typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+    ? error.message
+    : undefined
+}
+
+function FormFooter({
+  hideSubmitButton,
+  busy,
+  submitLabel,
+  message,
+  error,
+}: {
+  hideSubmitButton?: boolean
+  busy: boolean
+  submitLabel?: string
+  message?: string
+  error?: string
+}) {
+  if (hideSubmitButton && !message && !error) return null
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      {!hideSubmitButton && (
+        <KitButton type="submit" size="sm" disabled={busy}>
+          {busy ? 'Saving…' : (submitLabel ?? 'Save')}
+        </KitButton>
+      )}
+      {(error ?? message) && (
+        <span className={error ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+          {error ?? message}
+        </span>
+      )}
+    </div>
+  )
+}
+
 /**
- * Native-form kind body: collects named inputs via FormData on submit and
- * dispatches the declarative submit through the runtime. Form state stays
- * inside the form — it never leaks into the page variable scope.
+ * Composed DesignKit form. React Hook Form owns values, validation and
+ * submission state; child input kinds register through FormProvider.
  */
 function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string }>()
+  const form = useForm<FormValues>()
+  const [message, setMessage] = useState<string>()
+  const busy = form.formState.isSubmitting
+  const error = rootFormError(form.formState.errors)
+
+  const submit = form.handleSubmit(async (values) => {
+    form.clearErrors('root')
+    setMessage(undefined)
+    try {
+      const result = await ctx.actions.submit(spec.submit, values)
+      if (result !== SUBMIT_CANCELLED) {
+        form.reset(values)
+        setMessage(spec.successMessage ?? 'Saved')
+      }
+    } catch (nextError) {
+      form.setError('root', { type: 'server', message: errorMessage(nextError) })
+    }
+  })
 
   return (
-    <form
-      id={spec.id}
-      onSubmit={(event) => {
-        event.preventDefault()
-        const payload = collectFormPayload(new FormData(event.currentTarget))
-        setBusy(true)
-        setMessage(undefined)
-        ctx.actions
-          .submit(spec.submit, payload)
-          .then((result) => {
-            if (result !== SUBMIT_CANCELLED) setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' })
-          })
-          .catch((error: unknown) =>
-            setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Submit failed' }),
-          )
-          .finally(() => setBusy(false))
-      }}
-    >
-      {ctx.slots.children()}
-      {(!spec.hideSubmitButton || message) && (
-        <div className="flex items-center gap-3 px-4 py-3">
-          {!spec.hideSubmitButton && (
-            <KitButton type="submit" size="sm" disabled={busy}>
-              {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
-            </KitButton>
-          )}
-          {message && (
-            <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
-              {message.text}
-            </span>
-          )}
-        </div>
-      )}
-    </form>
+    <FormProvider {...form}>
+      <form id={spec.id} onSubmit={submit}>
+        {ctx.slots.children()}
+        <FormFooter
+          hideSubmitButton={spec.hideSubmitButton}
+          busy={busy}
+          submitLabel={spec.submitLabel}
+          message={message}
+          error={error}
+        />
+      </form>
+    </FormProvider>
   )
+}
+
+function formViewDefaults(spec: FormViewSpec, record: Record<string, unknown> | undefined): FormValues {
+  let values: unknown = {}
+  for (const section of spec.sections) {
+    for (const field of section.fields) {
+      const recordValue = field.fieldRef === undefined ? undefined : getValueAtPath(record, field.fieldRef)
+      const initial = recordValue !== undefined
+        ? recordValue
+        : field.type === 'checkbox'
+          ? undefined
+          : field.defaultValue
+      if (initial !== undefined) values = setValueAtPath(values, field.name, initial)
+    }
+  }
+  return values as FormValues
 }
 
 /**
  * Flattened form kind: sections of named fields declared directly in `spec`,
- * with no nested DataBodySection/DataBodyRow/InputControl tree required.
- * Submits the same way as ResourceForm.
+ * backed by React Hook Form and optionally synchronized to a writable draft.
  */
 function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string }>()
+  const hasDraft = ctx.bindings.has('draft')
+  const boundDraft = useBindingValue(ctx, 'draft')
+  const boundDraftRecord = asDraft(boundDraft)
+  const fallbackDefaults = formViewDefaults(spec, ctx.record)
+  const sourceDefaults = hasDraft ? boundDraftRecord : fallbackDefaults
+  const sourceKey = draftKey(sourceDefaults)
+  const form = useForm<FormValues>({ defaultValues: structuredClone(sourceDefaults ?? fallbackDefaults) })
+  const [message, setMessage] = useState<string>()
+  const acceptedDraftKeyRef = useRef<string | undefined>(undefined)
+  const lastPublishedKeyRef = useRef<string | undefined>(undefined)
+  const pendingDraftRef = useRef<Record<string, unknown> | undefined>(undefined)
+  const publishTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const writeDraftRef = useRef<((value: Record<string, unknown>) => Promise<void>) | undefined>(undefined)
+
+  writeDraftRef.current = (value) => ctx.bindings.write('draft', value)
+
+  const publishPendingDraft = async () => {
+    if (publishTimerRef.current) clearTimeout(publishTimerRef.current)
+    publishTimerRef.current = undefined
+    const next = pendingDraftRef.current
+    pendingDraftRef.current = undefined
+    if (!next || !hasDraft) return
+    lastPublishedKeyRef.current = draftKey(next)
+    await writeDraftRef.current?.(next)
+  }
+
+  const scheduleDraftPublish = (next: Record<string, unknown>) => {
+    pendingDraftRef.current = next
+    if (publishTimerRef.current) clearTimeout(publishTimerRef.current)
+    publishTimerRef.current = setTimeout(() => {
+      void publishPendingDraft().catch((error: unknown) => {
+        form.setError('root', { type: 'draft', message: errorMessage(error, 'Draft sync failed') })
+      })
+    }, spec.draftPolicy?.syncDelayMs ?? 100)
+  }
+
+  useEffect(() => {
+    if (hasDraft && !boundDraftRecord) return
+    if (sourceKey === lastPublishedKeyRef.current) {
+      lastPublishedKeyRef.current = undefined
+      return
+    }
+    if (sourceKey === acceptedDraftKeyRef.current) return
+    if (form.formState.isDirty && spec.draftPolicy?.preserveDirty !== false) return
+
+    form.reset(structuredClone(sourceDefaults ?? {}))
+    acceptedDraftKeyRef.current = sourceKey
+  }, [form, hasDraft, sourceDefaults, sourceKey, spec.draftPolicy?.preserveDirty, boundDraftRecord])
+
+  useEffect(() => {
+    if (!hasDraft) return
+    const subscription = form.watch((values, info) => {
+      if (!info.name) return
+      scheduleDraftPublish(structuredClone(values as FormValues))
+    })
+    return () => subscription.unsubscribe()
+  }, [form, hasDraft, spec.draftPolicy?.syncDelayMs]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(
+    () => () => {
+      if (publishTimerRef.current) clearTimeout(publishTimerRef.current)
+      pendingDraftRef.current = undefined
+    },
+    [],
+  )
+
+  const busy = form.formState.isSubmitting
+  const error = rootFormError(form.formState.errors)
+  const submit = form.handleSubmit(async (values) => {
+    form.clearErrors('root')
+    setMessage(undefined)
+    try {
+      if (hasDraft) {
+        pendingDraftRef.current = structuredClone(values)
+        await publishPendingDraft()
+      }
+      const result = await ctx.actions.submit(spec.submit, values)
+      if (result === SUBMIT_CANCELLED) return
+      if (spec.draftPolicy?.markCleanOnSuccess !== false) {
+        form.reset(values)
+        acceptedDraftKeyRef.current = draftKey(values)
+      }
+      setMessage(spec.successMessage ?? 'Saved')
+    } catch (nextError) {
+      form.setError('root', { type: 'server', message: errorMessage(nextError) })
+    }
+  })
 
   return (
-    <form
-      id={spec.id}
-      onSubmit={(event) => {
-        event.preventDefault()
-        const payload = collectFormPayload(new FormData(event.currentTarget))
-        setBusy(true)
-        setMessage(undefined)
-        ctx.actions
-          .submit(spec.submit, payload)
-          .then((result) => {
-            if (result !== SUBMIT_CANCELLED) setMessage({ tone: 'ok', text: spec.successMessage ?? 'Saved' })
-          })
-          .catch((error: unknown) =>
-            setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Submit failed' }),
-          )
-          .finally(() => setBusy(false))
-      }}
-    >
-      {spec.sections.map((section) => (
-        <div key={section.id} className="border-b border-border px-4 py-4 last:border-b-0">
-          {section.label && <h3 className="mb-1 text-sm font-medium">{section.label}</h3>}
-          {section.description && <p className="mb-3 text-xs text-muted-foreground">{section.description}</p>}
-          <div className="grid gap-3">
-            {section.fields.map((field, fieldIndex) => {
-              const fieldValue = field.fieldRef !== undefined ? getValueAtPath(ctx.record, field.fieldRef) : undefined
-              const defaultValue = fieldValue == null ? field.defaultValue : String(fieldValue)
-              return (
-                // Repeated `name` is a deliberately supported pattern now (a
-                // checkbox group posting multiple values under one field
-                // name) — `field.name` alone is no longer a safe React key.
-                <label key={`${field.name}-${fieldIndex}`} className="grid gap-1 text-sm">
-                  {field.label && <span className="text-muted-foreground">{field.label}</span>}
-                  <KitInput
-                    name={field.name}
-                    type={field.type ?? 'text'}
-                    required={field.required}
-                    placeholder={field.placeholder}
-                    defaultValue={defaultValue}
-                  />
-                </label>
-              )
-            })}
+    <FormProvider {...form}>
+      <form id={spec.id} onSubmit={submit}>
+        {spec.sections.map((section) => (
+          <div key={section.id} className="border-b border-border px-4 py-4 last:border-b-0">
+            {section.label && <h3 className="mb-1 text-sm font-medium">{section.label}</h3>}
+            {section.description && <p className="mb-3 text-xs text-muted-foreground">{section.description}</p>}
+            <div className="grid gap-3">
+              {section.fields.map((field, fieldIndex) => {
+                const registration = form.register(field.name, {
+                  required: field.required ? `${field.label ?? field.name} is required` : false,
+                  valueAsNumber: field.type === 'number',
+                })
+                const fieldError = fieldFormError(form.formState.errors, field.name)
+                return (
+                  <label key={`${field.name}-${fieldIndex}`} className="grid gap-1 text-sm">
+                    {field.label && <span className="text-muted-foreground">{field.label}</span>}
+                    <KitInput
+                      {...registration}
+                      type={field.type ?? 'text'}
+                      required={field.required}
+                      placeholder={field.placeholder}
+                      value={field.type === 'checkbox' ? field.defaultValue ?? 'on' : undefined}
+                      aria-invalid={fieldError ? true : undefined}
+                    />
+                    {fieldError && <span className="text-xs text-destructive">{fieldError}</span>}
+                  </label>
+                )
+              })}
+            </div>
           </div>
-        </div>
-      ))}
-      {(!spec.hideSubmitButton || message) && (
-        <div className="flex items-center gap-3 px-4 py-3">
-          {!spec.hideSubmitButton && (
-            <KitButton type="submit" size="sm" disabled={busy}>
-              {busy ? 'Saving…' : (spec.submitLabel ?? 'Save')}
-            </KitButton>
-          )}
-          {message && (
-            <span className={message.tone === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
-              {message.text}
-            </span>
-          )}
-        </div>
-      )}
-    </form>
+        ))}
+        <FormFooter
+          hideSubmitButton={spec.hideSubmitButton}
+          busy={busy}
+          submitLabel={spec.submitLabel}
+          message={message}
+          error={error}
+        />
+      </form>
+    </FormProvider>
   )
-}
-
-function collectFormPayload(formData: FormData): Record<string, FormDataEntryValue | FormDataEntryValue[]> {
-  const payload: Record<string, FormDataEntryValue | FormDataEntryValue[]> = {}
-  for (const key of new Set(formData.keys())) {
-    const values = formData.getAll(key)
-    payload[key] = values.length === 1 ? values[0] : values
-  }
-  return payload
 }
 
 const formViewFieldSchema = {
@@ -1449,7 +1658,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitForm',
         level: ['organism'],
         description:
-          "A native form: collects its input controls' values on submit and dispatches them through the declarative `submit` mutation. Form state stays local until submit. Use when inputs should be submitted together as one action, unlike an individual InputControl connected through bindings.value.",
+          "A React Hook Form-backed composed form: child input kinds register with one form state and submit through the declarative `submit` mutation. Form state stays local until submit. Use when inputs should be submitted together as one action, unlike an individual InputControl connected through bindings.value.",
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -1476,7 +1685,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitFormView',
         level: ['organism', 'template'],
         description:
-          'A flattened form: sections of named input fields plus a submit binding, declared directly in `spec` with no nested DataBodySection/DataBodyRow/InputControl tree. Use for simple settings/edit forms — for per-field composition (badges, custom controls), use ResourceForm instead.',
+          'A React Hook Form-backed flattened form: sections of named input fields plus a submit binding, declared directly in `spec` with no nested DataBodySection/DataBodyRow/InputControl tree. Use for simple settings/edit forms — for per-field composition (badges, custom controls), use ResourceForm instead.',
         specSchema: {
           type: 'object',
           additionalProperties: false,
@@ -1486,8 +1695,28 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             submit: submitSpecSchema,
             submitLabel: { type: 'string' },
             successMessage: { type: 'string' },
+            draftPolicy: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                syncDelayMs: { type: 'integer', minimum: 0, maximum: 2000 },
+                preserveDirty: { type: 'boolean' },
+                markCleanOnSuccess: { type: 'boolean' },
+              },
+            },
             id: { type: 'string', description: 'Rendered as the <form> id, so a host can place a submit button elsewhere via `form={id}`.' },
             hideSubmitButton: { type: 'boolean', description: 'Suppress the built-in submit button.' },
+          },
+        },
+        behaviorPolicy: { state: 'controlled' },
+        bindingPolicy: {
+          inputs: {
+            draft: {
+              description:
+                'Optional writable object containing the shared form draft. The form hydrates from it, publishes edits with a short debounce, and preserves dirty local edits from unrelated external refreshes.',
+              schema: { type: 'object' },
+              writable: true,
+            },
           },
         },
         render: (resource, ctx) => <FormView spec={resource.spec as FormViewSpec} ctx={ctx} />,

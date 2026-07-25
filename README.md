@@ -24,7 +24,7 @@ For React rendering, also install React and the kit adapters your application
 uses. For example, a designkit-only application needs:
 
 ```bash
-pnpm add react react-dom @loykin/designkit
+pnpm add react react-dom react-hook-form @loykin/designkit
 ```
 
 The kit and React packages are optional peer dependencies: headless consumers
@@ -34,7 +34,7 @@ do not need them, and applications can install only the adapters they use.
 | --- | --- |
 | `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, document dataflow, resolvers, connections, and submit runtime |
 | `@loykin/resourcekit/react` | `ResourceRenderer` and React render contracts |
-| `@loykin/resourcekit/adapters/designkit` | designkit kinds |
+| `@loykin/resourcekit/adapters/designkit` | designkit kinds; form kinds use React Hook Form |
 | `@loykin/resourcekit/adapters/gridkit` | gridkit kinds |
 | `@loykin/resourcekit/adapters/chartkit` | chartkit kinds |
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
@@ -579,6 +579,79 @@ same confirmation callback through `SubmitRuntime.confirm`.
 `setData`, `invalidateData`, and `refetchData` effects require a
 `ResourceDocument` data graph. `setVariable` and `emit` also work for a bare
 `Resource`.
+
+### Controlled FormView drafts
+
+`FormView` is backed by React Hook Form and can optionally connect its `draft`
+binding port to a writable dataflow `state` node. Without this binding RHF
+keeps values local to the form. With it, the form hydrates from the shared
+object, publishes edits with a short debounce, flushes pending edits before
+submit, and submits the complete draft—including fields not currently
+rendered by the form.
+
+```ts
+const document: ResourceDocument = {
+  data: {
+    nodes: {
+      processDraft: {
+        kind: 'state',
+        initialValue: {
+          id: 'process-7',
+          command: 'nginx -g daemon off;',
+          name: 'nginx',
+        },
+      },
+    },
+  },
+  resource: {
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'FormView',
+    bindings: {
+      draft: { $data: 'processDraft' },
+    },
+    spec: {
+      sections: [
+        {
+          id: 'main',
+          fields: [
+            { name: 'command', label: 'Command', required: true },
+          ],
+        },
+      ],
+      draftPolicy: {
+        syncDelayMs: 100,
+        preserveDirty: true,
+        markCleanOnSuccess: true,
+      },
+      submit: {
+        action: 'process.update',
+        mutation: { target: 'process-api' },
+      },
+    },
+  },
+}
+```
+
+The example assumes the host registered a `process-api` mutation resolver.
+`preserveDirty` defaults to `true`, so an external refresh of the same draft
+does not overwrite active edits. `markCleanOnSuccess` adopts the submitted
+payload as the new clean baseline; it does not clear the form.
+
+RHF's `formState.isSubmitting` and root errors drive the form's pending/error
+UI. The resource runtime continues to own mutation dispatch and success
+effects; it does not duplicate RHF's form lifecycle in a parallel store.
+
+`ResourceForm` also uses React Hook Form: its composed Input/Textarea/
+Checkbox/Select children register through an RHF `FormProvider`. The shared
+`draft` binding currently applies only to `FormView`; `ResourceForm` keeps
+its RHF values local until submit.
+
+The current vertical slice assumes one logical writer for the draft object.
+It does not yet provide a document-level rebase/reset command for switching
+from one dirty record to another, field-level conflict resolution between
+multiple form resources, or an external submit-status Kind. Hosts should
+remount the form for a new record, or opt into `preserveDirty: false` when
+external values are authoritative.
 
 ### Grid row actions
 

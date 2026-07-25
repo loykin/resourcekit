@@ -6,21 +6,21 @@ import { createRegistry } from '../../core/registry'
 import { ResourceRenderer } from '../../react'
 import type { KindRenderFn } from '../../react'
 import { staticResolver } from '../../connection/resolvers'
+import { createMemoryDataStore } from '../../runtime/dataflow'
+import type { ResourceDocument } from '../../runtime/dataflow'
 import { createDesignKitPlugin } from './plugin'
 
 afterEach(cleanup)
 
 describe('DesignKit forms', () => {
-  it('preserves repeated FormData names as an array', async () => {
+  it('submits repeated RHF checkbox names as an array', async () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
 
-    // Two fields sharing `name: 'roles'` used to also share the same React
-    // key (`key={field.name}`), which React flags as a duplicate-key error
-    // during reconciliation — assert it doesn't fire alongside the FormData
-    // behavior below.
+    // Two fields sharing `name: 'roles'` must still have distinct React keys
+    // while React Hook Form groups their checked values under one field.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     render(
@@ -53,6 +53,146 @@ describe('DesignKit forms', () => {
     expect(mutation.mock.calls[0][1]).toEqual({ roles: ['admin', 'editor'] })
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining('two children with the same key'), expect.anything())
     consoleError.mockRestore()
+  })
+
+  it('uses RHF validation and does not dispatch an invalid required FormView', async () => {
+    const mutation = vi.fn(async (_binding, payload) => payload)
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+
+    const { container } = render(
+      createElement(ResourceRenderer, {
+        registry,
+        resource: {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'FormView',
+          spec: {
+            sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command', required: true }] }],
+            submit: { mutation: { target: 'memory' } },
+          },
+        },
+      }),
+    )
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() => expect(screen.getByText('Command is required')).toBeTruthy())
+    expect(mutation).not.toHaveBeenCalled()
+  })
+
+  it('hydrates FormView from a writable draft binding, publishes edits, and submits the complete draft', async () => {
+    const mutation = vi.fn(async (_binding, payload) => payload)
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+    const dataStore = createMemoryDataStore()
+    const document: ResourceDocument = {
+      data: {
+        nodes: {
+          processDraft: {
+            kind: 'state',
+            initialValue: { command: 'nginx -g daemon off;', name: 'nginx' },
+          },
+        },
+      },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'FormView',
+        bindings: { draft: { $data: 'processDraft' } },
+        spec: {
+          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+          draftPolicy: { syncDelayMs: 0 },
+          submit: { action: 'process.update', mutation: { target: 'memory' } },
+        },
+      },
+    }
+
+    render(createElement(ResourceRenderer, { registry, resource: document, dataStore }))
+
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('nginx -g daemon off;'),
+    )
+    const input = screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'nginx -t' } })
+
+    await waitFor(async () => {
+      expect((await dataStore.read('processDraft'))?.value).toEqual({ command: 'nginx -t', name: 'nginx' })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(mutation).toHaveBeenCalled())
+    expect(mutation.mock.calls[0][1]).toEqual({ command: 'nginx -t', name: 'nginx' })
+  })
+
+  it('preserves a dirty FormView draft when an unrelated external refresh arrives', async () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    const dataStore = createMemoryDataStore()
+    const document: ResourceDocument = {
+      data: { nodes: { draft: { kind: 'state', initialValue: { command: 'initial' } } } },
+      resource: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'FormView',
+        bindings: { draft: { $data: 'draft' } },
+        spec: {
+          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+          draftPolicy: { syncDelayMs: 1000 },
+          submit: { mutation: { target: 'memory' } },
+        },
+      },
+    }
+
+    render(createElement(ResourceRenderer, { registry, resource: document, dataStore }))
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('initial'),
+    )
+    const input = screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'local edit' } })
+
+    await dataStore.write('draft', {
+      status: 'ready',
+      value: { command: 'server refresh' },
+      version: 99,
+      epoch: 99,
+    })
+
+    await waitFor(() => expect(input.value).toBe('local edit'))
+  })
+
+  it('renders RHF pending/error state for a named submit action', async () => {
+    const failure = new Error('update rejected')
+    let rejectMutation: ((error: unknown) => void) | undefined
+    const mutation = vi.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectMutation = reject
+        }),
+    )
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+
+    render(
+      createElement(ResourceRenderer, {
+        registry,
+        resource: {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'FormView',
+          spec: {
+            sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+            submit: { action: 'process.update', mutation: { target: 'memory' } },
+          },
+        },
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Saving…' }) as HTMLButtonElement).disabled).toBe(true))
+
+    rejectMutation?.(failure)
+    await waitFor(() => expect(screen.getByText('update rejected')).toBeTruthy())
   })
 })
 
@@ -307,6 +447,7 @@ describe('DesignKit adapter parity', () => {
     const panel = registry.getKind('resourcekit.dev/v1alpha1', 'Panel')
     const panelSection = registry.getKind('resourcekit.dev/v1alpha1', 'PanelSection')
     const dataBodyField = registry.getKind('resourcekit.dev/v1alpha1', 'DataBodyField')
+    const formView = registry.getKind('resourcekit.dev/v1alpha1', 'FormView')
 
     expect(dataBody?.slotPolicy?.slots?.status?.accepts).toEqual(['Badge'])
     expect(workbench?.slotPolicy?.slots?.status?.accepts).toEqual(['Badge'])
@@ -315,6 +456,7 @@ describe('DesignKit adapter parity', () => {
     expect(panel?.slotPolicy?.slots?.status?.accepts).toEqual(['Badge'])
     expect(panelSection?.level).toEqual(['organism'])
     expect(dataBodyField?.slotPolicy?.defaultSlot?.accepts).toEqual(['Badge', 'ActionButton'])
+    expect(formView?.bindingPolicy?.inputs.draft?.writable).toBe(true)
   })
 
   it('passes required and disabled through to the rendered InputControl element', () => {

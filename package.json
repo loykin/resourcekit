@@ -76,7 +76,8 @@
     "@loykin/gridkit": "*",
     "@tanstack/query-core": "*",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-hook-form": "^7.82.0"
   },
   "peerDependenciesMeta": {
     "@loykin/chartkit": {
@@ -102,6 +103,9 @@
     },
     "react-dom": {
       "optional": true
+    },
+    "react-hook-form": {
+      "optional": true
     }
   },
   "devDependencies": {
@@ -122,6 +126,7 @@
     "jiti": "^2.7.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.4",
+    "react-hook-form": "^7.82.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.1",

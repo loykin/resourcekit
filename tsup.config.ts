@@ -16,6 +16,6 @@ export default defineConfig({
   dts:       true,
   sourcemap: true,
   clean:     true,
-  external:  ['react', 'react-dom', '@loykin/designkit', '@loykin/gridkit', '@loykin/chartkit', '@loykin/filter-input', '@loykin/datasourcekit', '@tanstack/query-core'],
+  external:  ['react', 'react-dom', 'react-hook-form', '@loykin/designkit', '@loykin/gridkit', '@loykin/chartkit', '@loykin/filter-input', '@loykin/datasourcekit', '@tanstack/query-core'],
   treeshake: true,
 })
