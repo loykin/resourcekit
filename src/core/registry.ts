@@ -15,6 +15,7 @@ import type {
 } from './types'
 import { validateResource } from './validation'
 import { listExampleEntries } from './examples'
+import { allowListFilter, createNamedRegistry, scopedView } from './namedRegistry'
 
 /**
  * Plugin host. Registration is runtime data, not build-time wiring: plugins
@@ -188,13 +189,13 @@ function toConnectionSummary(
 }
 
 export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
-  const kinds = new Map<string, KindManifest<unknown, TRender>>()
-  const patternExamples = new Map<string, PatternExample>()
-  const dataResolvers = new Map<string, DataResolver>()
-  const dataSourceAdapters = new Map<string, DataSourceAdapter>()
-  const mutationResolvers = new Map<string, MutationResolver>()
-  const connectionAdapters = new Map<string, ConnectionAdapter>()
-  const connections = new Map<string, RegisteredConnection>()
+  const kinds = createNamedRegistry<KindManifest<unknown, TRender>>()
+  const patternExamples = createNamedRegistry<PatternExample>()
+  const dataResolvers = createNamedRegistry<DataResolver>()
+  const dataSourceAdapters = createNamedRegistry<DataSourceAdapter>()
+  const mutationResolvers = createNamedRegistry<MutationResolver>()
+  const connectionAdapters = createNamedRegistry<ConnectionAdapter>()
+  const connections = createNamedRegistry<RegisteredConnection>()
   let connectionProvider: ConnectionProvider | undefined
   const listeners = new Set<() => void>()
 
@@ -217,7 +218,7 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
       merged.set(connection.uid, connection)
     }
     // Static registrations win on uid collision with the provider.
-    for (const connection of connections.values()) {
+    for (const connection of connections.list()) {
       merged.set(connection.uid, connection)
     }
     return [...merged.values()]
@@ -226,42 +227,42 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
   return {
     use(plugin) {
       for (const manifest of plugin.kinds ?? []) {
-        kinds.set(kindKey(manifest.apiVersion, manifest.kind), manifest)
+        kinds.register(kindKey(manifest.apiVersion, manifest.kind), manifest)
       }
       for (const example of plugin.patternExamples ?? []) {
-        patternExamples.set(example.name, example)
+        patternExamples.register(example.name, example)
       }
       for (const [source, resolver] of Object.entries(plugin.dataResolvers ?? {})) {
-        dataResolvers.set(source, resolver)
+        dataResolvers.register(source, resolver)
       }
       for (const [source, adapter] of Object.entries(plugin.dataSourceAdapters ?? {})) {
-        dataSourceAdapters.set(source, adapter)
+        dataSourceAdapters.register(source, adapter)
       }
       for (const [target, resolver] of Object.entries(plugin.mutationResolvers ?? {})) {
-        mutationResolvers.set(target, resolver)
+        mutationResolvers.register(target, resolver)
       }
       for (const [type, adapter] of Object.entries(plugin.connectionAdapters ?? {})) {
-        connectionAdapters.set(type, adapter)
+        connectionAdapters.register(type, adapter)
       }
       notify()
     },
     getKind: (apiVersion, kind) => kinds.get(kindKey(apiVersion, kind)),
-    listKinds: () => [...kinds.values()],
-    listPatternExamples: () => [...patternExamples.values()],
+    listKinds: () => kinds.list(),
+    listPatternExamples: () => patternExamples.list(),
     getDataResolver: (source) => dataResolvers.get(source),
-    listDataResolvers: () => [...dataResolvers.keys()],
+    listDataResolvers: () => dataResolvers.keys(),
     getDataSourceAdapter: (source) => dataSourceAdapters.get(source),
-    listDataSourceAdapters: () => [...dataSourceAdapters.values()],
+    listDataSourceAdapters: () => dataSourceAdapters.list(),
     getMutationResolver: (target) => mutationResolvers.get(target),
-    listMutationResolvers: () => [...mutationResolvers.keys()],
+    listMutationResolvers: () => mutationResolvers.keys(),
     getConnectionAdapter: (type) => connectionAdapters.get(type),
-    listConnectionAdapters: () => [...connectionAdapters.values()],
+    listConnectionAdapters: () => connectionAdapters.list(),
     registerConnection(connection) {
-      connections.set(connection.uid, connection)
+      connections.register(connection.uid, connection)
       notify()
     },
     unregisterConnection(uid) {
-      connections.delete(uid)
+      connections.remove(uid)
       notify()
     },
     setConnectionProvider(provider) {
@@ -271,20 +272,31 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
     getConnection: resolveConnection,
     listConnections: resolveAllConnections,
     scope(options): ScopedRegistry<TRender> {
+      const kindsView = scopedView(kinds, options, {
+        allowed: (_key, manifest) => kindAllowed(manifest, options),
+        transform: applySlotScope,
+      })
+      const dataResolversView = scopedView(dataResolvers, options, {
+        allowed: (key) => allowListFilter(key, options.dataResolvers),
+      })
+      const dataSourceAdaptersView = scopedView(dataSourceAdapters, options, {
+        allowed: (key) => allowListFilter(key, options.dataResolvers),
+      })
+      const mutationResolversView = scopedView(mutationResolvers, options, {
+        allowed: (key) => allowListFilter(key, options.mutationResolvers),
+      })
+      const connectionAdaptersView = scopedView(connectionAdapters, options, {
+        allowed: (key) => allowListFilter(key, options.connectionAdapters),
+      })
+
       const scoped: ScopedRegistry<TRender> = {
         options,
-        getKind(apiVersion, kind) {
-          const manifest = kinds.get(kindKey(apiVersion, kind))
-          if (!manifest || !kindAllowed(manifest, options)) return undefined
-          return applySlotScope(manifest, options)
-        },
-        listKinds() {
-          return [...kinds.values()]
-            .filter((manifest) => kindAllowed(manifest, options))
-            .map((manifest) => applySlotScope(manifest, options))
-        },
+        getKind: (apiVersion, kind) => kindsView.get(kindKey(apiVersion, kind)),
+        listKinds: kindsView.list,
+        // Deliberately unfiltered here — real filtering happens per-example
+        // in selectExamples() below via validateResource, not an allow list.
         listPatternExamples() {
-          return [...patternExamples.values()]
+          return patternExamples.list()
         },
         selectExamples() {
           const entries = listExampleEntries(scoped)
@@ -298,30 +310,14 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
           const filteredPatternExamples = entries.patternExamples.filter((example) => validateResource(example.resource, scoped).valid)
           return { kindExamples, patternExamples: filteredPatternExamples }
         },
-        getDataResolver(source) {
-          return dataResolvers.get(source)
-        },
-        listDataResolvers() {
-          return [...dataResolvers.keys()]
-        },
-        getDataSourceAdapter(source) {
-          return dataSourceAdapters.get(source)
-        },
-        listDataSourceAdapters() {
-          return [...dataSourceAdapters.values()]
-        },
-        getMutationResolver(target) {
-          return mutationResolvers.get(target)
-        },
-        listMutationResolvers() {
-          return [...mutationResolvers.keys()]
-        },
-        getConnectionAdapter(type) {
-          return connectionAdapters.get(type)
-        },
-        listConnectionAdapters() {
-          return [...connectionAdapters.values()]
-        },
+        getDataResolver: dataResolversView.get,
+        listDataResolvers: dataResolversView.keys,
+        getDataSourceAdapter: dataSourceAdaptersView.get,
+        listDataSourceAdapters: dataSourceAdaptersView.list,
+        getMutationResolver: mutationResolversView.get,
+        listMutationResolvers: mutationResolversView.keys,
+        getConnectionAdapter: connectionAdaptersView.get,
+        listConnectionAdapters: connectionAdaptersView.list,
         async getConnection(uid) {
           if (!connectionAllowed(uid, options)) return undefined
           return resolveConnection(uid)

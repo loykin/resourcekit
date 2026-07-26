@@ -597,6 +597,21 @@ export interface ScopeOptions {
     include?: string[]
     exclude?: string[]
   }
+  /** Restricts which registered `dataResolvers`/`dataSourceAdapters` *types* (by `source`) this scope exposes — a `DataSourceAdapter` shares its resolver's allow-list since it's enrichment layered on the same `source`. Omit to leave every registered source visible (today's behavior). */
+  dataResolvers?: {
+    include?: string[]
+    exclude?: string[]
+  }
+  /** Restricts which registered `mutationResolvers` *types* (by `target`) this scope exposes. Omit to leave every registered target visible. */
+  mutationResolvers?: {
+    include?: string[]
+    exclude?: string[]
+  }
+  /** Restricts which registered connection *type* adapters (by `type`, e.g. `rest`/`datasourcekit`) this scope exposes — distinct from `connections.allow`, which restricts connection *instances* by `uid`. Omit to leave every registered type visible. */
+  connectionAdapters?: {
+    include?: string[]
+    exclude?: string[]
+  }
   spec?: Record<
     string,
     {

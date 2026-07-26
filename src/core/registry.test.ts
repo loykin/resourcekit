@@ -159,6 +159,69 @@ describe('createRegistry', () => {
     expect(scoped.listKinds().map((kind) => kind.kind)).toEqual(['Panel'])
   })
 
+  it('excludes a dataResolvers source from a scope while the unscoped registry keeps seeing it', () => {
+    const registry = createRegistry()
+    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver, rest: staticResolver } })
+
+    const scoped = registry.scope({ dataResolvers: { exclude: ['static'] } })
+
+    expect(scoped.getDataResolver('static')).toBeUndefined()
+    expect(scoped.getDataResolver('rest')).toBe(staticResolver)
+    expect(scoped.listDataResolvers()).toEqual(['rest'])
+    expect(registry.getDataResolver('static')).toBe(staticResolver)
+  })
+
+  it('narrows dataResolvers to an include list', () => {
+    const registry = createRegistry()
+    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver, rest: staticResolver, datasource: staticResolver } })
+
+    const scoped = registry.scope({ dataResolvers: { include: ['rest'] } })
+
+    expect(scoped.listDataResolvers()).toEqual(['rest'])
+    expect(scoped.getDataResolver('static')).toBeUndefined()
+    expect(scoped.getDataResolver('datasource')).toBeUndefined()
+  })
+
+  it('scopes dataSourceAdapters using the same dataResolvers allow-list, since an adapter is enrichment on the same source', () => {
+    const registry = createRegistry()
+    const adapter = { source: 'datasource', resolve: staticResolver, queryKey: () => ['datasource'] }
+    registry.use({ name: 'resolvers', dataResolvers: { datasource: staticResolver } })
+    registry.use({ name: 'adapters', dataSourceAdapters: { datasource: adapter } })
+
+    const scoped = registry.scope({ dataResolvers: { exclude: ['datasource'] } })
+
+    expect(scoped.getDataResolver('datasource')).toBeUndefined()
+    expect(scoped.getDataSourceAdapter('datasource')).toBeUndefined()
+    expect(scoped.listDataSourceAdapters()).toEqual([])
+    expect(registry.getDataSourceAdapter('datasource')).toBe(adapter)
+  })
+
+  it('excludes a mutationResolvers target from a scope', () => {
+    const registry = createRegistry()
+    const memoryResolver = async () => ({ id: '1' })
+    const restResolver = async () => ({ id: '2' })
+    registry.use({ name: 'mutations', mutationResolvers: { memory: memoryResolver, rest: restResolver } })
+
+    const scoped = registry.scope({ mutationResolvers: { exclude: ['memory'] } })
+
+    expect(scoped.getMutationResolver('memory')).toBeUndefined()
+    expect(scoped.getMutationResolver('rest')).toBe(restResolver)
+    expect(scoped.listMutationResolvers()).toEqual(['rest'])
+    expect(registry.getMutationResolver('memory')).toBe(memoryResolver)
+  })
+
+  it('excludes a connectionAdapters type from a scope', () => {
+    const registry = createRegistry()
+    const restAdapter = testConnectionAdapter()
+    registry.use({ name: 'adapters', connectionAdapters: { rest: restAdapter } })
+
+    const scoped = registry.scope({ connectionAdapters: { exclude: ['rest'] } })
+
+    expect(scoped.getConnectionAdapter('rest')).toBeUndefined()
+    expect(scoped.listConnectionAdapters()).toEqual([])
+    expect(registry.getConnectionAdapter('rest')).toBe(restAdapter)
+  })
+
   it('registers, looks up, and unregisters connections dynamically without recreating the registry', async () => {
     const registry = createRegistry()
     registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })

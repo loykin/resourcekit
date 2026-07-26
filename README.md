@@ -332,9 +332,12 @@ ceiling in one place; nothing an AI/MCP client can reach lives outside it:
 | `spec.pick` / `spec.omit` / `spec.lock` | Per-kind spec field allowlist, denylist, and fixed values |
 | `slots.include` / `slots.exclude` | Per-kind allowed slot names |
 | `variables.allow` / `variables.lock` | Allowed page variables and fixed values |
-| `datasources.allow` | Allowed resolver `source` values |
+| `dataResolvers.include` / `dataResolvers.exclude` | Allowed/denied registered resolver **types** (by `source`, e.g. `"rest"`/`"datasource"`) — a `dataSourceAdapters` entry shares its resolver's allow-list since it's enrichment layered on the same `source` |
+| `datasources.allow` | Allowed **values** for `datasourceUid` inside a `source: "datasource"` binding — distinct from `dataResolvers.include`, which restricts whether the `datasource` source type is visible at all |
 | `actions.allow` | Allowed named actions — both `submit.action` and `EventPolicy.kind: "action"` |
+| `mutationResolvers.include` / `mutationResolvers.exclude` | Allowed/denied registered mutation resolver **types** (by `target`) |
 | `connections.allow` / `connections.capabilities` | Allowed connection UIDs and the MCP capability ceiling (`test`/`inspect`/`preview`/`mutate`) applied to all of them |
+| `connectionAdapters.include` / `connectionAdapters.exclude` | Allowed/denied registered connection **type** adapters (by `type`, e.g. `"rest"`/`"datasourcekit"`) — distinct from `connections.allow`, which restricts connection *instances* by `uid` |
 | `maxDepth` | Maximum slot nesting depth |
 | `rootLevels` | Allowed [levels](docs/kind-level-taxonomy.md) for the document root |
 | `queryPolicy` | Host ceiling (`allowPolling`, `minIntervalMs`, `maxIntervalMs`, `maxRetries`) that clamps an AI-authored dataflow unit's `QueryPolicy` before it reaches a `QueryCoordinator` — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds) |
