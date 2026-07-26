@@ -1,4 +1,4 @@
-export type RuntimeNamespace = 'variable' | 'objectState' | 'scope' | 'execution' | (string & {})
+export type RuntimeNamespace = 'variable' | 'objectState' | 'dataflow' | 'execution' | (string & {})
 export type RuntimeOrigin = string | symbol
 
 export interface RuntimeKey {
@@ -47,7 +47,7 @@ export interface RuntimeStore {
 export const runtimeKeys = {
   variable: (name: string, scope = 'document'): RuntimeKey => ({ scope, namespace: 'variable', name }),
   objectState: (name: string, scope = 'document'): RuntimeKey => ({ scope, namespace: 'objectState', name }),
-  scope: (name: string, scope = 'document'): RuntimeKey => ({ scope, namespace: 'scope', name }),
+  dataflow: (name: string, scope = 'document'): RuntimeKey => ({ scope, namespace: 'dataflow', name }),
   execution: (name: string, scope = 'document'): RuntimeKey => ({ scope, namespace: 'execution', name }),
 }
 

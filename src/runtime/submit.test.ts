@@ -18,7 +18,7 @@ function makeRuntime(overrides: Partial<SubmitRuntime> = {}): SubmitRuntime & { 
       },
     },
     store: createMemoryRuntimeStore(),
-    scopes: {
+    dataflow: {
       invalidate: vi.fn(),
       refetch: vi.fn(async () => undefined),
     },
@@ -138,27 +138,27 @@ describe('runSubmit', () => {
     expect(emitted[0][0]).toBe('users.created')
   })
 
-  it('delegates invalidateData/refetchData effects directly to the scope registry', async () => {
-    const scopes = {
+  it('delegates invalidateData/refetchData effects directly to the dataflow engine', async () => {
+    const dataflow = {
       invalidate: vi.fn(),
       refetch: vi.fn(async () => undefined),
     }
-    const runtime = makeRuntime({ scopes })
+    const runtime = makeRuntime({ dataflow })
 
     await runSubmit(
       runtime,
       {
         mutation: { target: 'memory' },
         onSuccess: [
-          { kind: 'invalidateData', scopes: ['customers', 'customerDetail'] },
-          { kind: 'refetchData', scopes: ['customers'] },
+          { kind: 'invalidateData', dataflow: ['customers', 'customerDetail'] },
+          { kind: 'refetchData', dataflow: ['customers'] },
         ],
       },
       {},
     )
 
-    expect(scopes.invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
-    expect(scopes.refetch).toHaveBeenCalledWith(['customers'])
+    expect(dataflow.invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
+    expect(dataflow.refetch).toHaveBeenCalledWith(['customers'])
   })
 
   it('rejects unresolved variables in the binding', async () => {

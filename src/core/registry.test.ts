@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRegistry } from './registry'
-import { staticResolver } from '../connection/resolvers'
+import { staticResolver } from '../dataflow/resolvers'
 import type { ConnectionAdapter, RegisteredConnection } from './types'
 
 function testConnectionAdapter(): ConnectionAdapter {

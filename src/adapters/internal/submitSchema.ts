@@ -42,14 +42,14 @@ export const submitSpecSchema: JsonSchema = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['kind', 'scopes'],
-            properties: { kind: { const: 'invalidateData' }, scopes: { type: 'array', items: { type: 'string' } } },
+            required: ['kind', 'dataflow'],
+            properties: { kind: { const: 'invalidateData' }, dataflow: { type: 'array', items: { type: 'string' } } },
           },
           {
             type: 'object',
             additionalProperties: false,
-            required: ['kind', 'scopes'],
-            properties: { kind: { const: 'refetchData' }, scopes: { type: 'array', items: { type: 'string' } } },
+            required: ['kind', 'dataflow'],
+            properties: { kind: { const: 'refetchData' }, dataflow: { type: 'array', items: { type: 'string' } } },
           },
         ],
       },

@@ -1,10 +1,10 @@
 import Ajv from 'ajv'
 import type { ErrorObject } from 'ajv'
 import { isObjectStateRef } from '../runtime/objectState'
-import { scanScopeRefs } from '../runtime/scopeRef'
+import { scanDataflowRefs } from '../dataflow/ref'
 import { scanVariableRefs } from '../runtime/variables'
 import { listExampleEntries } from './examples'
-import type { Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
+import type { DataflowUnit, Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
 import type { ResourceRegistry, ScopedRegistry } from './registry'
 
 export interface ExampleValidationFailure {
@@ -93,8 +93,8 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   if ('objectState' in resource && !Array.isArray(resource.objectState)) {
     addIssue(issues, `${path}/objectState`, 'objectState must be an array', 'remove objectState or replace it with an array of { name, initialValue? } declarations')
   }
-  if ('scope' in resource && !isRecord(resource.scope)) {
-    addIssue(issues, `${path}/scope`, 'scope must be an object', 'remove scope or replace it with a { name, binding } object')
+  if ('dataflow' in resource && !Array.isArray(resource.dataflow)) {
+    addIssue(issues, `${path}/dataflow`, 'dataflow must be an array', 'remove dataflow or replace it with an array of { name, binding, policy?, dependOn? } units')
   }
   // `variables`/`events` are never legitimate spec content for any kind —
   // the runtime only ever reads them from the envelope. A kind whose own
@@ -323,6 +323,66 @@ function variableDeclarations(resource: Resource): VariableDeclaration[] {
   return resource.variables ?? []
 }
 
+/** Same recursive-collection shape as `collectVariables`/`collectObjectState` in `ResourceRenderer.tsx` — `dataflow` is document-wide, not tree-bound. */
+function collectDataflowUnits(resource: Resource, units: DataflowUnit[] = []): DataflowUnit[] {
+  units.push(...(resource.dataflow ?? []))
+  for (const slot of resource.slots ?? []) {
+    for (const child of children(slot)) {
+      if (isRecord(child)) collectDataflowUnits(child as unknown as Resource, units)
+    }
+  }
+  return units
+}
+
+/**
+ * `dependOn` is execution-order/lazy-gating only (never a value reference —
+ * see AGENTS.md's hard rule), so this only needs to reject dangling names and
+ * cycles, never compute a topological execution order. Model: dashboardkit's
+ * `detectCycle` DFS-with-stack (`buildVariableDAG`,
+ * /Users/loykin/Project/dashboardkit/src/query/dag.ts), adapted to report via
+ * `ValidationIssue` instead of throwing.
+ */
+function validateDataflowGraph(units: DataflowUnit[], issues: ValidationIssue[]): void {
+  const seen = new Set<string>()
+  for (const unit of units) {
+    if (seen.has(unit.name)) {
+      addIssue(issues, '/dataflow', `dataflow unit name ${unit.name} is declared more than once`, 'give each dataflow unit a unique name — a duplicate would silently overwrite the first in the engine')
+    }
+    seen.add(unit.name)
+  }
+
+  const names = new Set(units.map((unit) => unit.name))
+  const deps = new Map(units.map((unit) => [unit.name, unit.dependOn ?? []]))
+
+  for (const unit of units) {
+    for (const dep of unit.dependOn ?? []) {
+      if (!names.has(dep)) {
+        addIssue(issues, '/dataflow', `dataflow unit ${unit.name} depends on undeclared unit ${dep}`, `declare a dataflow unit named "${dep}", or remove it from ${unit.name}'s dependOn`)
+      }
+    }
+  }
+
+  const visited = new Set<string>()
+  const reported = new Set<string>()
+  const dfs = (node: string, stack: string[]) => {
+    const stackIndex = stack.indexOf(node)
+    if (stackIndex !== -1) {
+      const cycle = [...stack.slice(stackIndex), node]
+      const key = [...cycle].sort().join(',')
+      if (!reported.has(key)) {
+        reported.add(key)
+        addIssue(issues, '/dataflow', `dataflow units form a dependency cycle: ${cycle.join(' -> ')}`, 'remove one dependOn edge to break the cycle — dependOn must form a DAG, and never carries a value reference')
+      }
+      return
+    }
+    if (visited.has(node)) return
+    visited.add(node)
+    for (const dep of deps.get(node) ?? []) dfs(dep, [...stack, node])
+    visited.delete(node)
+  }
+  for (const name of deps.keys()) dfs(name, [])
+}
+
 function scanValueRefs(value: unknown): Set<string> {
   const refs = new Set<string>()
   const visit = (current: unknown) => {
@@ -474,24 +534,25 @@ function validateDatasourceAndActions(resource: Resource, registry: ResourceRegi
   visit(resource.spec, `${path}/spec`)
   if (resource.record) visit(resource.record, `${path}/record`)
   if (resource.events) visit(resource.events, `${path}/events`)
-  if (resource.scope) visit(resource.scope, `${path}/scope`)
+  if (resource.dataflow) visit(resource.dataflow, `${path}/dataflow`)
 }
 
 /**
- * `$scope` refs are resolved by walking `ctx.scopes` at render time — a
- * plain ancestor→descendant prop, not a graph lookup — so a ref to a name no
- * ancestor `scopeProvider: true` kind actually provides would silently
- * resolve to `undefined` at render time instead of failing. Threaded
- * top-down through `validateResource`'s own recursion (`providedScopes`).
+ * `$dataflow` refs are resolved off the document-level `DataflowEngine`'s
+ * snapshot at render time — a global by-name lookup, never a graph lookup
+ * and never gated by render-tree ancestry — so a ref to an undeclared name
+ * would silently resolve to `undefined` at render time instead of failing.
+ * `declaredNames` is the flat, document-wide set of every declared unit's
+ * name, computed once (see `validateResource`), not threaded top-down.
  */
-function validateScopeRefs(resource: Resource, path: string, providedScopes: Set<string>, issues: ValidationIssue[]): void {
-  for (const ref of scanScopeRefs(resource.spec)) {
-    if (!providedScopes.has(ref.$scope)) {
+function validateDataflowRefs(resource: Resource, path: string, declaredNames: Set<string>, issues: ValidationIssue[]): void {
+  for (const ref of scanDataflowRefs(resource.spec)) {
+    if (!declaredNames.has(ref.$dataflow)) {
       addIssue(
         issues,
         `${path}/spec`,
-        `referenced scope ${ref.$scope} is not provided by any ancestor`,
-        `wrap this kind in a scopeProvider kind whose scope.name is "${ref.$scope}", or use one of the currently in-scope names: ${[...providedScopes].join(', ') || '(none)'}`,
+        `referenced dataflow unit ${ref.$dataflow} is not declared anywhere in this document`,
+        `declare a dataflow unit named "${ref.$dataflow}" (anywhere in the document — dataflow is document-wide, not tree-bound), or use one of: ${[...declaredNames].join(', ') || '(none declared)'}`,
       )
     }
   }
@@ -514,11 +575,14 @@ export function validateResource(
 ): ValidationResult {
   const issues: ValidationIssue[] = []
   const options = scopedOptions(registry)
+  const dataflowUnits = collectDataflowUnits(resource)
+  validateDataflowGraph(dataflowUnits, issues)
+  const declaredDataflowNames = new Set(dataflowUnits.map((unit) => unit.name))
 
-  const visit = (current: unknown, path: string, depth: number, providedScopes: Set<string>) => {
+  const visit = (current: unknown, path: string, depth: number) => {
     if (!validateEnvelope(current, path, issues)) return
     validateScopedCapabilities(current, options, path, depth, issues)
-    validateScopeRefs(current, path, providedScopes, issues)
+    validateDataflowRefs(current, path, declaredDataflowNames, issues)
     const manifest = registry.getKind(current.apiVersion, current.kind)
     if (!manifest) {
       addIssue(
@@ -543,21 +607,14 @@ export function validateResource(
       if (manifest.recordScope && current.record === undefined) {
         addIssue(issues, `${path}/record`, `record is required for recordScope kind ${current.kind}`, 'add a record: a DataBinding fetch or a { "$state": "name" } pointer')
       }
-      if (manifest.scopeProvider && current.scope === undefined) {
-        addIssue(issues, `${path}/scope`, `scope is required for scopeProvider kind ${current.kind}`, 'add a scope: { name, binding } object naming this provider and its fetch binding')
-      }
     }
 
-    const childScopes = manifest?.scopeProvider && current.scope && typeof current.scope.name === 'string'
-      ? new Set([...providedScopes, current.scope.name])
-      : providedScopes
-
     current.slots?.forEach((slot, slotIndex) => {
-      children(slot).forEach((child, childIndex) => visit(child, `${path}/slots/${slotIndex}/items/${childIndex}`, depth + 1, childScopes))
+      children(slot).forEach((child, childIndex) => visit(child, `${path}/slots/${slotIndex}/items/${childIndex}`, depth + 1))
     })
   }
 
-  visit(resource, '', 0, new Set())
+  visit(resource, '', 0)
   return { valid: issues.length === 0, issues }
 }
 

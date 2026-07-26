@@ -11,9 +11,9 @@ export type JsonSchema = Record<string, unknown>
 
 // ─── Resource envelope ────────────────────────────────────────────────────────
 
-/** Descendant-side read of an ancestor `scopeProvider: true` kind's fetched value — resolved via `ctx.scopes`, never a graph lookup. */
-export interface ScopeRef {
-  $scope: string
+/** Tree-position-independent read of a named `dataflow` unit's current resolved value — resolved off the document-level DataflowEngine's snapshot, never a graph lookup, never scoped by render-tree ancestry. */
+export interface DataflowRef {
+  $dataflow: string
   path?: string
 }
 
@@ -51,8 +51,8 @@ export interface Resource<TSpec = unknown> {
   record?: DataBinding | ObjectStateRef
   /** Runtime-owned object-shaped local state declarations, scanned recursively across the whole document tree regardless of kind — the write-capable, structured counterpart to `variables` (flat strings only). See `ObjectStateRef`. */
   objectState?: ObjectStateDeclaration[]
-  /** Only meaningful for a `scopeProvider: true` kind — the runtime resolves `scope.binding` and publishes the raw result to descendants as `ctx.scopes[scope.name]`. */
-  scope?: ScopeSpec
+  /** Runtime-owned, document-level named data-fetch declarations, scanned recursively across the whole document tree regardless of kind — see `DataflowUnit`. Read-only, tree-position-independent (unlike `record`, which is ancestor-owned and first-row-reduced). */
+  dataflow?: DataflowUnit[]
 }
 
 export interface ObjectStateDeclaration {
@@ -61,7 +61,7 @@ export interface ObjectStateDeclaration {
 }
 
 /**
- * AI-authored server-state policy for a `scopeProvider: true` kind
+ * AI-authored server-state policy for a `dataflow` unit
  * (docs/dataflow-and-server-state-direction.md). Vocabulary is
  * resourcekit-generic, never a specific query library's option names —
  * `clampQueryPolicy` enforces the host's `QueryScopePolicy` ceiling on it.
@@ -73,10 +73,21 @@ export interface QueryPolicy {
   retry?: { maxAttempts: number }
 }
 
-export interface ScopeSpec {
+/**
+ * A flat, document-level, named data-fetch unit. `binding` may reference
+ * `${variables}` — it must NEVER reference another unit's resolved value (no
+ * value-chaining; that boundary belongs to dashboardkit). `dependOn` is
+ * execution-order/lazy-gating only: this unit does not attempt its fetch
+ * until every named unit in `dependOn` has reached `ready`. Omitted/empty
+ * `dependOn` makes this a root unit — it fetches eagerly as soon as the
+ * document mounts, independent of whether any consuming kind is currently
+ * rendered.
+ */
+export interface DataflowUnit {
   name: string
   binding: DataBinding
   policy?: QueryPolicy
+  dependOn?: string[]
 }
 
 export type VisibilityCondition =
@@ -280,14 +291,14 @@ export type MutationResolver = (
  * emit: surfaces the mutation result to the host app (ResourceRenderer onEvent).
  * invalidateData/refetchData: docs/dataflow-and-server-state-
  * direction.md "Mutation과 invalidation" — a mutation-only screen isn't a
- * management screen without a way to tell affected scope providers, by name,
+ * management screen without a way to tell affected dataflow units, by name,
  * to catch up.
  */
 export type SubmitEffect =
   | { kind: 'setVariable'; variable: string; from?: string; value?: string | string[] }
   | { kind: 'emit'; event: string }
-  | { kind: 'invalidateData'; scopes: string[] }
-  | { kind: 'refetchData'; scopes: string[] }
+  | { kind: 'invalidateData'; dataflow: string[] }
+  | { kind: 'refetchData'; dataflow: string[] }
 
 /**
  * Declarative submit wiring for forms and editable cells:
@@ -518,17 +529,6 @@ export interface KindManifest<TSpec = unknown, TRender = unknown> {
    * as the nearest record scope (`ctx.record`, `fieldRef` reads).
    */
   recordScope?: boolean
-  /**
-   * When true, this kind must carry `resource.scope`; the runtime resolves
-   * `scope.binding` (one-shot, or coordinator-backed when `scope.policy` is
-   * set) and publishes the raw result to descendants as
-   * `ctx.scopes[scope.name]` before rendering children. Unlike
-   * `recordScope`, no first-row reduction — carries whatever shape the
-   * binding resolves to (typically an array), and lets unrelated sibling
-   * kinds elsewhere in the tree share one fetch by referencing
-   * `{ "$scope": scope.name }`.
-   */
-  scopeProvider?: boolean
   /**
    * When true, `registry.scope()` unconditionally drops this kind — even if
    * a scope's `kinds.include` explicitly names it. For kinds whose spec is

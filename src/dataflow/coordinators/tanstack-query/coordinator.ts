@@ -1,6 +1,6 @@
 import { QueryObserver, keepPreviousData } from '@tanstack/query-core'
 import type { QueryClient } from '@tanstack/query-core'
-import type { QueryCoordinator, QueryHandle, QueryRequest } from '../../runtime/queryCoordinator'
+import type { QueryCoordinator, QueryHandle, QueryRequest } from '../../coordinator'
 
 /**
  * TanStack Query-backed `QueryCoordinator`

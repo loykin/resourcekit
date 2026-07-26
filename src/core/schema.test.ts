@@ -2,7 +2,7 @@ import Ajv2020 from 'ajv/dist/2020'
 import { describe, expect, it } from 'vitest'
 import { createChartKitPlugin } from '../adapters'
 import { createRegistry } from './registry'
-import { restResolver, staticResolver } from '../connection/resolvers'
+import { restResolver, staticResolver } from '../dataflow/resolvers'
 import { buildDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './schema'
 import type { JsonSchema, Resource } from './types'
 import { validateResource } from './validation'
@@ -156,7 +156,7 @@ describe('buildDocumentSchema', () => {
     expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Record', spec: {} })).toBe(false)
   })
 
-  it('adds scope only for a scopeProvider kind with a registered data binding, and requires it', () => {
+  it('adds dataflow unconditionally when a data binding schema exists, gated only on registered resolvers, and never requires it', () => {
     const registry = createRegistry()
     registry.use({
       name: 'test',
@@ -166,12 +166,6 @@ describe('buildDocumentSchema', () => {
           kind: 'Panel',
           specSchema: { type: 'object', additionalProperties: false, properties: {} },
         },
-        {
-          apiVersion: 'resourcekit.dev/v1alpha1',
-          kind: 'DataScope',
-          specSchema: { type: 'object', additionalProperties: false, properties: {} },
-          scopeProvider: true,
-        },
       ],
       dataResolvers: { static: staticResolver },
     })
@@ -179,18 +173,20 @@ describe('buildDocumentSchema', () => {
     const ajv = new Ajv2020({ strict: false })
     const validate = ajv.compile(schema)
 
-    // Panel is not scopeProvider — `scope` isn't in its schema at all.
-    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, scope: { name: 'rows', binding: { source: 'static', rows: [] } } })).toBe(false)
+    // dataflow is optional on every kind — no manifest flag gates it.
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {} })).toBe(true)
 
-    const scopeResource = {
+    const withDataflow = {
       apiVersion: 'resourcekit.dev/v1alpha1',
-      kind: 'DataScope',
+      kind: 'Panel',
       spec: {},
-      scope: { name: 'rows', binding: { source: 'static', rows: [] } },
+      dataflow: [{ name: 'rows', binding: { source: 'static', rows: [] } }],
     }
-    expect(validate(scopeResource)).toBe(true)
-    // scopeProvider kind requires `scope`.
-    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'DataScope', spec: {} })).toBe(false)
+    expect(validate(withDataflow)).toBe(true)
+
+    // dataflow must be an array of { name, binding, policy?, dependOn? } units.
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, dataflow: 'not-an-array' })).toBe(false)
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, dataflow: [{ binding: { source: 'static', rows: [] } }] })).toBe(false)
   })
 
   it('requires a min>0 slot and rejects a duplicate slot name in the generated schema, matching runtime validateResource', () => {

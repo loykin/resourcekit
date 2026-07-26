@@ -48,7 +48,7 @@ registration:
 
 | Import | Purpose |
 | --- | --- |
-| `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, object-state, scope registry, resolvers, connections, and submit runtime |
+| `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, object-state, dataflow engine, resolvers, connections, and submit runtime |
 | `@loykin/resourcekit/react` | `ResourceRenderer` and React render contracts |
 | `@loykin/resourcekit/adapters/designkit` | designkit kinds; form kinds use React Hook Form |
 | `@loykin/resourcekit/adapters/gridkit` | gridkit kinds |
@@ -56,7 +56,7 @@ registration:
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
 | `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionAdapter` bridging registered connections to `@loykin/datasourcekit` |
 | `@loykin/resourcekit/adapters` | All first-party kind adapters plus resource views; use when all required kit peers are installed. Connection adapters (e.g. `datasourcekit`) are not included — import them from their own subpath. |
-| `@loykin/resourcekit/connectors/tanstack-query` | `QueryCoordinator` backed by `@tanstack/query-core` (optional peer) for real polling/caching/dedup |
+| `@loykin/resourcekit/dataflow/tanstack-query` | `QueryCoordinator` backed by `@tanstack/query-core` (optional peer) for real polling/caching/dedup |
 
 The corresponding Tailwind v4 source entries are
 `@loykin/resourcekit/adapters/designkit/styles`,
@@ -148,11 +148,11 @@ sections below:
 
 | Prop | Purpose |
 | --- | --- |
-| `resource` | A `Resource` — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) for `scopeProvider`/`DataScope` |
+| `resource` | A `Resource` — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds) for the `dataflow` envelope field |
 | `registry` | A `ResourceRegistry` or (recommended) a `ScopedRegistry` |
-| `runtimeStore` | Shared `RuntimeStore`; defaults to a private in-memory one — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) |
+| `runtimeStore` | Shared `RuntimeStore`; defaults to a private in-memory one — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds) |
 | `runtimeScope` | Required alongside a shared `runtimeStore` unless the root has `metadata.name` |
-| `queryCoordinator` | Routes a policy-bearing named scope through caching/polling/dedup instead of one-shot — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) |
+| `queryCoordinator` | Routes a policy-bearing dataflow unit through caching/polling/dedup instead of one-shot — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds) |
 | `onAction` | Receives opaque `EventPolicy.kind: "action"` requests — see [Resource bindings, variables, and events](#resource-bindings-variables-and-events) |
 | `onEvent` | Receives `emit` event policies and submit `emit` effects |
 | `onDataError` | Receives resolve, coordinator, and unhandled action failures that have no other caller to reject to |
@@ -166,8 +166,8 @@ sections below:
 Every node uses a Kubernetes-like envelope:
 
 ```ts
-interface ScopeRef {
-  $scope: string
+interface DataflowRef {
+  $dataflow: string
   path?: string
 }
 
@@ -205,7 +205,7 @@ interface Resource<TSpec = unknown> {
   events?: Record<string, EventPolicy>
   objectState?: ObjectStateDeclaration[]
   record?: DataBinding | ObjectStateRef
-  scope?: { name: string; binding: DataBinding; policy?: QueryPolicy }
+  dataflow?: Array<{ name: string; binding: DataBinding; policy?: QueryPolicy; dependOn?: string[] }>
   slots?: Array<{
     name?: string
     items: Resource[]
@@ -241,7 +241,7 @@ emits, not a TypeScript value:
   `visible`, but never gates rendering — the runtime evaluates it and exposes
   the result as `RenderContext.disabled` for kinds with a natural disabled
   affordance (buttons, inputs, submit actions) to consume.
-- `variables`/`events`/`objectState`/`record`/`scope` are covered just below.
+- `variables`/`events`/`objectState`/`record`/`dataflow` are covered just below.
 - `slots` belong to the parent. Omit `name` for the default slot.
 - Each parent's `SlotPolicy` controls accepted child kinds and cardinality.
 - A leaf kind has no slot policy and must not contain `slots`.
@@ -252,7 +252,7 @@ contains them. Unknown or not-yet-loaded kinds degrade only that node to
 
 `spec` is *not* where every generically-shaped value lives — the envelope
 above carries the fields the runtime reads by fixed name regardless of kind
-(`variables`/`events`/`objectState`/`record`/`scope`, alongside
+(`variables`/`events`/`objectState`/`record`/`dataflow`, alongside
 `bindings`/`visible`/`disabled`), so a kind's own `specSchema` never needs a
 same-named placeholder property for them. `spec` still has two tiers of its
 own:
@@ -268,7 +268,7 @@ own:
 | `events` | Only as a fallback when the kind manifest has no `behaviorPolicy.events[event]` for the fired event | Read as an `EventPolicy` map, keyed by event name |
 | `objectState` | Any resource, any kind | `ObjectStateDeclaration[]`, scanned recursively — shared, writable, object-shaped state slots (the structured counterpart to `variables`; see `ObjectStateRef`/`Resource.bindings`) |
 | `record` | Only when the kind's manifest sets `recordScope: true` | Read as a `DataBinding` (a real fetch) or an `ObjectStateRef` (a pointer to an `objectState` slot); the runtime resolves it into `RenderContext.record` before the kind renders |
-| `scope` | Only when the kind's manifest sets `scopeProvider: true` | `{ name, binding, policy? }` — the runtime resolves `binding` (once, or repeatedly if `policy.refresh` is set) and publishes the raw result to every descendant as `{ "$scope": name }`, resolvable via `ctx.data.resolve` |
+| `dataflow` | Any resource, any kind | `DataflowUnit[]` (`{name, binding, policy?, dependOn?}`), scanned recursively — flat, document-wide named data-fetch units; the runtime resolves each `binding` (once, or repeatedly if `policy.refresh` is set) and any kind anywhere can read the current value via `{ "$dataflow": name }`, resolvable through `ctx.data.resolve` |
 
 ## Registry and adapters
 
@@ -281,7 +281,7 @@ takes one `ResourceKitPlugin` object:
 | `name` | Plugin identifier, for diagnostics only |
 | `kinds` | `KindManifest[]` this plugin registers |
 | `patternExamples` | Multi-kind pattern examples surfaced to `selectExamples()` for AI generation guidance |
-| `dataResolvers` | `source` → `DataResolver` map dispatched by `spec.data`/`scope.binding` |
+| `dataResolvers` | `source` → `DataResolver` map dispatched by `spec.data`/a dataflow unit's `binding` |
 | `dataSourceAdapters` | Optional `queryKey`/schema enrichment for a `dataResolvers` source — without one, a `QueryCoordinator` falls back to `[nodeId, JSON.stringify(binding)]` as the cache key |
 | `mutationResolvers` | `target` → `MutationResolver` map dispatched by `submit.mutation` |
 | `connectionAdapters` | Connection *type* adapters (`rest`, `datasourcekit`, ...) — not connection instances, see [Registered connections](#registered-connections) |
@@ -337,7 +337,7 @@ ceiling in one place; nothing an AI/MCP client can reach lives outside it:
 | `connections.allow` / `connections.capabilities` | Allowed connection UIDs and the MCP capability ceiling (`test`/`inspect`/`preview`/`mutate`) applied to all of them |
 | `maxDepth` | Maximum slot nesting depth |
 | `rootLevels` | Allowed [levels](docs/kind-level-taxonomy.md) for the document root |
-| `queryPolicy` | Host ceiling (`allowPolling`, `minIntervalMs`, `maxIntervalMs`, `maxRetries`) that clamps an AI-authored named scope's `QueryPolicy` before it reaches a `QueryCoordinator` — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) |
+| `queryPolicy` | Host ceiling (`allowPolling`, `minIntervalMs`, `maxIntervalMs`, `maxRetries`) that clamps an AI-authored dataflow unit's `QueryPolicy` before it reaches a `QueryCoordinator` — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds) |
 
 ```ts
 const scope = registry.scope({
@@ -378,9 +378,10 @@ if (!result.valid) {
 Validation checks the common envelope, registered kinds, kind spec schemas,
 binding ports, slot policies, required slots, scoped capabilities, variable
 references, resolver registration, and datasource/action allowlists —
-including that a `{ "$scope": "name" }` reference is only used where some
-ancestor `scopeProvider: true` kind actually provides that name. Validate
-every AI-produced document before rendering it.
+including that a `{ "$dataflow": "name" }` reference matches a unit declared
+somewhere in the document (dataflow is document-wide, never tree-bound), and
+that a unit's `dependOn` names form a DAG with no cycles. Validate every
+AI-produced document before rendering it.
 
 Never give an AI/MCP client a schema built from the unrestricted registry.
 
@@ -577,35 +578,39 @@ can actually block the underlying request. `disabled` is unrelated to
 value, a data source the runtime has no access to, so they keep their own
 `RowCondition` shape instead of `VisibilityCondition`.
 
-## Named scopes: sharing a fetch across sibling kinds
+## Named dataflow units: sharing a fetch across sibling kinds
 
 Most kinds fetch through their own `spec.data` binding directly — no extra
 mechanism needed, and `${variable}` interpolation already covers "refetch
-when a page variable changes". A named **scope** only earns its keep for the
-one thing a plain binding can't do: letting two *unrelated* sibling kinds
-(e.g. a compact selector and a full table showing the same list) share one
-fetch, or letting a mutation's `refetchData`/`invalidateData` effect target
-it by a stable name regardless of where it lives in the tree.
+when a page variable changes". A named **dataflow unit** only earns its keep
+for the one thing a plain binding can't do: letting two *unrelated* sibling
+kinds (e.g. a compact selector and a full table showing the same list) share
+one fetch, or letting a mutation's `refetchData`/`invalidateData` effect
+target it by a stable name regardless of where it lives in the tree.
 
-A `scopeProvider: true` kind (`DataScope` is the built-in one) resolves
-`resource.scope.binding` — once, or repeatedly if `scope.policy.refresh` is
-set — and publishes the raw result to every descendant as
-`{ "$scope": "name" }`, resolvable through the same `ctx.data.resolve` every
-kind already uses for its own `spec.data`:
+`dataflow` is a flat, document-wide array of named units — declared exactly
+like `variables` (scanned recursively across the whole document, not tied to
+any particular kind or tree position). Each unit resolves its `binding` —
+once, or repeatedly if `policy.refresh` is set — and any kind anywhere in
+the document can read the current value via `{ "$dataflow": "name" }`,
+resolvable through the same `ctx.data.resolve` every kind already uses for
+its own `spec.data`:
 
 ```json
 {
   "apiVersion": "resourcekit.dev/v1alpha1",
-  "kind": "DataScope",
+  "kind": "Workbench",
   "variables": [{ "name": "selectedHost", "default": "web-1" }],
-  "scope": {
-    "name": "hostCpu",
-    "binding": {
-      "source": "connection",
-      "connection": "metrics",
-      "request": { "operation": "metrics", "cluster": "us-east" }
+  "dataflow": [
+    {
+      "name": "hostCpu",
+      "binding": {
+        "source": "connection",
+        "connection": "metrics",
+        "request": { "operation": "metrics", "cluster": "us-east" }
+      }
     }
-  },
+  ],
   "spec": {},
   "slots": [
     {
@@ -614,13 +619,13 @@ kind already uses for its own `spec.data`:
           "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "SelectableList",
           "bindings": { "selected": { "$variable": "selectedHost" } },
-          "spec": { "data": { "$scope": "hostCpu" }, "primary": { "field": "host" } },
+          "spec": { "data": { "$dataflow": "hostCpu" }, "primary": { "field": "host" } },
           "events": { "select": { "kind": "setVariable", "variable": "selectedHost", "from": "row.host" } }
         },
         {
           "apiVersion": "resourcekit.dev/v1alpha1",
           "kind": "TableView",
-          "spec": { "data": { "$scope": "hostCpu" }, "columns": { "host": { "label": "Host" } } }
+          "spec": { "data": { "$dataflow": "hostCpu" }, "columns": { "host": { "label": "Host" } } }
         }
       ]
     }
@@ -629,27 +634,33 @@ kind already uses for its own `spec.data`:
 ```
 
 Both `SelectableList` and `TableView` read the *same* fetched value — one
-request, shared by both. The value flows down through ordinary React
-props/render-tree recursion, the same way `record` flows to descendants of a
-`recordScope: true` kind — there is no separate shared store for this part.
+request, shared by both — and neither needs to be a tree descendant of
+anything special to see it: `dataflow` refs are tree-position-independent,
+unlike `record`, which only flows to descendants of the `recordScope: true`
+kind that resolves it. A single `DataflowEngine`, built once per
+`ResourceRenderer` mount, owns every declared unit's fetch lifecycle — one
+fetch-owner per name, not one per consuming component.
 
-The only piece that *does* need a shared, tree-position-independent handle is
-letting a mutation's `onSuccess` effect (`invalidateData`/`refetchData`,
-`scopes: [...]`) reach a named scope provider mounted anywhere else in the
-tree. That's a thin in-memory registry, not a dependency graph — no
-generations, no epochs, no cascade: naming a scope in `refetchData` re-runs
-exactly that scope's own fetch, nothing implicitly downstream of it.
+A mutation's `onSuccess` effect (`invalidateData`/`refetchData`,
+`dataflow: [...]`) reaches a named unit anywhere in the document by calling
+the engine's own `refetch`/`invalidate` methods directly — no registry, no
+generations, no epochs, no cascade: naming a unit in `refetchData` re-runs
+exactly that unit's own fetch, nothing implicitly downstream of it. A unit
+may also declare `dependOn: ["otherUnit"]` to wait until another unit is
+`ready` before it starts fetching — this is execution-order/lazy-gating
+only; a unit's `binding` must never reference another unit's resolved
+value.
 
 ```json
 {
   "submit": {
     "mutation": { "target": "operations", "connection": "service-operations" },
-    "onSuccess": [{ "kind": "refetchData", "scopes": ["incidents", "incidentDetail"] }]
+    "onSuccess": [{ "kind": "refetchData", "dataflow": ["incidents", "incidentDetail"] }]
   }
 }
 ```
 
-A `scope.policy` carries an AI-authored `QueryPolicy` — `refresh: { kind:
+A unit's `policy` carries an AI-authored `QueryPolicy` — `refresh: { kind:
 'interval', ms }`, `staleForMs`, `retainPreviousData`, `retry: { maxAttempts
 }` — using resourcekit-generic vocabulary, never a specific query library's
 option names. A host clamps it against its own `QueryScopePolicy` ceiling
@@ -657,7 +668,7 @@ option names. A host clamps it against its own `QueryScopePolicy` ceiling
 `clampQueryPolicy(policy, scope)` before running it; this never rejects, it
 only narrows an AI-authored policy down to what the host already allows.
 
-A policy-bearing scope routes its fetch through a swappable
+A policy-bearing unit routes its fetch through a swappable
 `QueryCoordinator` boundary instead of talking to a data resolver directly.
 `createDirectQueryCoordinator()` does one-shot resolves with no cache,
 polling, dedup, or retry. TanStack Query hosts can install
@@ -665,7 +676,7 @@ polling, dedup, or retry. TanStack Query hosts can install
 `QueryClient`:
 
 ```ts
-import { createTanStackQueryCoordinator } from '@loykin/resourcekit/connectors/tanstack-query'
+import { createTanStackQueryCoordinator } from '@loykin/resourcekit/dataflow/tanstack-query'
 
 const coordinator = createTanStackQueryCoordinator(queryClient)
 
@@ -677,25 +688,25 @@ const coordinator = createTanStackQueryCoordinator(queryClient)
 ```
 
 Use the application's existing `QueryClient`. A data source adapter's
-`queryKey` determines cache identity; `refetchData` names the scope, and the
+`queryKey` determines cache identity; `refetchData` names the unit, and the
 connector maps it back to its active Query observer. This is the
 integration shape used by Piper-like hosts — ResourceKit owns which named
-scope exists and where its value flows, while TanStack Query owns
+unit exists and where its value flows, while TanStack Query owns
 server-state caching and scheduling.
 
 An explicit `refetchData` submit effect forces a fresh fetch through the
-scope's own coordinator handle (or, with no coordinator, bypasses
-`resolveThroughRuntime`'s cache) and publishes the new value into the
-mounted `DataScope` instance's own state.
+unit's own coordinator handle (or, with no coordinator, bypasses the
+engine's fingerprint cache) and publishes the new value for every consumer
+reading it via `{ "$dataflow": "name" }`.
 
-`invalidateData` only marks the coordinator cache (or the scope's published
+`invalidateData` only marks the coordinator cache (or the unit's published
 snapshot) stale; it does not execute a request. Use `refetchData` when the
 mutation must wait for fresh server data.
 
 `ResourceRenderer`'s default `RuntimeStore` is in memory; hosts can provide
 one through the `runtimeStore` prop. This is the common namespaced KV
-snapshot/watch plane underlying page variables, object-state slots, named
-scopes' change notifications, and named executions. Consumers opt into exact
+snapshot/watch plane underlying page variables, object-state slots, dataflow
+units' change notifications, and named executions. Consumers opt into exact
 keys or namespaces; the store does not own their subscription policy. A
 shared store must pair each renderer with a unique `runtimeScope` (or a root
 `metadata.name`) so pages do not collide. The common runtime stops at
@@ -735,7 +746,7 @@ references fail before confirmation or mutation.
 The submit runtime checks the scoped action allowlist, resolves references, verifies
 the mutation resolver and confirmation handler, waits for confirmation,
 executes the mutation, and only then applies success effects through the
-variable engine, scope registry, object-state engine, and runtime store that own those values. A declared
+variable engine, dataflow engine, object-state engine, and runtime store that own those values. A declared
 confirmation fails closed when the host does not provide
 `ResourceRenderer.confirmDialog`:
 
@@ -756,8 +767,8 @@ as an array rather than losing all but one value. Headless callers provide the
 same confirmation callback through `SubmitRuntime.confirm`.
 
 `setVariable` and `emit` work on any resource. `invalidateData`/`refetchData`
-name one or more `scope.name`s to mark stale or force a fresh fetch on —
-see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds).
+name one or more dataflow unit names to mark stale or force a fresh fetch on
+— see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds).
 
 ### Controlled FormView drafts
 
@@ -1043,86 +1054,77 @@ const scope = registry.scope({
 })
 ```
 
-### 3. Document: a named scope, visibility, and a submit row action
+### 3. Document: a named dataflow unit, visibility, and a submit row action
 
 This is the actual JSON payload an AI/MCP client emits (validated with
 `validateResource(resource, scope)` before it ever reaches
-`ResourceRenderer`) — not a TypeScript value. `customers` is wrapped in a
-`DataScope` here not because two sibling kinds share it (only `TableView`
-reads it in this example) but because the delete mutation below needs to
-target it by name with `refetchData`:
+`ResourceRenderer`) — not a TypeScript value. `customers` is declared as a
+named `dataflow` unit here not because two sibling kinds share it (only
+`TableView` reads it in this example) but because the delete mutation below
+needs to target it by name with `refetchData`:
 
 ```json
 {
   "apiVersion": "resourcekit.dev/v1alpha1",
-  "kind": "DataScope",
-  "scope": {
-    "name": "customers",
-    "binding": {
-      "source": "connection",
-      "connection": "crm-api",
-      "request": { "path": "/customers" }
-    },
-    "policy": { "refresh": { "kind": "interval", "ms": 5000 } }
-  },
-  "spec": {},
+  "kind": "Panel",
+  "dataflow": [
+    {
+      "name": "customers",
+      "binding": {
+        "source": "connection",
+        "connection": "crm-api",
+        "request": { "path": "/customers" }
+      },
+      "policy": { "refresh": { "kind": "interval", "ms": 5000 } }
+    }
+  ],
+  "visible": { "$variable": "roles", "contains": "admin" },
+  "variables": [{ "name": "roles", "type": "string[]" }],
+  "spec": { "title": "Customers" },
   "slots": [
     {
       "items": [
         {
           "apiVersion": "resourcekit.dev/v1alpha1",
-          "kind": "Panel",
-          "visible": { "$variable": "roles", "contains": "admin" },
-          "variables": [{ "name": "roles", "type": "string[]" }],
-          "spec": { "title": "Customers" },
-          "slots": [
-            {
-              "items": [
-                {
-                  "apiVersion": "resourcekit.dev/v1alpha1",
-                  "kind": "TableView",
-                  "spec": {
-                    "data": { "$scope": "customers" },
-                    "columns": {
-                      "name": { "label": "Name" },
-                      "actions": {
-                        "label": "",
-                        "display": "actions",
-                        "items": [
-                          {
-                            "id": "view",
-                            "label": "View",
-                            "event": "view"
-                          },
-                          {
-                            "id": "delete",
-                            "label": "Delete",
-                            "variant": "destructive",
-                            "submit": {
-                              "action": "customer.delete",
-                              "mutation": {
-                                "target": "rest",
-                                "url": "/customers/${payload.id}",
-                                "method": "DELETE"
-                              },
-                              "confirm": { "title": "Delete ${payload.name}?" },
-                              "onSuccess": [
-                                { "kind": "refetchData", "scopes": ["customers"] },
-                                { "kind": "emit", "event": "customer.deleted" }
-                              ]
-                            }
-                          }
-                        ]
-                      }
-                    }
+          "kind": "TableView",
+          "spec": {
+            "data": { "$dataflow": "customers" },
+            "columns": {
+              "name": { "label": "Name" },
+              "actions": {
+                "label": "",
+                "display": "actions",
+                "items": [
+                  {
+                    "id": "view",
+                    "label": "View",
+                    "event": "view"
                   },
-                  "events": {
-                    "view": { "kind": "emit", "event": "customer.viewRequested" }
+                  {
+                    "id": "delete",
+                    "label": "Delete",
+                    "variant": "destructive",
+                    "submit": {
+                      "action": "customer.delete",
+                      "mutation": {
+                        "target": "rest",
+                        "url": "/customers/${payload.id}",
+                        "method": "DELETE"
+                      },
+                      "confirm": { "title": "Delete ${payload.name}?" },
+                      "onSuccess": [
+                        { "kind": "refetchData", "dataflow": ["customers"] },
+                        { "kind": "emit", "event": "customer.deleted" }
+                      ]
+                    }
                   }
-                }
-              ]
+                ]
+              }
             }
-          ]
+          },
+          "events": {
+            "view": { "kind": "emit", "event": "customer.viewRequested" }
+          }
         }
       ]
     }
@@ -1138,11 +1140,11 @@ routes through the table's own `events`, which is envelope content (a
 sibling of `spec`), not a `spec` field, exactly like `Panel`'s `visible`
 above reads `roles` from the envelope.
 
-`record` (a fifth envelope field, alongside `variables`/`events`/
-`bindings`/`visible`/`scope`) only applies to a `recordScope: true` kind — it
-doesn't fit naturally into this list/delete flow, so here it is in
+`record` (another envelope field, alongside `variables`/`events`/
+`bindings`/`visible`/`dataflow`) only applies to a `recordScope: true` kind —
+it doesn't fit naturally into this list/delete flow, so here it is in
 isolation, resolving one customer directly by ID instead of through the
-`customers` scope above:
+`customers` dataflow unit above:
 
 ```json
 {

@@ -10,7 +10,7 @@ export default defineConfig({
     'adapters/chartkit': 'src/adapters/chartkit/index.ts',
     'adapters/basekit': 'src/adapters/basekit/index.ts',
     'adapters/datasourcekit': 'src/adapters/datasourcekit/index.ts',
-    'connectors/tanstack-query': 'src/connectors/tanstack-query/index.ts',
+    'dataflow/tanstack-query': 'src/dataflow/coordinators/tanstack-query/index.ts',
   },
   format:    ['esm', 'cjs'],
   dts:       true,

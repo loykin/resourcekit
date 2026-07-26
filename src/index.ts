@@ -6,10 +6,10 @@
 
 export type {
   JsonSchema,
-  ScopeRef,
+  DataflowRef,
   ObjectStateRef,
   ObjectStateDeclaration,
-  ScopeSpec,
+  DataflowUnit,
   QueryPolicy,
   VariableRef,
   ValueBinding,
@@ -95,10 +95,10 @@ export type {
   RuntimeStore,
   FetchStatus,
 } from './runtime/store'
-export { restResolver, staticResolver, createConnectionDataResolver, createRestResolver } from './connection/resolvers'
-export type { RestResolverOptions } from './connection/resolvers'
-export { restConnectionAdapter, createRestConnectionAdapter } from './connection/connectionAdapters'
-export type { RestConnectionConfig, RestConnectionRequest, RestConnectionAdapterOptions } from './connection/connectionAdapters'
+export { restResolver, staticResolver, createConnectionDataResolver, createRestResolver } from './dataflow/resolvers'
+export type { RestResolverOptions } from './dataflow/resolvers'
+export { restConnectionAdapter, createRestConnectionAdapter } from './dataflow/connectionAdapters'
+export type { RestConnectionConfig, RestConnectionRequest, RestConnectionAdapterOptions } from './dataflow/connectionAdapters'
 
 export { getValueAtPath, setValueAtPath, coerceVariableValue } from './core/path'
 export { runSubmit, SUBMIT_CANCELLED } from './runtime/submit'
@@ -108,11 +108,11 @@ export { LOCKED_ANNOTATION, isLocked, markLocked, preserveLockedNodes } from './
 export { canonicalizeJson, canonicalizeResource, canonicalStringify } from './core/canonical'
 
 export { clampQueryPolicy } from './runtime/queryPolicy'
-export { isScopeRef, scanScopeRefs } from './runtime/scopeRef'
+export { isDataflowRef, scanDataflowRefs } from './dataflow/ref'
 export { isObjectStateRef, scanObjectStateRefs, createObjectStateEngine } from './runtime/objectState'
 export type { ObjectStateEngine } from './runtime/objectState'
-export { createScopeRegistry } from './runtime/scopeRegistry'
-export type { ScopeRegistry, ScopeRegistration } from './runtime/scopeRegistry'
 
-export { createDirectQueryCoordinator } from './runtime/queryCoordinator'
-export type { QueryRequest, QueryStatus, QuerySnapshot, QueryHandle, QueryCoordinator } from './runtime/queryCoordinator'
+export { createDirectQueryCoordinator } from './dataflow/coordinator'
+export type { QueryRequest, QueryStatus, QuerySnapshot, QueryHandle, QueryCoordinator } from './dataflow/coordinator'
+export { createDataflowEngine } from './dataflow/engine'
+export type { DataflowEngine, CreateDataflowEngineOptions } from './dataflow/engine'

@@ -1,22 +1,22 @@
 /**
- * Vendor-neutral server-state boundary between a `scopeProvider: true` kind
- * (`ScopeProviderNode`, `src/react/ResourceRenderer.tsx`) and a
- * `DataSourceAdapter` (docs/dataflow-and-server-state-direction.md P0
- * item 2). A scope provider never talks to a coordinator directly — it only
- * knows about `DataBinding`/`resolve`; wiring a coordinator's background
- * results back into a mounted provider goes through `onUpdate` below,
- * published into `RuntimeStore`'s `scope` namespace.
+ * Vendor-neutral server-state boundary between the document-level
+ * `DataflowEngine` (`src/dataflow/engine.ts`) and a `DataSourceAdapter`
+ * (docs/dataflow-and-server-state-direction.md P0 item 2). The engine never
+ * talks to a coordinator directly — it only knows about `DataBinding`/
+ * `resolve`; wiring a coordinator's background results back into the engine
+ * goes through `onUpdate` below, published into `RuntimeStore`'s `dataflow`
+ * namespace.
  *
  * `createDirectQueryCoordinator` is the only implementation here: no cache,
  * no polling, no dedup, no retry — it preserves a one-shot resolve
  * behavior. A TanStack Query (or other) coordinator is a separate,
  * pluggable implementation of the same `QueryCoordinator` contract (see
  * `createCoordinatorResolve` below for how either kind actually plugs into
- * a scope provider's resolve, and
- * `@loykin/resourcekit/connectors/tanstack-query` for the TanStack-backed one).
+ * the engine's resolve, and
+ * `@loykin/resourcekit/dataflow/tanstack-query` for the TanStack-backed one).
  */
 
-import { clampQueryPolicy } from './queryPolicy'
+import { clampQueryPolicy } from '../runtime/queryPolicy'
 import type { DataBinding, DataResolveContext, QueryPolicy, QueryScopePolicy } from '../core/types'
 import type { ResourceRegistry } from '../core/registry'
 
@@ -60,9 +60,8 @@ interface DirectEntry {
 }
 
 export function createDirectQueryCoordinator(): QueryCoordinator {
-  // Multiple handles may open the same nodeId (e.g. two ScopeProviderNode
-  // instances consuming the same scope name); invalidate/refetch by nodeId
-  // must reach all of them.
+  // Multiple handles could in principle open the same nodeId; invalidate/
+  // refetch by nodeId must reach all of them regardless.
   const entriesByNodeId = new Map<string, Set<DirectEntry>>()
 
   function notify(entry: DirectEntry) {
@@ -163,10 +162,10 @@ export interface CreateCoordinatorResolveOptions {
    * way a coordinator's own background activity (a poll tick, an
    * out-of-band `invalidate`/`refetch`) reaches anything, since `resolve` is
    * otherwise a one-shot call. Wire this to publish into `RuntimeStore`'s
-   * `scope` namespace (`runtimeKeys.scope(nodeId, scope)`) — the mounted
-   * `ScopeProviderNode` for that name subscribes to that key and updates its
-   * own local state from it. Safe to ignore (e.g. a coordinator with no
-   * polling policy never calls this after the first snapshot).
+   * `dataflow` namespace (`runtimeKeys.dataflow(nodeId, scope)`) — the
+   * `DataflowEngine` for that name reads directly off that same key. Safe to
+   * ignore (e.g. a coordinator with no polling policy never calls this after
+   * the first snapshot).
    */
   onUpdate?: (nodeId: string, snapshot: QuerySnapshot) => void
 }
@@ -194,8 +193,8 @@ interface CachedHandle {
 
 /**
  * Bridges any `QueryCoordinator` (direct or a scheduling one like TanStack
- * Query) into the `(binding, ctx) => Promise<unknown>` shape a
- * `ScopeProviderNode` needs (docs/dataflow-and-server-state-direction.md P1
+ * Query) into the `(binding, ctx) => Promise<unknown>` shape the
+ * `DataflowEngine` needs (docs/dataflow-and-server-state-direction.md P1
  * item 1). Query key comes from a registered `DataSourceAdapter.queryKey`
  * when one exists for the binding's source; otherwise falls back to
  * `[nodeId, stableStringify(binding)]` when a source has no richer adapter
@@ -207,7 +206,7 @@ interface CachedHandle {
  * `onUpdate` (a fresh handle per call would settle its own promise once and
  * be abandoned, so a poll tick between calls would have nothing listening).
  * The cached handle is replaced (old one disposed) only when the computed
- * key changes — i.e. the scope's variable-dependent binding now refers to a
+ * key changes — i.e. the unit's variable-dependent binding now refers to a
  * genuinely different query, not just a re-evaluation with the same one.
  */
 export function createCoordinatorResolve(options: CreateCoordinatorResolveOptions): CoordinatorResolveBridge {

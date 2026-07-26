@@ -47,10 +47,10 @@
       "import": "./dist/adapters/datasourcekit.js",
       "require": "./dist/adapters/datasourcekit.cjs"
     },
-    "./connectors/tanstack-query": {
-      "types": "./dist/connectors/tanstack-query.d.ts",
-      "import": "./dist/connectors/tanstack-query.js",
-      "require": "./dist/connectors/tanstack-query.cjs"
+    "./dataflow/tanstack-query": {
+      "types": "./dist/dataflow/tanstack-query.d.ts",
+      "import": "./dist/dataflow/tanstack-query.js",
+      "require": "./dist/dataflow/tanstack-query.cjs"
     },
     "./adapters/styles": "./styles/adapters/index.css",
     "./adapters/designkit/styles": "./styles/adapters/designkit.css",

@@ -1,14 +1,13 @@
 import { createElement, Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import { isScopeRef, scanScopeRefs } from '../runtime/scopeRef'
-import { clampQueryPolicy } from '../runtime/queryPolicy'
+import { isDataflowRef, scanDataflowRefs } from '../dataflow/ref'
 import { createObjectStateEngine, isObjectStateRef, scanObjectStateRefs } from '../runtime/objectState'
 import type { ObjectStateEngine } from '../runtime/objectState'
-import { createScopeRegistry } from '../runtime/scopeRegistry'
-import type { ScopeRegistry } from '../runtime/scopeRegistry'
-import { createCoordinatorResolve } from '../runtime/queryCoordinator'
-import type { CoordinatorResolveBridge, QueryCoordinator } from '../runtime/queryCoordinator'
-import type { ConfirmSpec, DataBinding, EventPolicy, KindManifest, ObjectStateDeclaration, ObjectStateRef, Resource, ScopeRef, VariableDeclaration, VariableValue, VisibilityCondition } from '../core/types'
+import { createCoordinatorResolve } from '../dataflow/coordinator'
+import type { QueryCoordinator } from '../dataflow/coordinator'
+import { createDataflowEngine } from '../dataflow/engine'
+import type { DataflowEngine } from '../dataflow/engine'
+import type { ConfirmSpec, DataBinding, DataflowRef, DataflowUnit, EventPolicy, KindManifest, ObjectStateDeclaration, ObjectStateRef, Resource, VariableDeclaration, VariableValue, VisibilityCondition } from '../core/types'
 import type { ResourceRegistry, ScopedRegistry } from '../core/registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../runtime/variables'
 import type { VariableEngine } from '../runtime/variables'
@@ -41,18 +40,17 @@ export interface ResourceRendererProps {
    */
   onEvent?: (event: string, payload?: unknown) => void
   onDataError?: (error: unknown, node: string) => void
-  /** When provided, `scopeProvider: true` kinds route their fetch through this coordinator (caching/polling/dedup) instead of resolving once directly. Omitted preserves a plain one-shot fetch. */
+  /** When provided, `dataflow` units route their fetch through this coordinator (caching/polling/dedup) instead of resolving once directly. Omitted preserves a plain one-shot fetch. */
   queryCoordinator?: QueryCoordinator
 }
 
 interface Runtime {
   engine: VariableEngine
   objectState: ObjectStateEngine
-  scopeRegistry: ScopeRegistry
+  dataflowEngine: DataflowEngine
   store: RuntimeStore
   scope: string
   dataCache: Map<string, { fingerprint: string; promise: Promise<Record<string, unknown>[]> }>
-  coordinatorResolve?: CoordinatorResolveBridge
 }
 
 interface ResourceNodeProps extends Omit<ResourceRendererProps, 'resource'> {
@@ -60,8 +58,6 @@ interface ResourceNodeProps extends Omit<ResourceRendererProps, 'resource'> {
   runtime: Runtime
   /** Nearest ancestor record scope, inherited by all descendants. */
   record?: Record<string, unknown>
-  /** Named ancestor scopes (from `scopeProvider: true` kinds), inherited by all descendants — see `ScopeRef`. */
-  scopes?: Record<string, unknown>
 }
 
 const emptyRows = Promise.resolve<Record<string, unknown>[]>([])
@@ -88,6 +84,16 @@ function collectObjectState(resource: Resource, declarations: ObjectStateDeclara
   }
 
   return declarations
+}
+
+function collectDataflow(resource: Resource, units: DataflowUnit[] = []): DataflowUnit[] {
+  units.push(...(resource.dataflow ?? []))
+
+  for (const slot of resource.slots ?? []) {
+    for (const child of slot.items) collectDataflow(child, units)
+  }
+
+  return units
 }
 
 function renderNodes(
@@ -122,11 +128,10 @@ function isVisible(resource: Resource, runtime: Runtime): boolean {
 function resolveThroughRuntime(
   registry: ResourceRendererProps['registry'],
   runtime: Runtime,
-  binding: DataBinding | ScopeRef | ObjectStateRef,
-  scopes: Record<string, unknown>,
+  binding: DataBinding | DataflowRef | ObjectStateRef,
 ): Promise<Record<string, unknown>[]> {
-  if (isScopeRef(binding)) {
-    const value = scopes[binding.$scope]
+  if (isDataflowRef(binding)) {
+    const value = runtime.dataflowEngine.read(binding.$dataflow)
     return Promise.resolve(asRuntimeRows(binding.path ? getValueAtPath(value, binding.path) : value))
   }
   if (isObjectStateRef(binding)) {
@@ -196,9 +201,9 @@ function scanResourceObjectStateNames(resource: Resource): Set<string> {
   return names
 }
 
-function scanResourceScopeNames(resource: Resource): Set<string> {
+function scanResourceDataflowNames(resource: Resource): Set<string> {
   const names = new Set<string>()
-  for (const ref of scanScopeRefs(resource.spec)) names.add(ref.$scope)
+  for (const ref of scanDataflowRefs(resource.spec)) names.add(ref.$dataflow)
   return names
 }
 
@@ -209,7 +214,6 @@ function scanResourceVariableNames(resource: Resource): Set<string> {
     visible: resource.visible,
     disabled: resource.disabled,
     record: resource.record,
-    scope: resource.scope?.binding,
   })
   for (const slot of resource.slots ?? []) {
     for (const child of slot.items) {
@@ -221,7 +225,7 @@ function scanResourceVariableNames(resource: Resource): Set<string> {
 
 function useNodeVersion(runtime: Runtime, resource: Resource): number {
   const objectStateDependencies = useMemo(() => scanResourceObjectStateNames(resource), [resource])
-  const scopeDependencies = useMemo(() => scanResourceScopeNames(resource), [resource])
+  const dataflowDependencies = useMemo(() => scanResourceDataflowNames(resource), [resource])
   const variableDependencies = useMemo(() => scanResourceVariableNames(resource), [resource])
   const versionRef = useRef(0)
 
@@ -237,14 +241,13 @@ function useNodeVersion(runtime: Runtime, resource: Resource): number {
             if (snapshot?.status !== 'pending') notify()
           }),
         ),
-        // Load-bearing, not decorative: a ScopeProviderNode's new value only
-        // reaches descendants through the `scopes` prop, never a store read
-        // — but a consuming kind's own effect (e.g. views/plugin.tsx's
-        // `useRows`) is keyed on `ctx.data.revision`, which only this
-        // subscription bumps. Without it, a prop change alone would not
-        // re-trigger that effect.
-        ...[...scopeDependencies].map((name) =>
-          runtime.store.subscribe({ kind: 'key', key: runtimeKeys.scope(name, runtime.scope) }, ({ snapshot }) => {
+        // Load-bearing, not decorative: a dataflow unit's new value is read
+        // via `ctx.data.resolve`, but a consuming kind's own effect (e.g.
+        // views/plugin.tsx's `useRows`) is keyed on `ctx.data.revision`,
+        // which only this subscription bumps. Without it, the unit's store
+        // publish alone would not re-trigger that effect.
+        ...[...dataflowDependencies].map((name) =>
+          runtime.store.subscribe({ kind: 'key', key: runtimeKeys.dataflow(name, runtime.scope) }, ({ snapshot }) => {
             if (snapshot?.status !== 'pending') notify()
           }),
         ),
@@ -256,7 +259,7 @@ function useNodeVersion(runtime: Runtime, resource: Resource): number {
         for (const unsubscribe of unsubscribers) unsubscribe()
       }
     },
-    [runtime.store, runtime.scope, objectStateDependencies, scopeDependencies, variableDependencies],
+    [runtime.store, runtime.scope, objectStateDependencies, dataflowDependencies, variableDependencies],
   )
   const getSnapshot = useCallback(() => versionRef.current, [])
 
@@ -335,7 +338,7 @@ function renderKindNode(
         entries: (name?: string) => slotEntries.get(name) ?? [],
       },
       data: {
-        resolve: (binding) => resolveThroughRuntime(registry, runtime, binding, props.scopes ?? {}),
+        resolve: (binding) => resolveThroughRuntime(registry, runtime, binding),
         revision: nodeVersion,
       },
       bindings: {
@@ -391,7 +394,6 @@ function renderKindNode(
         set: runtime.engine.set,
       },
       record,
-      scopes: props.scopes ?? {},
       disabled: resource.disabled !== undefined && evaluateVisibility(resource.disabled, (name) => runtime.engine.get(name)),
       actions: {
         submit: (submit, payload) =>
@@ -404,9 +406,9 @@ function renderKindNode(
                 set: runtime.engine.set,
               },
               store: runtime.store,
-              scopes: {
-                invalidate: runtime.scopeRegistry.invalidate,
-                refetch: runtime.scopeRegistry.refetch,
+              dataflow: {
+                invalidate: runtime.dataflowEngine.invalidate,
+                refetch: runtime.dataflowEngine.refetch,
               },
               allowedActions,
               confirm: props.confirmDialog,
@@ -459,7 +461,7 @@ function RecordScopeNode(props: RecordScopeNodeProps): ReactNode {
     if (!binding || unresolved) return
     let cancelled = false
     setError(undefined)
-    resolveThroughRuntime(registry, runtime, binding, props.scopes ?? {})
+    resolveThroughRuntime(registry, runtime, binding)
       .then((rows) => {
         if (cancelled) return
         const record = rows[0] && isRecord(rows[0]) ? rows[0] : undefined
@@ -484,159 +486,6 @@ function RecordScopeNode(props: RecordScopeNodeProps): ReactNode {
   return renderKindNode({ ...props, record: state.record }, manifest, render, props.nodeVersion)
 }
 
-interface ScopeProviderNodeProps extends ResourceNodeProps {
-  manifest: KindManifest<unknown, KindRenderFn>
-  render: KindRenderFn
-  /** This resource's own change counter — see `useNodeVersion`. */
-  nodeVersion: number
-}
-
-/**
- * Generalizes `RecordScopeNode` for a `scopeProvider: true` kind: resolves
- * `resource.scope.binding` once (no first-row reduction — carries whatever
- * shape the binding resolves to, typically an array) and publishes it to
- * descendants as `ctx.scopes[scope.name]`, the same way `RecordScopeNode`
- * publishes `ctx.record` — plain prop-threading through the recursive
- * render chain, not React Context.
- *
- * Two arrival paths, not one: its own fetch (below), and an external/
- * background arrival (a coordinator poll tick, or an out-of-band host write)
- * reconciled via a `RuntimeStore` subscription — see the second `useEffect`.
- */
-function ScopeProviderNode(props: ScopeProviderNodeProps): ReactNode {
-  const { resource, registry, runtime, manifest, render } = props
-  // A malformed document (scopeProvider kind with no resource.scope) must
-  // still degrade via renderError instead of crashing the whole tree — but
-  // every hook below has to run unconditionally regardless (Rules of
-  // Hooks), so `spec` stays possibly-undefined throughout and the actual
-  // bail-out happens only in the render branch at the bottom, after all
-  // hooks have executed. (validateResource is expected to catch a missing
-  // `scope` before render; this is the defense-in-depth path for when it
-  // slips through unvalidated.)
-  const spec = resource.scope
-
-  const bindingKey = JSON.stringify(spec?.binding ?? null)
-  const refs = useMemo(() => scanVariableRefs(spec?.binding), [bindingKey]) // eslint-disable-line react-hooks/exhaustive-deps
-  const fingerprint = [...refs].map((name) => JSON.stringify(runtime.engine.get(name) ?? null)).join('|')
-  const stateKey = `${bindingKey}::${fingerprint}`
-  const interpolated = interpolate(spec?.binding, runtime.engine.snapshot())
-  const unresolved = interpolated.unresolved.size > 0
-  const scopePolicy = 'options' in registry ? registry.options.queryPolicy : undefined
-  const clampedPolicy = clampQueryPolicy(spec?.policy, scopePolicy)
-
-  const [state, setState] = useState<{ key: string; value: unknown } | null>(null)
-  const [error, setError] = useState<unknown>()
-
-  const publish = useCallback(
-    (snapshot: { status: 'ready'; value: unknown } | { status: 'error'; error: unknown }) => {
-      if (!spec) return
-      runtime.store.publish(runtimeKeys.scope(spec.name, runtime.scope), snapshot)
-    },
-    [runtime.store, runtime.scope, spec],
-  )
-
-  // Guards against out-of-order completion: a variable change (new
-  // `stateKey`) or an explicit refetch/invalidate can start a new fetch
-  // while a previous one is still in flight. Each call captures its own
-  // generation and only commits if it's still the most recent one when it
-  // settles — the same supersession `RecordScopeNode` gets from its
-  // effect's `cancelled` flag, but shared across both the effect-driven
-  // "initial" call and the registry-driven "refetch" call.
-  const generationRef = useRef(0)
-
-  const runFetch = useCallback(
-    async (reason: 'initial' | 'refetch') => {
-      if (!spec) return
-      const generation = ++generationRef.current
-      try {
-        // The coordinator never interpolates ${var} refs itself — only
-        // resolveThroughRuntime does that internally — so the fully
-        // resolved binding (computed once above, from this same render's
-        // variable snapshot) must be what's handed to it.
-        // resolveThroughRuntime's cache is keyed purely by binding+variable
-        // fingerprint — it has no notion of "reason", so an explicit
-        // refetch (nothing actually changed) would otherwise just return
-        // the same cached promise. Drop the entry first to force a real
-        // resolver call.
-        if (reason === 'refetch' && !runtime.coordinatorResolve) {
-          runtime.dataCache.delete(canonicalStringify(spec.binding))
-        }
-        const value = runtime.coordinatorResolve
-          ? await runtime.coordinatorResolve.resolve(interpolated.value as DataBinding, {
-              variables: runtime.engine.snapshot(),
-              nodeId: spec.name,
-              reason,
-              policy: clampedPolicy,
-            })
-          : await resolveThroughRuntime(registry, runtime, spec.binding, props.scopes ?? {})
-        if (generationRef.current !== generation) return
-        setState({ key: stateKey, value })
-        setError(undefined)
-        publish({ status: 'ready', value })
-      } catch (nextError) {
-        if (generationRef.current !== generation) return
-        setError(nextError)
-        publish({ status: 'error', error: nextError })
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [stateKey, clampedPolicy, spec],
-  )
-
-  // Registration — lets a `refetchData`/`invalidateData` SubmitEffect fired
-  // anywhere in the tree reach this specific mounted instance by name.
-  useEffect(() => {
-    if (!spec || unresolved) return
-    return runtime.scopeRegistry.register(spec.name, {
-      refetch: () => runFetch('refetch'),
-      invalidate: () => {
-        if (runtime.coordinatorResolve) {
-          void runtime.coordinatorResolve.invalidate([spec.name])
-        } else {
-          runtime.store.publish(runtimeKeys.scope(spec.name, runtime.scope), {
-            ...(runtime.store.read(runtimeKeys.scope(spec.name, runtime.scope)) ?? { status: 'idle' }),
-            isStale: true,
-          })
-        }
-      },
-    })
-  }, [runtime, spec, unresolved, clampedPolicy, runFetch])
-
-  // External/background arrival: a coordinator poll tick (delivered via the
-  // root `onUpdate` callback, which publishes into this same store key) or
-  // an out-of-band host write must reach this mounted instance even with no
-  // `resolve()` call of its own in flight.
-  useEffect(() => {
-    if (!spec) return
-    return runtime.store.subscribe({ kind: 'key', key: runtimeKeys.scope(spec.name, runtime.scope) }, ({ snapshot }) => {
-      if (!snapshot || snapshot.status === 'pending') return
-      if (snapshot.status === 'ready') {
-        setState({ key: stateKey, value: snapshot.value })
-        setError(undefined)
-      } else if (snapshot.status === 'error') {
-        setError(snapshot.error)
-      }
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtime.store, runtime.scope, spec])
-
-  useEffect(() => {
-    if (!spec || unresolved) return
-    void runFetch('initial')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stateKey, unresolved, spec])
-
-  if (!spec) return props.renderError?.(new Error(`kind ${resource.kind} has scopeProvider: true but no resource.scope`), resource) ?? null
-  if (unresolved) return renderKindNode({ ...props, scopes: props.scopes }, manifest, render, props.nodeVersion)
-  if (error) return props.renderError?.(error, resource) ?? null
-
-  // Stale-while-revalidate: after the first load, keep rendering the
-  // previous value while a refetch is in flight so children don't unmount.
-  if (!state) return props.renderLoading?.() ?? null
-
-  return renderKindNode({ ...props, scopes: { ...props.scopes, [spec.name]: state.value } }, manifest, render, props.nodeVersion)
-}
-
 function ResourceNode(props: ResourceNodeProps): ReactNode {
   const { resource, registry } = props
   const nodeVersion = useNodeVersion(props.runtime, resource)
@@ -649,9 +498,6 @@ function ResourceNode(props: ResourceNodeProps): ReactNode {
 
   if (manifest.recordScope) {
     return createElement(RecordScopeNode, { ...props, manifest, render, nodeVersion })
-  }
-  if (manifest.scopeProvider) {
-    return createElement(ScopeProviderNode, { ...props, manifest, render, nodeVersion })
   }
 
   return renderKindNode(props, manifest, render, nodeVersion)
@@ -683,7 +529,6 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
     engine.declare(collectVariables(resource))
     const objectState = createObjectStateEngine(store, runtimeScope)
     objectState.declare(collectObjectState(resource))
-    const scopeRegistry = createScopeRegistry()
     const dataCache = new Map<string, { fingerprint: string; promise: Promise<Record<string, unknown>[]> }>()
 
     const coordinatorResolve = props.queryCoordinator
@@ -693,25 +538,34 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
           resolve: async (b, ctx) => applyValuePath(await callResolver(props.registry, b, ctx), b),
           scopePolicy: 'options' in props.registry ? props.registry.options.queryPolicy : undefined,
           // The only path a coordinator's own background activity (a poll
-          // tick, an out-of-band invalidate/refetch) reaches a mounted
-          // `ScopeProviderNode` — `resolve()` itself only ever delivers the
-          // *first* value for a given call. Publishing into the `scope`
-          // namespace is what the node's own store subscription reconciles.
+          // tick, an out-of-band invalidate/refetch) reaches the engine —
+          // `resolve()` itself only ever delivers the *first* value for a
+          // given call. Publishing into the `dataflow` namespace is what the
+          // engine reads directly off on every subsequent `read()`/`status()`.
           onUpdate: (nodeId, snapshot) => {
-            const key = runtimeKeys.scope(nodeId, runtimeScope)
+            const key = runtimeKeys.dataflow(nodeId, runtimeScope)
             if (snapshot.status === 'ready') store.publish(key, { status: 'ready', value: snapshot.value })
             else if (snapshot.status === 'error') store.publish(key, { status: 'error', error: snapshot.error })
           },
         })
       : undefined
 
-    return { engine, objectState, scopeRegistry, store, scope: runtimeScope, dataCache, coordinatorResolve }
+    const dataflowEngine = createDataflowEngine({
+      store,
+      scope: runtimeScope,
+      variables: engine,
+      resolve: async (b, ctx) => applyValuePath(await callResolver(props.registry, b, ctx), b),
+      coordinatorResolve,
+      scopePolicy: 'options' in props.registry ? props.registry.options.queryPolicy : undefined,
+    })
+
+    return { engine, objectState, dataflowEngine, store, scope: runtimeScope, dataCache }
   }, [props.runtimeStore, props.runtimeScope, props.registry, props.queryCoordinator, resource])
 
   useEffect(() => {
-    const coordinatorResolve = runtime.coordinatorResolve
-    return () => coordinatorResolve?.dispose()
-  }, [runtime])
+    runtime.dataflowEngine.declare(collectDataflow(resource))
+    return () => runtime.dataflowEngine.dispose()
+  }, [runtime, resource])
 
   return createElement(RootResourceNode, { ...props, resource, runtime })
 }

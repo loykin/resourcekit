@@ -232,9 +232,9 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
       // recursively, including a kind's own embedded nested $defs (e.g.
       // chartkit's `chartDefs`). Rewriting unconditionally would also catch
       // an unrelated third-party `data` property nested in there that has
-      // nothing to do with DataBinding/ScopeRef.
+      // nothing to do with DataBinding/DataflowRef.
       if (options.hasDataBindingSchema && 'data' in properties) {
-        properties.data = { oneOf: [{ $ref: '#/$defs/dataBinding' }, { $ref: '#/$defs/scopeRef' }] }
+        properties.data = { oneOf: [{ $ref: '#/$defs/dataBinding' }, { $ref: '#/$defs/dataflowRef' }] }
       }
       if (options.hasMutationBindingSchema && 'mutation' in properties) properties.mutation = { $ref: '#/$defs/mutationBinding' }
       if ('mutation' in properties && 'action' in properties && options.allowedActions) {
@@ -254,9 +254,11 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
  * The envelope properties the runtime reads directly regardless of kind:
  * `variables`/`events`/`objectState` unconditionally (like `visible`/
  * `disabled`), `record` only for a `recordScope: true` kind with a
- * registered `DataBinding` schema, `scope` only for a `scopeProvider: true`
- * kind (mirrors `withWellKnownRefs`'s `hasDataBindingSchema` guard for
- * kind-placed `spec.data`).
+ * registered `DataBinding` schema. `dataflow` is available on every kind's
+ * envelope, same footing as `variables`/`objectState` — no manifest flag
+ * gates it, since a dataflow unit is never tied to any particular kind
+ * (only gated on `hasDataBindingSchema`, since a unit's `binding` is
+ * meaningless with zero registered resolvers).
  */
 function commonEnvelopeProperties(manifest: KindManifest, refOptions: WellKnownRefOptions): Record<string, unknown> {
   return {
@@ -269,19 +271,8 @@ function commonEnvelopeProperties(manifest: KindManifest, refOptions: WellKnownR
     ...(manifest.recordScope && refOptions.hasDataBindingSchema
       ? { record: { oneOf: [{ $ref: '#/$defs/dataBinding' }, { $ref: '#/$defs/objectStateRef' }] } }
       : {}),
-    ...(manifest.scopeProvider && refOptions.hasDataBindingSchema
-      ? {
-          scope: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['name', 'binding'],
-            properties: {
-              name: { type: 'string', description: 'Name descendants reference via { "$scope": name }.' },
-              binding: { $ref: '#/$defs/dataBinding' },
-              policy: { $ref: '#/$defs/queryPolicy' },
-            },
-          },
-        }
+    ...(refOptions.hasDataBindingSchema
+      ? { dataflow: { type: 'array', items: { $ref: '#/$defs/dataflowUnit' } } }
       : {}),
   }
 }
@@ -299,12 +290,12 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
       initialValue: {},
     },
   }
-  defs.scopeRef = {
+  defs.dataflowRef = {
     type: 'object',
     additionalProperties: false,
-    required: ['$scope'],
+    required: ['$dataflow'],
     properties: {
-      $scope: { type: 'string', description: 'Name provided by an ancestor scopeProvider kind (its scope.name).' },
+      $dataflow: { type: 'string', description: 'Name of a dataflow unit declared anywhere in this document (see the document-wide dataflow array).' },
       path: { type: 'string' },
     },
   }
@@ -389,7 +380,24 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
 
   const dataSchemas = dataBindingSchemas(scoped.listDataResolvers(), scoped.options.connections?.allow, scoped.options.datasources?.allow)
   const hasDataBindingSchema = dataSchemas.length > 0
-  if (hasDataBindingSchema) defs.dataBinding = dataSchemas.length === 1 ? dataSchemas[0] : { oneOf: dataSchemas }
+  if (hasDataBindingSchema) {
+    defs.dataBinding = dataSchemas.length === 1 ? dataSchemas[0] : { oneOf: dataSchemas }
+    defs.dataflowUnit = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'binding'],
+      properties: {
+        name: { type: 'string', description: 'Referenced elsewhere via { "$dataflow": name }.' },
+        binding: { $ref: '#/$defs/dataBinding' },
+        policy: { $ref: '#/$defs/queryPolicy' },
+        dependOn: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Names of other dataflow units that must reach ready before this one starts fetching — execution-order gating only. Never a value reference: this unit\'s binding must not read another unit\'s resolved value.',
+        },
+      },
+    }
+  }
 
   const mutationSchemas = mutationBindingSchemas(scoped.listMutationResolvers(), scoped.options.datasources?.allow)
   const hasMutationBindingSchema = mutationSchemas.length > 0
@@ -427,7 +435,6 @@ function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOpti
       'spec',
       ...(hasRequiredBindings(manifest) ? ['bindings'] : []),
       ...(manifest.recordScope && refOptions.hasDataBindingSchema ? ['record'] : []),
-      ...(manifest.scopeProvider && refOptions.hasDataBindingSchema ? ['scope'] : []),
     ],
     properties: {
       $schema: { type: 'string' },
@@ -585,7 +592,6 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
     const required = ['apiVersion', 'kind', 'spec']
     if (hasRequiredBindings(manifest)) required.push('bindings')
     if (manifest.recordScope && refOptions.hasDataBindingSchema) required.push('record')
-    if (manifest.scopeProvider && refOptions.hasDataBindingSchema) required.push('scope')
 
     if (manifest.slotPolicy) {
       const slotBranches: JsonSchema[] = []

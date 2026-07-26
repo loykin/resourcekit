@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRegistry } from '../../core/registry'
-import { staticResolver } from '../../connection/resolvers'
+import { staticResolver } from '../../dataflow/resolvers'
 import { validateResource } from '../../core/validation'
 import type { Resource, ResourceKitPlugin } from '../../core/types'
 import type { KindRenderFn } from '../../react'
@@ -139,7 +139,7 @@ describe('flattened list/detail and form views (test.md §4)', () => {
                   action: 'users.delete',
                   mutation: { target: 'rest', url: '/api/users/${payload.id}', method: 'DELETE' },
                   confirm: { title: 'Delete ${payload.name}?' },
-                  onSuccess: [{ kind: 'invalidateData', scopes: ['users'] }],
+                  onSuccess: [{ kind: 'invalidateData', dataflow: ['users'] }],
                 },
               },
             ],

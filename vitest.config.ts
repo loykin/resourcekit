@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
+    setupFiles:  ['./vitest.setup.ts'],
     include:     ['src/**/*.test.ts', 'playground/src/**/*.test.ts', 'playground/scenarios/**/*.test.ts', 'examples/mcp-server/src/**/*.test.ts'],
     coverage: {
       provider: 'v8',

@@ -1,6 +1,6 @@
 import { QueryClient, environmentManager } from '@tanstack/query-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { QueryCoordinator, QueryHandle, QueryRequest, QuerySnapshot } from '../../runtime/queryCoordinator'
+import type { QueryCoordinator, QueryHandle, QueryRequest, QuerySnapshot } from '../../coordinator'
 import { createTanStackQueryCoordinator } from './coordinator'
 
 function freshClient(): QueryClient {

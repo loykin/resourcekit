@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRegistry } from './registry'
-import { staticResolver } from '../connection/resolvers'
+import { staticResolver } from '../dataflow/resolvers'
 import { validateResource } from './validation'
 
 const panel = {
@@ -416,12 +416,84 @@ describe('validateResource', () => {
     expect(result.issues.map((issue) => issue.message)).toContain('record is required for recordScope kind Panel')
   })
 
-  it('rejects a scopeProvider kind with no scope', () => {
-    const scopeProvider = createRegistry()
-    scopeProvider.use({ name: 'test', kinds: [{ ...panel, scopeProvider: true }] })
-
-    const result = validateResource({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'x' } }, scopeProvider)
+  it('rejects a $dataflow ref to an undeclared unit', () => {
+    const result = validateResource(
+      { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'x', data: { $dataflow: 'rows' } } },
+      registry(),
+    )
     expect(result.valid).toBe(false)
-    expect(result.issues.map((issue) => issue.message)).toContain('scope is required for scopeProvider kind Panel')
+    expect(result.issues.map((issue) => issue.message)).toContain('referenced dataflow unit rows is not declared anywhere in this document')
+  })
+
+  it('accepts a $dataflow ref to a unit declared in a sibling subtree, not an ancestor', () => {
+    const nestablePanel = { ...panel, slotPolicy: { defaultSlot: { min: 0, accepts: ['Panel'] } } }
+    const nested = createRegistry()
+    nested.use({ name: 'test', kinds: [nestablePanel], dataResolvers: { static: staticResolver } })
+
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        dataflow: [{ name: 'rows', binding: { source: 'static', rows: [] } }],
+        slots: [
+          {
+            items: [
+              { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'y', data: { $dataflow: 'rows' } } },
+            ],
+          },
+        ],
+      },
+      nested,
+    )
+    expect(result.valid).toBe(true)
+  })
+
+  it('rejects a dependOn reference to an undeclared unit', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        dataflow: [{ name: 'detail', binding: { source: 'static', rows: [] }, dependOn: ['missing'] }],
+      },
+      registry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('dataflow unit detail depends on undeclared unit missing')
+  })
+
+  it('rejects a dependOn cycle', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        dataflow: [
+          { name: 'a', binding: { source: 'static', rows: [] }, dependOn: ['b'] },
+          { name: 'b', binding: { source: 'static', rows: [] }, dependOn: ['a'] },
+        ],
+      },
+      registry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.some((issue) => issue.message.includes('dependency cycle'))).toBe(true)
+  })
+
+  it('rejects a duplicate dataflow unit name', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        dataflow: [
+          { name: 'rows', binding: { source: 'static', rows: [] } },
+          { name: 'rows', binding: { source: 'static', rows: [] } },
+        ],
+      },
+      registry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('dataflow unit name rows is declared more than once')
   })
 })

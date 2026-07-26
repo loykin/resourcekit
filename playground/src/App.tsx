@@ -53,7 +53,7 @@ import { ResourceRenderer } from '@loykin/resourcekit/react'
 import type { KindRenderFn } from '@loykin/resourcekit/react'
 import { publicKindNames } from '@loykin/resourcekit/adapters'
 import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapters/datasourcekit'
-import { createTanStackQueryCoordinator } from '@loykin/resourcekit/connectors/tanstack-query'
+import { createTanStackQueryCoordinator } from '@loykin/resourcekit/dataflow/tanstack-query'
 import { QueryClient } from '@tanstack/query-core'
 import { createPlaygroundConnectionProvider, createPlaygroundDatasourceManager } from './demoDatasourceKit'
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
@@ -1460,6 +1460,21 @@ const connectionWriteReadPage: Resource = {
 const dynamicDatasourceKitResource: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
+  metadata: { name: 'dynamic-datasourcekit-metrics' },
+  variables: [
+    { name: 'region', default: 'us-east' },
+    { name: 'selectedHost', default: 'web-1' },
+  ],
+  dataflow: [
+    {
+      name: 'hostCpu',
+      binding: {
+        source: 'connection',
+        connection: 'demo-metrics-dynamic',
+        request: { metric: 'cpuPercent', region: '${region}' },
+      },
+    },
+  ],
   spec: {
     leftPaneWidth: 280,
     rightPaneWidth: 340,
@@ -1506,7 +1521,7 @@ const dynamicDatasourceKitResource: Resource = {
                   kind: 'SelectableList',
                   bindings: { selected: { $variable: 'selectedHost' } },
                   spec: {
-                    data: { $scope: 'hostCpu' },
+                    data: { $dataflow: 'hostCpu' },
                     idField: 'host',
                     primary: { field: 'host' },
                     secondary: [
@@ -1535,7 +1550,7 @@ const dynamicDatasourceKitResource: Resource = {
               region: { label: 'Region' },
               cpuPercent: { label: 'CPU %', type: 'number', align: 'right' },
             },
-            data: { $scope: 'hostCpu' },
+            data: { $dataflow: 'hostCpu' },
           },
         },
       ],
@@ -1616,62 +1631,33 @@ const dynamicDatasourceKitResource: Resource = {
   ],
 }
 
-const dynamicDatasourceKitPage: Resource = {
-  apiVersion: 'resourcekit.dev/v1alpha1',
-  kind: 'DataScope',
-  metadata: { name: 'dynamic-datasourcekit-metrics' },
-  variables: [
-    { name: 'region', default: 'us-east' },
-    { name: 'selectedHost', default: 'web-1' },
-  ],
-  scope: {
-    name: 'hostCpu',
-    binding: {
-      source: 'connection',
-      connection: 'demo-metrics-dynamic',
-      request: { metric: 'cpuPercent', region: '${region}' },
-    },
-  },
-  spec: {},
-  slots: [{ items: [dynamicDatasourceKitResource] }],
-}
-
 // docs/dataflow-and-server-state-direction.md P1 item 1 — proves the
 // TanStack Query coordinator actually polls: `tick`/`time` change on their
 // own every 2s with zero user interaction, driven entirely by `policy`.
 const tanStackPollingDemoPage: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
-  kind: 'DataScope',
-  scope: {
-    name: 'liveTick',
-    binding: { source: 'liveClock' },
-    policy: { refresh: { kind: 'interval', ms: 2000 } },
-  },
-  spec: {},
+  kind: 'Panel',
+  dataflow: [
+    {
+      name: 'liveTick',
+      binding: { source: 'liveClock' },
+      policy: { refresh: { kind: 'interval', ms: 2000 } },
+    },
+  ],
+  spec: { title: 'TanStack Query polling demo' },
   slots: [
     {
       items: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
-          kind: 'Panel',
-          spec: { title: 'TanStack Query polling demo' },
-          slots: [
-            {
-              items: [
-                {
-                  apiVersion: 'resourcekit.dev/v1alpha1',
-                  kind: 'DetailView',
-                  spec: {
-                    data: { $scope: 'liveTick' },
-                    fields: [
-                      { field: 'tick', label: 'Tick count (increments every poll)' },
-                      { field: 'time', label: 'Resolved at' },
-                    ],
-                  },
-                },
-              ],
-            },
-          ],
+          kind: 'DetailView',
+          spec: {
+            data: { $dataflow: 'liveTick' },
+            fields: [
+              { field: 'tick', label: 'Tick count (increments every poll)' },
+              { field: 'time', label: 'Resolved at' },
+            ],
+          },
         },
       ],
     },
@@ -1680,27 +1666,35 @@ const tanStackPollingDemoPage: Resource = {
 
 export const serviceOperationsPage: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
-  kind: 'DataScope',
+  kind: 'Workbench',
   metadata: { name: 'service-operations-command-center' },
   variables: [
     { name: 'incidentStatus', default: 'all' },
     { name: 'selectedIncident', default: 'INC-2048' },
   ],
-  scope: {
-    name: 'incidents',
-    binding: {
-      source: 'connection',
-      connection: 'service-operations',
-      request: { path: '/incidents', query: { status: '${incidentStatus}' } },
+  dataflow: [
+    {
+      name: 'incidents',
+      binding: {
+        source: 'connection',
+        connection: 'service-operations',
+        request: { path: '/incidents', query: { status: '${incidentStatus}' } },
+      },
+      policy: { refresh: { kind: 'interval', ms: 30_000 }, staleForMs: 10_000, retainPreviousData: true, retry: { maxAttempts: 2 } },
     },
-    policy: { refresh: { kind: 'interval', ms: 30_000 }, staleForMs: 10_000, retainPreviousData: true, retry: { maxAttempts: 2 } },
-  },
-  spec: {},
-  slots: [{ items: [{
-    apiVersion: 'resourcekit.dev/v1alpha1',
-    kind: 'Workbench',
-    spec: { leftPaneWidth: 280, rightPaneWidth: 330, bottomPaneHeight: 210, minLeftPaneWidth: 250, minRightPaneWidth: 300, resizable: true },
-    slots: [
+    {
+      // Purely ${selectedIncident}-driven — never reads `incidents`' resolved
+      // value, so no dependOn is needed at all.
+      name: 'incidentDetail',
+      binding: {
+        source: 'connection',
+        connection: 'service-operations',
+        request: { path: '/incidents', query: { id: '${selectedIncident}' } },
+      },
+    },
+  ],
+  spec: { leftPaneWidth: 280, rightPaneWidth: 330, bottomPaneHeight: 210, minLeftPaneWidth: 250, minRightPaneWidth: 300, resizable: true },
+  slots: [
       {
         name: 'topBar',
         items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'Service operations', eyebrow: 'Production control room' } }],
@@ -1754,7 +1748,7 @@ export const serviceOperationsPage: Resource = {
                     kind: 'SelectableList',
                     bindings: { selected: { $variable: 'selectedIncident' } },
                     spec: {
-                      data: { $scope: 'incidents' },
+                      data: { $dataflow: 'incidents' },
                       idField: 'id',
                       primary: { field: 'service' },
                       secondary: [
@@ -1778,7 +1772,7 @@ export const serviceOperationsPage: Resource = {
             kind: 'TableView',
             spec: {
               title: 'Active incidents',
-              data: { $scope: 'incidents' },
+              data: { $dataflow: 'incidents' },
               enableSorting: true,
               globalSearch: true,
               searchPlaceholder: 'Search incident, service, or owner…',
@@ -1807,29 +1801,16 @@ export const serviceOperationsPage: Resource = {
                 items: [
                   {
                     apiVersion: 'resourcekit.dev/v1alpha1',
-                    kind: 'DataScope',
-                    scope: {
-                      name: 'incidentDetail',
-                      binding: {
-                        source: 'connection',
-                        connection: 'service-operations',
-                        request: { path: '/incidents', query: { id: '${selectedIncident}' } },
-                      },
+                    kind: 'DetailView',
+                    spec: {
+                      data: { $dataflow: 'incidentDetail' },
+                      fields: [
+                        { field: 'summary', label: 'Summary' },
+                        { field: 'status', label: 'Status', display: 'badge' },
+                        { field: 'severity', label: 'Severity', display: 'badge' },
+                        { field: 'owner', label: 'Commander' },
+                      ],
                     },
-                    spec: {},
-                    slots: [{ items: [{
-                      apiVersion: 'resourcekit.dev/v1alpha1',
-                      kind: 'DetailView',
-                      spec: {
-                        data: { $scope: 'incidentDetail' },
-                        fields: [
-                          { field: 'summary', label: 'Summary' },
-                          { field: 'status', label: 'Status', display: 'badge' },
-                          { field: 'severity', label: 'Severity', display: 'badge' },
-                          { field: 'owner', label: 'Commander' },
-                        ],
-                      },
-                    }] }],
                   },
                   {
                     apiVersion: 'resourcekit.dev/v1alpha1',
@@ -1848,7 +1829,7 @@ export const serviceOperationsPage: Resource = {
                       ],
                       submit: {
                         mutation: { target: 'operations', connection: 'service-operations' },
-                        onSuccess: [{ kind: 'refetchData', scopes: ['incidents', 'incidentDetail'] }],
+                        onSuccess: [{ kind: 'refetchData', dataflow: ['incidents', 'incidentDetail'] }],
                       },
                       submitLabel: 'Save handoff',
                       successMessage: 'Handoff saved and incident data refreshed',
@@ -1881,7 +1862,6 @@ export const serviceOperationsPage: Resource = {
         ],
       },
     ],
-  } ] } ],
 }
 
 // Built via a live MCP client session against examples/mcp-server's
@@ -1999,7 +1979,7 @@ export const examples: readonly PlaygroundExample[] = [
     description: 'Static-hosting-safe demo of a provider-backed DatasourceKit connection running entirely in the browser.',
     category: 'runtime',
     scope: { connections: { allow: ['demo-metrics-dynamic'] } },
-    resource: dynamicDatasourceKitPage,
+    resource: dynamicDatasourceKitResource,
   },
   {
     id: 'user-editor',
@@ -2082,7 +2062,7 @@ export const examples: readonly PlaygroundExample[] = [
   {
     id: 'tanstack-query-polling-demo',
     name: 'TanStack Query polling demo',
-    description: 'Component fragment: a DataScope with scope.policy.refresh actually polls via the TanStack Query coordinator — tick/time update every 2s on their own (docs/dataflow-and-server-state-direction.md P1 item 1).',
+    description: 'Component fragment: a dataflow unit with policy.refresh actually polls via the TanStack Query coordinator — tick/time update every 2s on their own (docs/dataflow-and-server-state-direction.md P1 item 1).',
     category: 'fragment',
     resource: tanStackPollingDemoPage,
   },
@@ -2108,8 +2088,8 @@ registry.setConnectionProvider(createPlaygroundConnectionProvider())
 
 // docs/dataflow-and-server-state-direction.md P1 item 1 — a real,
 // polling-capable QueryCoordinator. Wired into the main ResourceRenderer
-// below; any DataScope's `scope.policy.refresh` (e.g. serviceOperationsPage's
-// `incidents` scope, already authored with one) actually polls now instead of
+// below; any dataflow unit's `policy.refresh` (e.g. serviceOperationsPage's
+// `incidents` unit, already authored with one) actually polls now instead of
 // resolving once and never again.
 const tanStackCoordinator = createTanStackQueryCoordinator(new QueryClient())
 

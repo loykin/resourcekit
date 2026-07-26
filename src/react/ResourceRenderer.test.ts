@@ -397,9 +397,9 @@ describe('ResourceRenderer', () => {
     })
   })
 
-  // Coverage for a policy-bearing, coordinator-routed scope (DataScope +
-  // queryCoordinator) requires real effects (ScopeProviderNode's own
-  // useEffect fetch) — renderToStaticMarkup never runs effects, so that
+  // Coverage for a policy-bearing, coordinator-routed dataflow unit
+  // requires real effects (the DataflowEngine's declare-time fetch, wired
+  // in a useEffect) — renderToStaticMarkup never runs effects, so that
   // case lives in ResourceRenderer.render.test.ts's coordinator tests
   // instead, which already use @testing-library/react's render()/act().
 })

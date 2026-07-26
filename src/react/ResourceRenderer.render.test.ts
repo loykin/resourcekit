@@ -3,9 +3,9 @@ import { act, cleanup, render } from '@testing-library/react'
 import { QueryClient } from '@tanstack/query-core'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTanStackQueryCoordinator } from '../connectors/tanstack-query'
-import { createDirectQueryCoordinator } from '../runtime/queryCoordinator'
-import type { QueryCoordinator } from '../runtime/queryCoordinator'
+import { createTanStackQueryCoordinator } from '../dataflow/coordinators/tanstack-query'
+import { createDirectQueryCoordinator } from '../dataflow/coordinator'
+import type { QueryCoordinator } from '../dataflow/coordinator'
 import { createMemoryRuntimeStore, runtimeKeys } from '../runtime/store'
 import { createRegistry } from '../core/registry'
 import type { Resource } from '../core/types'
@@ -189,41 +189,7 @@ describe('RecordScopeNode refetches on a pure $state dependency change', () => {
   })
 })
 
-describe('ScopeProviderNode with no resource.scope', () => {
-  it('degrades via renderError instead of throwing and crashing the tree', async () => {
-    const registry = createRegistry<KindRenderFn>()
-    registry.use({
-      name: 'scope-provider-no-scope',
-      kinds: [
-        {
-          apiVersion: 'resourcekit.dev/v1alpha1',
-          kind: 'ScopeProbe',
-          specSchema: { type: 'object' },
-          scopeProvider: true,
-          render: () => createElement('div', null, 'should not render'),
-        },
-      ],
-    })
-    const resource: Resource = {
-      apiVersion: 'resourcekit.dev/v1alpha1',
-      kind: 'ScopeProbe',
-      spec: {},
-    }
-
-    const { container } = render(
-      createElement(ResourceRenderer, {
-        resource,
-        registry,
-        renderError: (error) => createElement('div', { 'data-testid': 'error' }, String(error)),
-      }),
-    )
-    await act(async () => {})
-
-    expect(container.querySelector('[data-testid="error"]')?.textContent).toContain('has scopeProvider: true but no resource.scope')
-  })
-})
-
-describe('ResourceRenderer mutation-to-scope-registry integration', () => {
+describe('ResourceRenderer mutation-to-dataflow-engine integration', () => {
   it.each([
     ['direct', () => createDirectQueryCoordinator()],
     [
@@ -233,7 +199,7 @@ describe('ResourceRenderer mutation-to-scope-registry integration', () => {
       })),
     ],
   ] satisfies Array<[string, () => QueryCoordinator]>)(
-    'routes refetchData through the %s coordinator and exposes the fresh graph state',
+    'routes refetchData through the %s coordinator and exposes the fresh dataflow value',
     async (_name, createCoordinator) => {
     let context: RenderContext | undefined
     const query = vi
@@ -260,10 +226,9 @@ describe('ResourceRenderer mutation-to-scope-registry integration', () => {
     })
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
-      kind: 'DataScope',
-      scope: { name: 'rows', binding: { source: 'query' } },
+      kind: 'ActionProbe',
+      dataflow: [{ name: 'rows', binding: { source: 'query' } }],
       spec: {},
-      slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} }] }],
     }
 
     const coordinator = createCoordinator()
@@ -281,8 +246,8 @@ describe('ResourceRenderer mutation-to-scope-registry integration', () => {
         {
           mutation: { target: 'memory' },
           onSuccess: [
-            { kind: 'invalidateData', scopes: ['rows'] },
-            { kind: 'refetchData', scopes: ['rows'] },
+            { kind: 'invalidateData', dataflow: ['rows'] },
+            { kind: 'refetchData', dataflow: ['rows'] },
           ],
         },
         { draft: true },
@@ -291,12 +256,12 @@ describe('ResourceRenderer mutation-to-scope-registry integration', () => {
 
     expect(invalidate).toHaveBeenCalledWith(['rows'])
     expect(query).toHaveBeenCalledTimes(2)
-    expect(context?.scopes.rows).toEqual([{ id: 'after' }])
+    await expect(context?.data.resolve({ $dataflow: 'rows' })).resolves.toEqual([{ id: 'after' }])
     },
   )
 })
 
-describe('ScopeProviderNode guards against out-of-order fetch completion', () => {
+describe('DataflowEngine guards against out-of-order fetch completion', () => {
   it('ignores a stale fetch that settles after a newer one', async () => {
     let context: RenderContext | undefined
     const deferred: Array<(rows: Record<string, unknown>[]) => void> = []
@@ -320,19 +285,13 @@ describe('ScopeProviderNode guards against out-of-order fetch completion', () =>
     })
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
-      kind: 'DataScope',
+      kind: 'ActionProbe',
       variables: [{ name: 'sel', default: 'a' }],
-      scope: { name: 'rows', binding: { source: 'query', id: '${sel}' } },
+      dataflow: [{ name: 'rows', binding: { source: 'query', id: '${sel}' } }],
       spec: {},
-      slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} }] }],
     }
     const runtimeStore = createMemoryRuntimeStore()
 
-    // Both fetches stay pending (unresolved deferred promises) across this
-    // whole setup, so the child (and `context`) never mounts — ScopeProviderNode
-    // renders its loading fallback until a fetch settles. The variable change
-    // has to be driven through the store directly rather than through
-    // `context.variables.set`, which isn't available yet.
     render(createElement(ResourceRenderer, { resource, registry, runtimeStore, runtimeScope: 'race' }))
     await act(async () => {})
     expect(query).toHaveBeenCalledTimes(1) // first fetch in flight for sel=a
@@ -349,12 +308,12 @@ describe('ScopeProviderNode guards against out-of-order fetch completion', () =>
     await act(async () => {
       deferred[1]([{ id: 'b' }])
     })
-    expect(context?.scopes.rows).toEqual([{ id: 'b' }])
+    await expect(context?.data.resolve({ $dataflow: 'rows' })).resolves.toEqual([{ id: 'b' }])
 
     await act(async () => {
       deferred[0]([{ id: 'a' }])
     })
-    expect(context?.scopes.rows).toEqual([{ id: 'b' }])
+    await expect(context?.data.resolve({ $dataflow: 'rows' })).resolves.toEqual([{ id: 'b' }])
   })
 })
 

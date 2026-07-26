@@ -7,7 +7,7 @@ import {
   type QueryHandle,
   type QueryRequest,
   type QuerySnapshot,
-} from './queryCoordinator'
+} from './coordinator'
 
 function deferred<T>() {
   let resolve!: (value: T) => void

@@ -15,7 +15,7 @@ export interface SubmitRuntime {
     set(name: string, value: VariableValue): void
   }
   store: Pick<RuntimeStore, 'publish'>
-  scopes: {
+  dataflow: {
     invalidate(names: string[]): void
     refetch(names: string[]): Promise<void>
   }
@@ -84,10 +84,10 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
         runtime.emit?.(effect.event, result)
       }
       if (effect.kind === 'invalidateData') {
-        runtime.scopes.invalidate(effect.scopes)
+        runtime.dataflow.invalidate(effect.dataflow)
       }
       if (effect.kind === 'refetchData') {
-        await runtime.scopes.refetch(effect.scopes)
+        await runtime.dataflow.refetch(effect.dataflow)
       }
     }
 

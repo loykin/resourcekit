@@ -27,37 +27,43 @@ own `behaviorPolicy.events` doesn't cover the fired event), `objectState`
 (shared, writable, object-shaped state slots — the structured counterpart to
 `variables`, read/written via `ObjectStateRef`/`{"$state": name}`), `record`
 (only for a `recordScope: true` kind — resolved into `ctx.record`; a
-`DataBinding` fetch or an `ObjectStateRef` pointer), and `scope` (only for a
-`scopeProvider: true` kind — `{name, binding, policy?}`; the runtime
-resolves `binding` and publishes it to descendants as `ctx.scopes[name]` /
-`{"$scope": name}`). Never add a same-named placeholder property to a
-kind's own `specSchema` for these — they live on the envelope, not in
-`spec`. Everything else in `spec` is either kind-owned outright, or a
-shared vocabulary type (`SubmitSpec`, `DataBinding`) that the kind itself
-chooses where to place and read (e.g. most kinds' own `spec.data`,
-`spec.submit`).
+`DataBinding` fetch or an `ObjectStateRef` pointer), and `dataflow` (a flat
+array of named data-fetch units — `{name, binding, policy?, dependOn?}` —
+scanned recursively across the whole document, same footing as `variables`;
+available on every kind, no manifest flag gates it). Never add a same-named
+placeholder property to a kind's own `specSchema` for these — they live on
+the envelope, not in `spec`. Everything else in `spec` is either kind-owned
+outright, or a shared vocabulary type (`SubmitSpec`, `DataBinding`) that the
+kind itself chooses where to place and read (e.g. most kinds' own
+`spec.data`, `spec.submit`).
 
 Beyond rendering, the runtime provides (all optional, additive to a bare
-`Resource`): named scope providers (`scopeProvider: true` kinds, `DataScope`
-built in) that let unrelated sibling kinds share one fetch, resolved through
-a swappable `QueryCoordinator` boundary for caching/polling when a `policy`
-is set; a thin `ScopeRegistry` (in-memory, per-`ResourceRenderer`, not
-routed through the store) that lets a `refetchData`/`invalidateData`
-`SubmitEffect` reach a named scope provider anywhere in the tree by name; a
-common `RuntimeStore` (namespaced KV + watch plane underlying
-variables/objectState/scope/execution — see `src/runtime/store.ts`) that
-never assigns meaning to what's stored; a `submit`/mutation dispatch path;
-and an opaque host-action boundary (`EventPolicy.kind: "action"` →
-allowlist check → `ResourceRenderer.onAction`, never interpreted or
-executed by ResourceKit itself). `src/connection/` (REST/DSN resolvers,
-always bundled, no credential storage) is separate from `src/connectors/*`
-(optional third-party integrations, e.g. TanStack Query, shipped as their
-own subpath).
+`Resource`): a document-level `dataflow` layer — named, document-wide
+data-fetch units resolved via `{"$dataflow": name}` from anywhere in the
+tree, tree-position-independent (not tied to render structure the way
+`record` is), owned by a single `DataflowEngine` per `ResourceRenderer`
+mount (one fetch-owner per name, no per-mount registry), resolved through a
+swappable `QueryCoordinator` boundary for caching/polling when a unit's
+`policy` is set; a `submit`/mutation dispatch path whose `refetchData`/
+`invalidateData` effects call the `DataflowEngine`'s own `refetch`/
+`invalidate` methods directly by name; a common `RuntimeStore` (namespaced
+KV + watch plane underlying variables/objectState/dataflow/execution — see
+`src/runtime/store.ts`) that never assigns meaning to what's stored; and an
+opaque host-action boundary (`EventPolicy.kind: "action"` → allowlist check
+→ `ResourceRenderer.onAction`, never interpreted or executed by ResourceKit
+itself). `src/dataflow/` holds everything dataflow-related: the engine
+itself, always-bundled REST/DSN resolvers (no credential storage), the
+generic `QueryCoordinator` contract, and optional third-party coordinator
+integrations (e.g. TanStack Query) under `src/dataflow/coordinators/*`,
+shipped from their own subpath.
 
-There is deliberately no document-level dependency graph or multi-hop
-chaining (a `scopeProvider` kind's `binding` is a single fetch, not a node
-referencing other nodes) — chained/cascading data dependencies belong to
-dashboardkit, same boundary as the flat variable engine below.
+A `dataflow` unit's `dependOn` is execution-order/lazy-gating ONLY — a unit
+waits until every named unit in `dependOn` has reached `ready` before it
+attempts its own fetch. It never carries a value: a unit's `binding` must
+never reference another unit's resolved value (no value-chaining, no
+document-level dependency *value* graph) — chained/cascading *value*
+dependencies still belong to dashboardkit, same boundary as the flat
+variable engine below. Only execution ordering moved into resourcekit.
 
 A local working document (`docs/loykin-resource-runtime.md`, intentionally
 untracked) may exist with the full specification narrative. If present,
@@ -81,7 +87,7 @@ Public package entries:
 
 - `src/index.ts` (`.`) — **headless core**. No React imports anywhere under
   this entry. Types, registry/plugin host, validation, schema generation +
-  scoping, variable engine, object-state engine, `ScopeRegistry`,
+  scoping, variable engine, object-state engine, `DataflowEngine`,
   `RuntimeStore`, `QueryCoordinator`, `rest`/`static` data resolvers,
   connection resolvers.
 - `src/react/index.ts` (`./react`) — the only place React types may appear.
@@ -93,11 +99,16 @@ Public package entries:
   kit peers they use.
 - `src/adapters/datasourcekit/index.ts` (`./adapters/datasourcekit`) —
   `ConnectionAdapter` bridging a registered connection to `@loykin/datasourcekit`.
-- `src/connectors/tanstack-query/index.ts` (`./connectors/tanstack-query`) —
-  optional `QueryCoordinator` backed by `@tanstack/query-core`. `connectors/*`
-  are optional third-party integrations, distinct from `src/connection/`
-  (always-bundled REST/DSN resolvers, no extra dependency) and from
-  `src/adapters/*` (kind/UI adapters).
+- `src/dataflow/` — the consolidated home for everything dataflow-related:
+  `engine.ts` (`DataflowEngine`), `ref.ts` (`DataflowRef` scanning),
+  `resolvers.ts`/`connectionAdapters.ts` (always-bundled REST/DSN resolvers,
+  no extra dependency), `coordinator.ts` (the generic `QueryCoordinator`
+  contract + direct implementation), and
+  `coordinators/tanstack-query/index.ts` (`./dataflow/tanstack-query`) —
+  an optional third-party `QueryCoordinator` backed by `@tanstack/query-core`.
+  Distinct from `src/adapters/*` (kind/UI adapters) — `src/dataflow/` is
+  about how data gets fetched, `src/adapters/*` is about how it gets
+  rendered.
 
 Current state: the core engine (registry, validation, scoped schema
 generation, variable engine, object-state engine, resolvers) and the React
@@ -126,27 +137,32 @@ MCP server example.
   never executes a request. `refetch()` is the only path that forces
   execution. Both `createDirectQueryCoordinator` and the TanStack connector
   must keep this split; don't let `invalidate` become a re-fetch shortcut.
-- `ScopeProviderNode` (`src/react/ResourceRenderer.tsx`) is the only
-  coordinator-aware point — `ScopeRegistry` stays a plain function-call
-  side-table (`register`/`refetch`/`invalidate` by name), never reaching
-  into a coordinator itself or gaining graph/generation semantics.
+- `DataflowEngine` (`src/dataflow/engine.ts`) is the only coordinator-aware
+  point and the sole fetch-owner per named unit — there is no per-mount
+  registration side-table; `refetch`/`invalidate` are plain method calls on
+  this one instance, called directly by `SubmitEffect` handling and by
+  `ctx.data.resolve`'s `DataflowRef` reads.
 - `RuntimeStore` (`src/runtime/store.ts`) is a common namespaced KV/watch
   plane. It stores snapshots and notifies subscribers and nothing else — it
   must never gain an adapter action registry, command semantics, or
   namespace-specific behavior. Each namespace's owner (variables,
-  object-state, scope, submit, a plugin) decides what its own keys mean. A
-  live callback (like `ScopeRegistry`'s refetch/invalidate) never goes
-  through the store — that's command semantics, not a snapshot.
+  object-state, dataflow, submit, a plugin) decides what its own keys mean.
+  `DataflowEngine` publishes status/value *snapshots* into the store's
+  `dataflow` namespace (that's fine — it's a snapshot), but its `refetch`/
+  `invalidate` methods themselves never go through the store — that's
+  command semantics, not a snapshot.
 - `spec`'s `data`/`events`/`variables`-shaped placeholders must not be
   reintroduced. If a new runtime-owned, kind-independent concern comes up,
   it belongs on the `Resource` envelope (like
-  `variables`/`events`/`objectState`/`record`/`scope`), not inside a kind's
-  `specSchema` under a well-known name.
-- A `scopeProvider` kind's `scope.binding` is a single fetch — it must never
-  gain a way to reference another `scopeProvider`'s result (no document-level
-  dependency graph, no multi-hop chaining). Sharing across sibling kinds
-  works through the render tree (a scope provider as their common ancestor);
-  chained/cascading dependencies belong to dashboardkit.
+  `variables`/`events`/`objectState`/`record`/`dataflow`), not inside a
+  kind's `specSchema` under a well-known name.
+- A `dataflow` unit's `binding` is a single fetch — it must never gain a way
+  to reference another unit's resolved *value* (no document-level value
+  graph, no multi-hop value chaining). `dependOn` may express
+  execution-order/lazy-gating between units, but never carries a value.
+  Sharing across sibling kinds works through the flat, document-wide
+  `{"$dataflow": name}` ref, tree-position-independent; chained/cascading
+  *value* dependencies belong to dashboardkit.
 
 ## Conventions
 
