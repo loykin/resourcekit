@@ -113,15 +113,12 @@ function collectKinds(resource: Resource, kinds: string[] = []): string[] {
 }
 
 function collectVariables(resource: Resource, variables: string[] = []): string[] {
-  const spec = resource.spec
-  if (isRecord(spec)) {
-    if (Array.isArray(spec.variables)) {
-      for (const item of spec.variables) {
-        if (isRecord(item) && typeof item.name === 'string') variables.push(item.name)
-      }
-    }
-    variables.push(...scanVariableRefs(spec))
-    JSON.stringify(spec).replace(/"variables\.([^"]+)"/g, (_match, name: string) => {
+  for (const declaration of resource.variables ?? []) {
+    variables.push(declaration.name)
+  }
+  if (isRecord(resource.spec)) {
+    variables.push(...scanVariableRefs(resource.spec))
+    JSON.stringify(resource.spec).replace(/"variables\.([^"]+)"/g, (_match, name: string) => {
       variables.push(name)
       return ''
     })
@@ -133,9 +130,7 @@ function collectVariables(resource: Resource, variables: string[] = []): string[
 }
 
 function collectEventNames(resource: Resource, events: string[] = []): string[] {
-  if (isRecord(resource.spec) && isRecord(resource.spec.events)) {
-    events.push(...Object.keys(resource.spec.events))
-  }
+  if (resource.events) events.push(...Object.keys(resource.events))
   for (const slot of resource.slots ?? []) {
     for (const child of slot.items) collectEventNames(child, events)
   }
@@ -159,6 +154,7 @@ function collectBindings(resource: Resource, bindings: Array<{ source: string; d
   }
 
   visit(resource.spec)
+  if (resource.record) visit(resource.record)
   for (const slot of resource.slots ?? []) {
     for (const child of slot.items) collectBindings(child, bindings)
   }

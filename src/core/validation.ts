@@ -1,7 +1,7 @@
 import Ajv from 'ajv'
 import type { ErrorObject } from 'ajv'
-import { isDataRef, scanDataRefs, validateDataGraph } from '../runtime/dataflow'
-import type { ResourceDocument } from '../runtime/dataflow'
+import { isObjectStateRef } from '../runtime/objectState'
+import { scanScopeRefs } from '../runtime/scopeRef'
 import { scanVariableRefs } from '../runtime/variables'
 import { listExampleEntries } from './examples'
 import type { Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
@@ -81,6 +81,33 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   }
   if ('visible' in resource) validateVisibilityCondition(resource.visible, `${path}/visible`, 'visible', issues)
   if ('disabled' in resource) validateVisibilityCondition(resource.disabled, `${path}/disabled`, 'disabled', issues)
+  if ('variables' in resource && !Array.isArray(resource.variables)) {
+    addIssue(issues, `${path}/variables`, 'variables must be an array', 'remove variables or replace it with an array of variable declarations')
+  }
+  if ('events' in resource && !isRecord(resource.events)) {
+    addIssue(issues, `${path}/events`, 'events must be an object', 'remove events or replace it with an object of { eventName: EventPolicy }')
+  }
+  if ('record' in resource && !isRecord(resource.record)) {
+    addIssue(issues, `${path}/record`, 'record must be an object', 'remove record or replace it with a DataBinding or { "$state": "name" } object')
+  }
+  if ('objectState' in resource && !Array.isArray(resource.objectState)) {
+    addIssue(issues, `${path}/objectState`, 'objectState must be an array', 'remove objectState or replace it with an array of { name, initialValue? } declarations')
+  }
+  if ('scope' in resource && !isRecord(resource.scope)) {
+    addIssue(issues, `${path}/scope`, 'scope must be an object', 'remove scope or replace it with a { name, binding } object')
+  }
+  // `variables`/`events` are never legitimate spec content for any kind —
+  // the runtime only ever reads them from the envelope. A kind whose own
+  // specSchema allows additionalProperties would otherwise accept these
+  // silently, and the runtime would just as silently never see them.
+  if (isRecord(resource.spec)) {
+    if ('variables' in resource.spec) {
+      addIssue(issues, `${path}/spec/variables`, 'variables is not spec content', `move it to ${path}/variables — the runtime only reads variable declarations from the envelope, never from spec`)
+    }
+    if ('events' in resource.spec) {
+      addIssue(issues, `${path}/spec/events`, 'events is not spec content', `move it to ${path}/events — the runtime only reads event policy from the envelope, never from spec`)
+    }
+  }
   return typeof resource.apiVersion === 'string' && typeof resource.kind === 'string' && 'spec' in resource
 }
 
@@ -140,7 +167,7 @@ function validateBindings(resource: Resource, registry: ResourceRegistry | Scope
       )
       continue
     }
-    if (isDataRef(value)) continue
+    if (isObjectStateRef(value)) continue
     if (isRecord(value) && typeof value.$variable === 'string' && Object.keys(value).length === 1) {
       if (variableAllow && !variableAllow.includes(value.$variable)) {
         addIssue(
@@ -152,7 +179,7 @@ function validateBindings(resource: Resource, registry: ResourceRegistry | Scope
       }
       continue
     }
-    addIssue(issues, `${path}/bindings/${name}`, 'binding must be a data or variable reference', 'use { "$data": "nodeId" } or { "$variable": "name" }')
+    addIssue(issues, `${path}/bindings/${name}`, 'binding must be an object-state or variable reference', 'use { "$state": "name" } or { "$variable": "name" }')
   }
 
   for (const [name, port] of Object.entries(ports)) {
@@ -292,9 +319,8 @@ function validateSlots(resource: Resource, registry: ResourceRegistry | ScopedRe
   }
 }
 
-function variableDeclarations(spec: unknown): VariableDeclaration[] {
-  if (!isRecord(spec) || !Array.isArray(spec.variables)) return []
-  return spec.variables.filter((item): item is VariableDeclaration => isRecord(item) && typeof item.name === 'string')
+function variableDeclarations(resource: Resource): VariableDeclaration[] {
+  return resource.variables ?? []
 }
 
 function scanValueRefs(value: unknown): Set<string> {
@@ -353,19 +379,24 @@ function validateScopedCapabilities(resource: Resource, options: ScopeOptions | 
     for (const name of scanValueRefs(resource.spec)) {
       if (!variableAllow.includes(name)) addIssue(issues, `${path}/spec`, `variable ${name} is not allowed in this scope`, variableHint())
     }
-    for (const declaration of variableDeclarations(resource.spec)) {
+    if (resource.record) {
+      for (const name of scanVariableRefs(resource.record)) {
+        if (!variableAllow.includes(name)) addIssue(issues, `${path}/record`, `variable ${name} is not allowed in this scope`, variableHint())
+      }
+    }
+    for (const declaration of variableDeclarations(resource)) {
       if (!variableAllow.includes(declaration.name)) {
-        addIssue(issues, `${path}/spec/variables`, `variable ${declaration.name} is not allowed in this scope`, variableHint())
+        addIssue(issues, `${path}/variables`, `variable ${declaration.name} is not allowed in this scope`, variableHint())
       }
     }
   }
 
   for (const [name, value] of Object.entries(options.variables?.lock ?? {})) {
-    for (const declaration of variableDeclarations(resource.spec)) {
+    for (const declaration of variableDeclarations(resource)) {
       if (declaration.name === name && declaration.default !== undefined && !sameJsonValue(declaration.default, value)) {
         addIssue(
           issues,
-          `${path}/spec/variables`,
+          `${path}/variables`,
           `locked variable ${name} cannot be overridden`,
           `remove this variable's default, or set it to the scope-locked value: ${JSON.stringify(value)}`,
         )
@@ -405,10 +436,6 @@ function validateDatasourceAndActions(resource: Resource, registry: ResourceRegi
           `use one of the scope's allowed datasources: ${options.datasources.allow.join(', ') || '(none allowed)'}`,
         )
       }
-      // Mirrors the same check the ResourceDocument data-graph path applies
-      // to `resolve` nodes — a bare Resource's `spec.data`/binding tree must
-      // not be able to reach a connection the document-graph path would
-      // reject (test.md §5.2, ScopeOptions.connections.allow).
       if (
         current.source === 'connection' &&
         options?.connections?.allow &&
@@ -445,6 +472,29 @@ function validateDatasourceAndActions(resource: Resource, registry: ResourceRegi
   }
 
   visit(resource.spec, `${path}/spec`)
+  if (resource.record) visit(resource.record, `${path}/record`)
+  if (resource.events) visit(resource.events, `${path}/events`)
+  if (resource.scope) visit(resource.scope, `${path}/scope`)
+}
+
+/**
+ * `$scope` refs are resolved by walking `ctx.scopes` at render time — a
+ * plain ancestor→descendant prop, not a graph lookup — so a ref to a name no
+ * ancestor `scopeProvider: true` kind actually provides would silently
+ * resolve to `undefined` at render time instead of failing. Threaded
+ * top-down through `validateResource`'s own recursion (`providedScopes`).
+ */
+function validateScopeRefs(resource: Resource, path: string, providedScopes: Set<string>, issues: ValidationIssue[]): void {
+  for (const ref of scanScopeRefs(resource.spec)) {
+    if (!providedScopes.has(ref.$scope)) {
+      addIssue(
+        issues,
+        `${path}/spec`,
+        `referenced scope ${ref.$scope} is not provided by any ancestor`,
+        `wrap this kind in a scopeProvider kind whose scope.name is "${ref.$scope}", or use one of the currently in-scope names: ${[...providedScopes].join(', ') || '(none)'}`,
+      )
+    }
+  }
 }
 
 /**
@@ -465,9 +515,10 @@ export function validateResource(
   const issues: ValidationIssue[] = []
   const options = scopedOptions(registry)
 
-  const visit = (current: unknown, path: string, depth: number) => {
+  const visit = (current: unknown, path: string, depth: number, providedScopes: Set<string>) => {
     if (!validateEnvelope(current, path, issues)) return
     validateScopedCapabilities(current, options, path, depth, issues)
+    validateScopeRefs(current, path, providedScopes, issues)
     const manifest = registry.getKind(current.apiVersion, current.kind)
     if (!manifest) {
       addIssue(
@@ -489,131 +540,24 @@ export function validateResource(
       validateBindings(current, registry, path, issues)
       validateSlots(current, registry, path, issues)
       validateDatasourceAndActions(current, registry, path, issues)
+      if (manifest.recordScope && current.record === undefined) {
+        addIssue(issues, `${path}/record`, `record is required for recordScope kind ${current.kind}`, 'add a record: a DataBinding fetch or a { "$state": "name" } pointer')
+      }
+      if (manifest.scopeProvider && current.scope === undefined) {
+        addIssue(issues, `${path}/scope`, `scope is required for scopeProvider kind ${current.kind}`, 'add a scope: { name, binding } object naming this provider and its fetch binding')
+      }
     }
 
+    const childScopes = manifest?.scopeProvider && current.scope && typeof current.scope.name === 'string'
+      ? new Set([...providedScopes, current.scope.name])
+      : providedScopes
+
     current.slots?.forEach((slot, slotIndex) => {
-      children(slot).forEach((child, childIndex) => visit(child, `${path}/slots/${slotIndex}/items/${childIndex}`, depth + 1))
+      children(slot).forEach((child, childIndex) => visit(child, `${path}/slots/${slotIndex}/items/${childIndex}`, depth + 1, childScopes))
     })
   }
 
-  visit(resource, '', 0)
+  visit(resource, '', 0, new Set())
   return { valid: issues.length === 0, issues }
 }
 
-/** Layered validation for the experimental ResourceDocument data graph plus its root resource. */
-export function validateResourceDocument(
-  document: ResourceDocument,
-  registry: ResourceRegistry | ScopedRegistry,
-): ValidationResult {
-  const resourceValidation = validateResource(document.resource, registry)
-  const issues = [...resourceValidation.issues]
-  const graph = document.data
-  if (!graph) return { valid: issues.length === 0, issues }
-
-  const dataGraphHints: Record<string, string> = {
-    'invalid-node': 'give the node a non-empty id and a valid kind ("state" or "resolve")',
-    'invalid-ref': 'a data reference must be exactly { "$data": "nodeId", "path"?: "string" } — no other keys',
-    'missing-ref': `reference an existing node id: ${Object.keys(graph.nodes).join(', ') || '(no nodes declared)'}`,
-    cycle: 'break the cycle — remove one of the listed edges so dependencies form a DAG',
-  }
-  for (const issue of validateDataGraph(graph).issues) {
-    addIssue(issues, `/${issue.path.split('.').join('/')}`, issue.message, dataGraphHints[issue.code])
-  }
-
-  const options = scopedOptions(registry)
-  for (const [id, node] of Object.entries(graph.nodes)) {
-    if (node.kind !== 'resolve') continue
-    if (!registry.getDataResolver(node.binding.source)) {
-      addIssue(
-        issues,
-        `/data/nodes/${id}/binding/source`,
-        `data resolver ${node.binding.source} is not registered`,
-        `register a resolver for "${node.binding.source}", or use one of: ${registry.listDataResolvers().join(', ') || '(none registered)'}`,
-      )
-    }
-    if (
-      node.binding.source === 'datasource' &&
-      options?.datasources?.allow &&
-      'datasourceUid' in node.binding &&
-      typeof node.binding.datasourceUid === 'string' &&
-      !options.datasources.allow.includes(node.binding.datasourceUid)
-    ) {
-      addIssue(
-        issues,
-        `/data/nodes/${id}/binding/datasourceUid`,
-        `datasource ${node.binding.datasourceUid} is not allowed in this scope`,
-        `use one of the scope's allowed datasources: ${options.datasources.allow.join(', ') || '(none allowed)'}`,
-      )
-    }
-    if (
-      node.binding.source === 'connection' &&
-      options?.connections?.allow &&
-      'connection' in node.binding &&
-      typeof node.binding.connection === 'string' &&
-      !options.connections.allow.includes(node.binding.connection)
-    ) {
-      addIssue(
-        issues,
-        `/data/nodes/${id}/binding/connection`,
-        `connection ${node.binding.connection} is not allowed in this scope`,
-        `use one of the scope's allowed connections: ${options.connections.allow.join(', ') || '(none allowed)'}`,
-      )
-    }
-  }
-
-  for (const ref of scanDataRefs(document.resource)) {
-    if (!(ref.$data in graph.nodes)) {
-      addIssue(
-        issues,
-        '/resource',
-        `referenced data node ${ref.$data} does not exist`,
-        `add a data node with id "${ref.$data}", or fix the $data reference to an existing node: ${Object.keys(graph.nodes).join(', ') || '(no nodes declared)'}`,
-      )
-    }
-  }
-
-  const visitPolicies = (value: unknown, path: string) => {
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => visitPolicies(item, `${path}/${index}`))
-      return
-    }
-    if (!isRecord(value)) return
-    if (typeof value.apiVersion === 'string' && typeof value.kind === 'string' && isRecord(value.bindings)) {
-      const manifest = registry.getKind(value.apiVersion, value.kind)
-      for (const [name, binding] of Object.entries(value.bindings)) {
-        if (!manifest?.bindingPolicy?.inputs[name]?.writable || !isDataRef(binding)) continue
-        if (graph.nodes[binding.$data]?.kind !== 'state') {
-          addIssue(
-            issues,
-            `${path}/bindings/${name}`,
-            `writable binding ${name} must reference a state node`,
-            `point $data at a "state"-kind node, not "${graph.nodes[binding.$data]?.kind ?? 'an unknown node'}"`,
-          )
-        }
-      }
-    }
-    if (value.kind === 'setData' && typeof value.node === 'string' && graph.nodes[value.node]?.kind !== 'state') {
-      addIssue(
-        issues,
-        `${path}/node`,
-        `data node ${value.node} is not writable state`,
-        `target a "state"-kind node with setData, not "${graph.nodes[value.node]?.kind ?? 'an unknown node'}"`,
-      )
-    }
-    if ((value.kind === 'invalidateData' || value.kind === 'refetchData') && Array.isArray(value.nodes)) {
-      value.nodes.forEach((node, index) => {
-        if (typeof node !== 'string' || graph.nodes[node]?.kind === 'resolve') return
-        addIssue(
-          issues,
-          `${path}/nodes/${index}`,
-          `data node ${String(node)} is not a resolvable query`,
-          `target a "resolve"-kind node with ${value.kind}, not "${graph.nodes[String(node)]?.kind ?? 'an unknown node'}"`,
-        )
-      })
-    }
-    Object.entries(value).forEach(([key, item]) => visitPolicies(item, `${path}/${key}`))
-  }
-  visitPolicies(document.resource, '/resource')
-
-  return { valid: issues.length === 0, issues }
-}

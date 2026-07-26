@@ -6,7 +6,11 @@
 
 export type {
   JsonSchema,
-  DataRef,
+  ScopeRef,
+  ObjectStateRef,
+  ObjectStateDeclaration,
+  ScopeSpec,
+  QueryPolicy,
   VariableRef,
   ValueBinding,
   Resource,
@@ -71,10 +75,9 @@ export type {
 export { createRegistry } from './core/registry'
 export type { ResourceRegistry, ScopedRegistry } from './core/registry'
 
-export { validateResource, validateResourceDocument, validateAllExamples } from './core/validation'
+export { validateResource, validateAllExamples } from './core/validation'
 export type { ExampleValidationFailure } from './core/validation'
-export { buildDocumentSchema, buildResourceDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './core/schema'
-export type { BuildResourceDocumentSchemaOptions } from './core/schema'
+export { buildDocumentSchema, nextStage, nextStageBatch, singleKindSchema } from './core/schema'
 
 export { createVariableEngine, scanVariableRefs, interpolate } from './runtime/variables'
 export type { VariableEngine } from './runtime/variables'
@@ -104,30 +107,12 @@ export type { SubmitRuntime, SubmitResult } from './runtime/submit'
 export { LOCKED_ANNOTATION, isLocked, markLocked, preserveLockedNodes } from './core/annotations'
 export { canonicalizeJson, canonicalizeResource, canonicalStringify } from './core/canonical'
 
-export {
-  createDataflowRuntime,
-  isDataRef,
-  scanDataRefs,
-  resolveDataRefs,
-  validateDataGraph,
-  clampQueryPolicy,
-  DataGraphValidationError,
-} from './runtime/dataflow'
-export type {
-  StateDataNode,
-  ResolveDataNode,
-  DataNode,
-  DataGraphSpec,
-  ResourceDocument,
-  DataGraphIssue,
-  DataGraphValidationResult,
-  DataNodeResolveContext,
-  CreateDataflowRuntimeOptions,
-  DataflowRuntime,
-  QueryPolicy,
-  PublishResult,
-  StatePatch,
-} from './runtime/dataflow'
+export { clampQueryPolicy } from './runtime/queryPolicy'
+export { isScopeRef, scanScopeRefs } from './runtime/scopeRef'
+export { isObjectStateRef, scanObjectStateRefs, createObjectStateEngine } from './runtime/objectState'
+export type { ObjectStateEngine } from './runtime/objectState'
+export { createScopeRegistry } from './runtime/scopeRegistry'
+export type { ScopeRegistry, ScopeRegistration } from './runtime/scopeRegistry'
 
 export { createDirectQueryCoordinator } from './runtime/queryCoordinator'
 export type { QueryRequest, QueryStatus, QuerySnapshot, QueryHandle, QueryCoordinator } from './runtime/queryCoordinator'

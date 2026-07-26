@@ -44,7 +44,8 @@ describe('flattened list/detail and form views (test.md §4)', () => {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'ListDetail',
       bindings: { selection: { $variable: 'customerId' } },
-      spec: { title: 'Customers', variables: [{ name: 'customerId', default: '1' }] },
+      spec: { title: 'Customers' },
+      variables: [{ name: 'customerId', default: '1' }],
       slots: [
         {
           name: 'list',
@@ -138,7 +139,7 @@ describe('flattened list/detail and form views (test.md §4)', () => {
                   action: 'users.delete',
                   mutation: { target: 'rest', url: '/api/users/${payload.id}', method: 'DELETE' },
                   confirm: { title: 'Delete ${payload.name}?' },
-                  onSuccess: [{ kind: 'invalidateData', nodes: ['users'] }],
+                  onSuccess: [{ kind: 'invalidateData', scopes: ['users'] }],
                 },
               },
             ],

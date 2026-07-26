@@ -13,8 +13,6 @@ const panel = {
     properties: {
       title: { type: 'string' },
       data: { type: 'object' },
-      events: { type: 'object' },
-      variables: { type: 'array' },
     },
   },
   slotPolicy: {
@@ -130,9 +128,9 @@ describe('validateResource', () => {
         spec: {
           title: 'Customers',
           data: { source: 'datasource', datasourceUid: 'erp', query: { id: '${accountId}' } },
-          events: { rowSelect: { kind: 'action', action: 'customers.delete' } },
-          variables: [{ name: 'tenant', default: 'other' }],
         },
+        events: { rowSelect: { kind: 'action', action: 'customers.delete' } },
+        variables: [{ name: 'tenant', default: 'other' }],
         slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'Hidden' } }] }],
       },
       scoped,
@@ -296,12 +294,7 @@ describe('validateResource', () => {
     expect(scopeViolation.issues.map((issue) => issue.path)).toContain('/disabled/$or/0/$variable')
   })
 
-  it('enforces connections.allow on a bare Resource, not just a ResourceDocument data graph', () => {
-    // The ResourceDocument data-graph path (validateResourceDocument) already
-    // checks `connections.allow` for `resolve` nodes — this covers the same
-    // policy for a plain Resource's own spec.data binding, which used to
-    // reach `registry.getConnection`/the resolver with no allowlist check at
-    // all as long as the AI omitted the ResourceDocument wrapper.
+  it('enforces connections.allow on a bare Resource spec.data binding', () => {
     const scoped = registry().scope({ connections: { allow: ['public'] } })
 
     const disallowed = validateResource(
@@ -323,6 +316,60 @@ describe('validateResource', () => {
       scoped,
     )
     expect(allowed.issues.map((issue) => issue.message)).not.toContain('connection public is not allowed in this scope')
+  })
+
+  it('rejects variables/events placed inside spec even when the kind schema allows additionalProperties', () => {
+    // A kind whose own specSchema allows extra properties (a real, common
+    // pattern — see e.g. GridKitTable, SelectableList) would otherwise let
+    // `spec.variables`/`spec.events` through its own ajv check silently.
+    // The runtime only ever reads these from the envelope, so a document
+    // that puts them in spec would validate as "valid" while the runtime
+    // quietly never sees them — this must fail validation instead.
+    const loose = createRegistry()
+    loose.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Loose',
+          specSchema: { type: 'object', additionalProperties: true, properties: {} },
+        },
+      ],
+    })
+
+    const misplacedVariables = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Loose',
+        spec: { variables: [{ name: 'x' }] },
+      },
+      loose,
+    )
+    expect(misplacedVariables.valid).toBe(false)
+    expect(misplacedVariables.issues.map((issue) => issue.path)).toContain('/spec/variables')
+
+    const misplacedEvents = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Loose',
+        spec: { events: { click: { kind: 'internal' } } },
+      },
+      loose,
+    )
+    expect(misplacedEvents.valid).toBe(false)
+    expect(misplacedEvents.issues.map((issue) => issue.path)).toContain('/spec/events')
+
+    const correct = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Loose',
+        spec: {},
+        variables: [{ name: 'x' }],
+        events: { click: { kind: 'internal' } },
+      },
+      loose,
+    )
+    expect(correct.valid).toBe(true)
   })
 
   it('rejects a missing required slot instead of only checking slots that are present', () => {
@@ -358,5 +405,23 @@ describe('validateResource', () => {
     )
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.message)).toContain('slot main is declared more than once')
+  })
+
+  it('rejects a recordScope kind with no record', () => {
+    const recordScope = createRegistry()
+    recordScope.use({ name: 'test', kinds: [{ ...panel, recordScope: true }] })
+
+    const result = validateResource({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'x' } }, recordScope)
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('record is required for recordScope kind Panel')
+  })
+
+  it('rejects a scopeProvider kind with no scope', () => {
+    const scopeProvider = createRegistry()
+    scopeProvider.use({ name: 'test', kinds: [{ ...panel, scopeProvider: true }] })
+
+    const result = validateResource({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'x' } }, scopeProvider)
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('scope is required for scopeProvider kind Panel')
   })
 })

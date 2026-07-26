@@ -1,22 +1,23 @@
 /**
- * Vendor-neutral server-state boundary between `DataflowRuntime` and a
+ * Vendor-neutral server-state boundary between a `scopeProvider: true` kind
+ * (`ScopeProviderNode`, `src/react/ResourceRenderer.tsx`) and a
  * `DataSourceAdapter` (docs/dataflow-and-server-state-direction.md P0
- * item 2). `DataflowRuntime` never talks to a coordinator directly — it only
- * knows about `DataBinding`/`resolve`; wiring a coordinator's results into a
- * dataflow epoch goes through `DataflowRuntime.publish()`.
+ * item 2). A scope provider never talks to a coordinator directly — it only
+ * knows about `DataBinding`/`resolve`; wiring a coordinator's background
+ * results back into a mounted provider goes through `onUpdate` below,
+ * published into `RuntimeStore`'s `scope` namespace.
  *
  * `createDirectQueryCoordinator` is the only implementation here: no cache,
- * no polling, no dedup, no retry — it preserves today's one-shot resolve
+ * no polling, no dedup, no retry — it preserves a one-shot resolve
  * behavior. A TanStack Query (or other) coordinator is a separate,
  * pluggable implementation of the same `QueryCoordinator` contract (see
  * `createCoordinatorResolve` below for how either kind actually plugs into
- * `DataflowRuntime.resolve`, and `@loykin/resourcekit/connectors/tanstack-query`
- * for the TanStack-backed one).
+ * a scope provider's resolve, and
+ * `@loykin/resourcekit/connectors/tanstack-query` for the TanStack-backed one).
  */
 
-import { clampQueryPolicy } from './dataflow'
-import type { DataNodeResolveContext, QueryPolicy } from './dataflow'
-import type { DataBinding, DataResolveContext, QueryScopePolicy } from '../core/types'
+import { clampQueryPolicy } from './queryPolicy'
+import type { DataBinding, DataResolveContext, QueryPolicy, QueryScopePolicy } from '../core/types'
 import type { ResourceRegistry } from '../core/registry'
 
 export interface QueryRequest {
@@ -59,27 +60,20 @@ interface DirectEntry {
 }
 
 export function createDirectQueryCoordinator(): QueryCoordinator {
-  // Multiple handles may open the same nodeId (e.g. two resources consuming
-  // one resolve node); invalidate/refetch by nodeId must reach all of them.
+  // Multiple handles may open the same nodeId (e.g. two ScopeProviderNode
+  // instances consuming the same scope name); invalidate/refetch by nodeId
+  // must reach all of them.
   const entriesByNodeId = new Map<string, Set<DirectEntry>>()
 
   function notify(entry: DirectEntry) {
     for (const listener of entry.listeners) listener()
   }
 
-  // Generation-counter + AbortController supersession, same idea as
-// src/dataflow.ts's per-node cancellation (evaluate()/evaluateAffected,
-// ObsoleteExecutionError). Deliberately not shared: dataflow.ts tracks
-// generations for many graph nodes at once via external `Map<string,
-// number>` + `Map<string, AbortController>` lookups (needed because a
-// node's cancellation is driven by *other* nodes changing), while a
-// DirectEntry here is a single, self-contained query with no graph
-// awareness at all. Forcing one shape onto the other would either make
-// dataflow.ts's already-delicate multi-node bookkeeping indirect for no
-// reason, or make this file carry map lookups it doesn't need — see
-// AGENTS.md on not introducing abstractions beyond what's required. If a
-// third cancellation site appears, that's the signal to actually extract one.
-function run(entry: DirectEntry) {
+  // Generation-counter + AbortController supersession: a `DirectEntry` is a
+  // single, self-contained query with no graph awareness, so a plain
+  // incrementing `generation` field is the simplest correct mechanism for
+  // discarding a stale in-flight execution when a newer one starts.
+  function run(entry: DirectEntry) {
     const generation = ++entry.generation
     entry.controller.abort()
     entry.controller = new AbortController()
@@ -161,8 +155,6 @@ export interface CreateCoordinatorResolveOptions {
   registry: Pick<ResourceRegistry, 'getDataSourceAdapter'>
   /** The actual row-fetching call (e.g. a plain `DataResolver` invocation) — this helper only adds coordinator semantics around it, it doesn't know how to fetch anything itself. */
   resolve: (binding: DataBinding, ctx: DataResolveContext) => Promise<unknown>
-  /** Per-node AI-authored policy, looked up by nodeId (e.g. from a `DataGraphSpec`'s resolve node). */
-  getPolicy?: (nodeId: string) => QueryPolicy | undefined
   /** Host ceiling applied via `clampQueryPolicy` before the policy reaches the coordinator. */
   scopePolicy?: QueryScopePolicy
   /**
@@ -170,9 +162,11 @@ export interface CreateCoordinatorResolveOptions {
    * value already delivered through `resolve`'s return promise — the only
    * way a coordinator's own background activity (a poll tick, an
    * out-of-band `invalidate`/`refetch`) reaches anything, since `resolve` is
-   * otherwise a one-shot call. Wire this to `DataflowRuntime.publish(nodeId,
-   * ...)`. Safe to ignore (e.g. a coordinator with no polling policy never
-   * calls this after the first snapshot).
+   * otherwise a one-shot call. Wire this to publish into `RuntimeStore`'s
+   * `scope` namespace (`runtimeKeys.scope(nodeId, scope)`) — the mounted
+   * `ScopeProviderNode` for that name subscribes to that key and updates its
+   * own local state from it. Safe to ignore (e.g. a coordinator with no
+   * polling policy never calls this after the first snapshot).
    */
   onUpdate?: (nodeId: string, snapshot: QuerySnapshot) => void
 }
@@ -180,9 +174,9 @@ export interface CreateCoordinatorResolveOptions {
 export interface CoordinatorResolveBridge {
   resolve: (
     binding: DataBinding,
-    ctx: DataResolveContext & Pick<DataNodeResolveContext, 'nodeId' | 'reason'>,
+    ctx: DataResolveContext & { nodeId: string; reason: 'initial' | 'refetch'; policy?: QueryPolicy },
   ) => Promise<unknown>
-  /** Invalidates coordinator cache entries while suppressing same-value update echoes back into dataflow. */
+  /** Invalidates coordinator cache entries while suppressing same-value update echoes back to a mounted provider. */
   invalidate: (nodeIds: string[]) => Promise<void>
   /** Disposes every handle this bridge has opened — call when the owning runtime is torn down. */
   dispose: () => void
@@ -200,12 +194,12 @@ interface CachedHandle {
 
 /**
  * Bridges any `QueryCoordinator` (direct or a scheduling one like TanStack
- * Query) into the `(binding, ctx) => Promise<unknown>` shape
- * `DataflowRuntime`'s `resolve` option needs
- * (docs/dataflow-and-server-state-direction.md P1 item 1). Query key comes
- * from a registered `DataSourceAdapter.queryKey` when one exists for the
- * binding's source; otherwise falls back to `[nodeId, stableStringify(binding)]`
- * when a source has no richer adapter registration.
+ * Query) into the `(binding, ctx) => Promise<unknown>` shape a
+ * `ScopeProviderNode` needs (docs/dataflow-and-server-state-direction.md P1
+ * item 1). Query key comes from a registered `DataSourceAdapter.queryKey`
+ * when one exists for the binding's source; otherwise falls back to
+ * `[nodeId, stableStringify(binding)]` when a source has no richer adapter
+ * registration.
  *
  * Keeps exactly one `QueryHandle` per nodeId, reused across repeated
  * `resolve` calls for that node — not reopened every call. This is what
@@ -213,9 +207,8 @@ interface CachedHandle {
  * `onUpdate` (a fresh handle per call would settle its own promise once and
  * be abandoned, so a poll tick between calls would have nothing listening).
  * The cached handle is replaced (old one disposed) only when the computed
- * key changes — i.e. the node's `$data` or variable-dependent binding now
- * refers to a genuinely different query, not just a re-evaluation with the
- * same one.
+ * key changes — i.e. the scope's variable-dependent binding now refers to a
+ * genuinely different query, not just a re-evaluation with the same one.
  */
 export function createCoordinatorResolve(options: CreateCoordinatorResolveOptions): CoordinatorResolveBridge {
   const handles = new Map<string, CachedHandle>()
@@ -261,7 +254,7 @@ export function createCoordinatorResolve(options: CreateCoordinatorResolveOption
       const adapter = options.registry.getDataSourceAdapter(binding.source)
       const rawKey = adapter ? adapter.queryKey(binding, ctx) : [ctx.nodeId, stableStringify(binding)]
       const cacheKey = stableStringify(rawKey)
-      const policy = clampQueryPolicy(options.getPolicy?.(ctx.nodeId), options.scopePolicy)
+      const policy = clampQueryPolicy(ctx.policy, options.scopePolicy)
 
       const existing = handles.get(ctx.nodeId)
       let cached: CachedHandle
@@ -305,8 +298,7 @@ export function createCoordinatorResolve(options: CreateCoordinatorResolveOption
           const onAbort = () => {
             // Only this call's wait is cancelled — the handle stays cached and
             // subscribed (via unsubscribeUpdates) for the next resolve() call
-            // or background update, matching `DataflowRuntime`'s own
-            // per-evaluation (not per-node) cancellation model.
+            // or background update; cancellation is per-call, not per-node.
             if (settled) return
             settled = true
             cleanup()

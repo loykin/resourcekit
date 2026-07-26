@@ -315,7 +315,6 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
             idField: { type: 'string' },
             primary: fieldRefSchema,
             secondary: { type: 'array', items: fieldRefSchema },
-            events: { type: 'object' },
           },
         },
         bindingPolicy: {
@@ -371,6 +370,23 @@ export function createResourceViewPlugin(): ResourceKitPlugin<KindRenderFn> {
           },
         },
         render: (resource, ctx) => <JsonViewer spec={resource.spec as JsonViewerSpec} ctx={ctx} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DataScope',
+        level: ['template', 'organism'],
+        scopeProvider: true,
+        description:
+          'Fetches `scope.binding` once (optionally polling via `scope.policy`) and publishes the raw result to every descendant kind as `{ "$scope": scope.name }` — for a value multiple unrelated sibling kinds need to share (e.g. a list shown both as a compact selector and a full table). A single-consumer fetch should stay an inline `spec.data` binding instead; only wrap in DataScope when sharing across siblings, or a mutation needs to target it by name via refetchData/invalidateData.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {},
+        },
+        slotPolicy: {
+          defaultSlot: { min: 1, max: 1, acceptsLevels: ['template', 'organism', 'leaf'] },
+        },
+        render: (_resource, ctx) => ctx.slots.children(),
       },
     ],
   }

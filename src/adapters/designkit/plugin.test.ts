@@ -7,7 +7,7 @@ import { ResourceRenderer } from '../../react'
 import type { KindRenderFn } from '../../react'
 import { staticResolver } from '../../connection/resolvers'
 import { createMemoryRuntimeStore, runtimeKeys } from '../../runtime/store'
-import type { ResourceDocument } from '../../runtime/dataflow'
+import type { Resource } from '../../core/types'
 import { createDesignKitPlugin } from './plugin'
 
 afterEach(cleanup)
@@ -87,31 +87,27 @@ describe('DesignKit forms', () => {
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
     const runtimeStore = createMemoryRuntimeStore()
-    const document: ResourceDocument = {
-      data: {
-        nodes: {
-          processDraft: {
-            kind: 'state',
-            initialValue: {
-              identity: 'process-7',
-              value: { command: 'nginx -g daemon off;', name: 'nginx' },
-            },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormView',
+      objectState: [
+        {
+          name: 'processDraft',
+          initialValue: {
+            identity: 'process-7',
+            value: { command: 'nginx -g daemon off;', name: 'nginx' },
           },
         },
-      },
-      resource: {
-        apiVersion: 'resourcekit.dev/v1alpha1',
-        kind: 'FormView',
-        bindings: { draft: { $data: 'processDraft' } },
-        spec: {
-          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-          draftPolicy: { syncDelayMs: 0 },
-          submit: { action: 'process.update', mutation: { target: 'memory' } },
-        },
+      ],
+      bindings: { draft: { $state: 'processDraft' } },
+      spec: {
+        sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+        draftPolicy: { syncDelayMs: 0 },
+        submit: { action: 'process.update', mutation: { target: 'memory' } },
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    render(createElement(ResourceRenderer, { registry, resource, runtimeStore, runtimeScope: 'form' }))
 
     await waitFor(() =>
       expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('nginx -g daemon off;'),
@@ -120,7 +116,7 @@ describe('DesignKit forms', () => {
     fireEvent.change(input, { target: { value: 'nginx -t' } })
 
     await waitFor(async () => {
-      expect(runtimeStore.read(runtimeKeys.data('processDraft', 'form'))?.value).toEqual({
+      expect(runtimeStore.read(runtimeKeys.objectState('processDraft', 'form'))?.value).toEqual({
         identity: 'process-7',
         value: { command: 'nginx -t', name: 'nginx' },
       })
@@ -136,35 +132,26 @@ describe('DesignKit forms', () => {
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
     const runtimeStore = createMemoryRuntimeStore()
-    const document: ResourceDocument = {
-      data: {
-        nodes: {
-          draft: {
-            kind: 'state',
-            initialValue: { identity: 'process-1', value: { command: 'initial' } },
-          },
-        },
-      },
-      resource: {
-        apiVersion: 'resourcekit.dev/v1alpha1',
-        kind: 'FormView',
-        bindings: { draft: { $data: 'draft' } },
-        spec: {
-          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-          draftPolicy: { syncDelayMs: 1000 },
-          submit: { mutation: { target: 'memory' } },
-        },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormView',
+      objectState: [{ name: 'draft', initialValue: { identity: 'process-1', value: { command: 'initial' } } }],
+      bindings: { draft: { $state: 'draft' } },
+      spec: {
+        sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+        draftPolicy: { syncDelayMs: 1000 },
+        submit: { mutation: { target: 'memory' } },
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    render(createElement(ResourceRenderer, { registry, resource, runtimeStore, runtimeScope: 'form' }))
     await waitFor(() =>
       expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement).value).toBe('initial'),
     )
     const input = screen.getByRole('textbox', { name: 'Command' }) as HTMLInputElement
     fireEvent.change(input, { target: { value: 'local edit' } })
 
-    runtimeStore.publish(runtimeKeys.data('draft', 'form'), {
+    runtimeStore.publish(runtimeKeys.objectState('draft', 'form'), {
       status: 'ready',
       value: { identity: 'process-1', value: { command: 'server refresh' } },
       epoch: 99,
@@ -178,32 +165,23 @@ describe('DesignKit forms', () => {
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
     const runtimeStore = createMemoryRuntimeStore()
-    const document: ResourceDocument = {
-      data: {
-        nodes: {
-          draft: {
-            kind: 'state',
-            initialValue: { identity: 'process-a', value: { command: 'command-a' } },
-          },
-        },
-      },
-      resource: {
-        apiVersion: 'resourcekit.dev/v1alpha1',
-        kind: 'FormView',
-        bindings: { draft: { $data: 'draft' } },
-        spec: {
-          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-          submit: { mutation: { target: 'memory' } },
-        },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormView',
+      objectState: [{ name: 'draft', initialValue: { identity: 'process-a', value: { command: 'command-a' } } }],
+      bindings: { draft: { $state: 'draft' } },
+      spec: {
+        sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+        submit: { mutation: { target: 'memory' } },
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    render(createElement(ResourceRenderer, { registry, resource, runtimeStore, runtimeScope: 'form' }))
     const input = await screen.findByRole('textbox', { name: 'Command' }) as HTMLInputElement
     await waitFor(() => expect(input.value).toBe('command-a'))
     fireEvent.change(input, { target: { value: 'dirty-a' } })
 
-    runtimeStore.publish(runtimeKeys.data('draft', 'form'), {
+    runtimeStore.publish(runtimeKeys.objectState('draft', 'form'), {
       status: 'ready',
       value: { identity: 'process-b', value: { command: 'command-b' } },
       epoch: 100,
@@ -217,24 +195,18 @@ describe('DesignKit forms', () => {
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
     const runtimeStore = createMemoryRuntimeStore()
-    const document: ResourceDocument = {
-      data: {
-        nodes: {
-          draft: { kind: 'state', initialValue: { command: 'legacy-flat-draft' } },
-        },
-      },
-      resource: {
-        apiVersion: 'resourcekit.dev/v1alpha1',
-        kind: 'FormView',
-        bindings: { draft: { $data: 'draft' } },
-        spec: {
-          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-          submit: { mutation: { target: 'memory' } },
-        },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormView',
+      objectState: [{ name: 'draft', initialValue: { command: 'legacy-flat-draft' } }],
+      bindings: { draft: { $state: 'draft' } },
+      spec: {
+        sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+        submit: { mutation: { target: 'memory' } },
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    render(createElement(ResourceRenderer, { registry, resource, runtimeStore, runtimeScope: 'form' }))
 
     expect(await screen.findByText('Draft binding must contain { identity: string, value: object }')).toBeTruthy()
     expect(screen.getByRole('textbox', { name: 'Command' })).toBeTruthy()
@@ -245,23 +217,21 @@ describe('DesignKit forms', () => {
     registry.use(createDesignKitPlugin())
     registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
     const runtimeStore = createMemoryRuntimeStore()
-    const document: ResourceDocument = {
-      data: { nodes: { draft: { kind: 'state', initialValue: null } } },
-      resource: {
-        apiVersion: 'resourcekit.dev/v1alpha1',
-        kind: 'FormView',
-        bindings: { draft: { $data: 'draft' } },
-        spec: {
-          sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-          submit: { mutation: { target: 'memory' } },
-        },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormView',
+      objectState: [{ name: 'draft', initialValue: null }],
+      bindings: { draft: { $state: 'draft' } },
+      spec: {
+        sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
+        submit: { mutation: { target: 'memory' } },
       },
     }
 
-    render(createElement(ResourceRenderer, { registry, resource: document, runtimeStore, runtimeScope: 'form' }))
+    render(createElement(ResourceRenderer, { registry, resource, runtimeStore, runtimeScope: 'form' }))
     expect(screen.queryByText('Draft binding must contain { identity: string, value: object }')).toBeNull()
 
-    runtimeStore.publish(runtimeKeys.data('draft', 'form'), {
+    runtimeStore.publish(runtimeKeys.objectState('draft', 'form'), {
       status: 'ready',
       value: { identity: 'process-1', value: { command: 'hydrated' } },
     })
@@ -362,7 +332,8 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
-          spec: { data: { source: 'static', rows: [{ notes: 'line one\nline two' }] } },
+          spec: {},
+          record: { source: 'static', rows: [{ notes: 'line one\nline two' }] },
           slots: [
             {
               items: [
@@ -405,7 +376,8 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
-          spec: { data: { source: 'static', rows: [{ active: true }] } },
+          spec: {},
+          record: { source: 'static', rows: [{ active: true }] },
           slots: [
             {
               items: [
@@ -452,7 +424,8 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
-          spec: { data: { source: 'static', rows: [{ roles: ['admin', 'viewer'] }] } },
+          spec: {},
+          record: { source: 'static', rows: [{ roles: ['admin', 'viewer'] }] },
           slots: [
             {
               items: [
@@ -501,7 +474,8 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
-          spec: { data: { source: 'static', rows: [{ concurrencyPolicy: 'Allow' }] } },
+          spec: {},
+          record: { source: 'static', rows: [{ concurrencyPolicy: 'Allow' }] },
           slots: [
             {
               items: [
@@ -601,10 +575,8 @@ describe('DesignKit adapter parity', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'InputControl',
-          spec: {
-            name: 'query',
-            events: { change: { kind: 'emit', event: 'queryChanged' } },
-          },
+          spec: { name: 'query' },
+          events: { change: { kind: 'emit', event: 'queryChanged' } },
         },
       }),
     )

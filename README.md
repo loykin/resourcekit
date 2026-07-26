@@ -48,7 +48,7 @@ registration:
 
 | Import | Purpose |
 | --- | --- |
-| `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, document dataflow, resolvers, connections, and submit runtime |
+| `@loykin/resourcekit` | React-free core: registry, scoping, schema generation, validation, variables, object-state, scope registry, resolvers, connections, and submit runtime |
 | `@loykin/resourcekit/react` | `ResourceRenderer` and React render contracts |
 | `@loykin/resourcekit/adapters/designkit` | designkit kinds; form kinds use React Hook Form |
 | `@loykin/resourcekit/adapters/gridkit` | gridkit kinds |
@@ -142,13 +142,37 @@ Use the same scoped registry for schema generation, validation, and rendering
 when the document came from an AI/MCP client. This prevents the generator from
 using kinds or capabilities that the application did not expose.
 
+`ResourceRenderer` takes one `ResourceRendererProps` object. This example only
+uses a few of them — the full set, most of which are covered in their own
+sections below:
+
+| Prop | Purpose |
+| --- | --- |
+| `resource` | A `Resource` — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) for `scopeProvider`/`DataScope` |
+| `registry` | A `ResourceRegistry` or (recommended) a `ScopedRegistry` |
+| `runtimeStore` | Shared `RuntimeStore`; defaults to a private in-memory one — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) |
+| `runtimeScope` | Required alongside a shared `runtimeStore` unless the root has `metadata.name` |
+| `queryCoordinator` | Routes a policy-bearing named scope through caching/polling/dedup instead of one-shot — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) |
+| `onAction` | Receives opaque `EventPolicy.kind: "action"` requests — see [Resource bindings, variables, and events](#resource-bindings-variables-and-events) |
+| `onEvent` | Receives `emit` event policies and submit `emit` effects |
+| `onDataError` | Receives resolve, coordinator, and unhandled action failures that have no other caller to reject to |
+| `confirmDialog` | Handles `SubmitSpec.confirm`; a confirmed submit fails closed without it — see [Mutations and submit](#mutations-and-submit) |
+| `renderUnknownKind` | Rendered for an unregistered kind |
+| `renderLoading` | Rendered while a lazily-loaded kind's `render` is still loading, or a record-scope resource's first fetch hasn't resolved |
+| `renderError` | Rendered when a record-scope resource's data fetch rejects |
+
 ## Resource model
 
 Every node uses a Kubernetes-like envelope:
 
 ```ts
-interface DataRef {
-  $data: string
+interface ScopeRef {
+  $scope: string
+  path?: string
+}
+
+interface ObjectStateRef {
+  $state: string
   path?: string
 }
 
@@ -174,9 +198,14 @@ interface Resource<TSpec = unknown> {
     annotations?: Record<string, string>
   }
   spec: TSpec
-  bindings?: Record<string, DataRef | VariableRef>
+  bindings?: Record<string, ObjectStateRef | VariableRef>
   visible?: VisibilityCondition
   disabled?: VisibilityCondition
+  variables?: VariableDeclaration[]
+  events?: Record<string, EventPolicy>
+  objectState?: ObjectStateDeclaration[]
+  record?: DataBinding | ObjectStateRef
+  scope?: { name: string; binding: DataBinding; policy?: QueryPolicy }
   slots?: Array<{
     name?: string
     items: Resource[]
@@ -184,16 +213,35 @@ interface Resource<TSpec = unknown> {
 }
 ```
 
+A minimal instance of that envelope — the actual JSON shape an AI/MCP client
+emits, not a TypeScript value:
+
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "DetailView",
+  "bindings": {
+    "selected": { "$variable": "customerId" }
+  },
+  "visible": { "$variable": "roles", "contains": "admin" },
+  "spec": {
+    "title": "Customer",
+    "fields": [{ "field": "name", "label": "Name" }]
+  }
+}
+```
+
 - `apiVersion` and `kind` select a registered kind manifest.
-- `spec` belongs exclusively to that kind and is checked against its schema.
-- `bindings` connects kind-declared ports to document data nodes or flat
-  variables. Adapters access those values only through the runtime context.
+- `bindings` connects kind-declared ports to a shared object-state slot or a
+  flat variable. Adapters access those values only through the runtime
+  context.
 - `visible` conditionally renders the node from a flat page variable. The
   runtime owns this field, so kinds do not implement visibility themselves.
 - `disabled` shares the same `VisibilityCondition` shape and evaluator as
   `visible`, but never gates rendering — the runtime evaluates it and exposes
   the result as `RenderContext.disabled` for kinds with a natural disabled
   affordance (buttons, inputs, submit actions) to consume.
+- `variables`/`events`/`objectState`/`record`/`scope` are covered just below.
 - `slots` belong to the parent. Omit `name` for the default slot.
 - Each parent's `SlotPolicy` controls accepted child kinds and cardinality.
 - A leaf kind has no slot policy and must not contain `slots`.
@@ -202,10 +250,41 @@ Parents never inspect child specs, and children never know which parent slot
 contains them. Unknown or not-yet-loaded kinds degrade only that node to
 `renderUnknownKind`; they do not crash the whole document.
 
+`spec` is *not* where every generically-shaped value lives — the envelope
+above carries the fields the runtime reads by fixed name regardless of kind
+(`variables`/`events`/`objectState`/`record`/`scope`, alongside
+`bindings`/`visible`/`disabled`), so a kind's own `specSchema` never needs a
+same-named placeholder property for them. `spec` still has two tiers of its
+own:
+
+| Tier | Fields | Who reads it |
+| --- | --- | --- |
+| Shared vocabulary, kind-placed | e.g. `SubmitSpec` (`action`/`mutation`/`confirm`/`onSuccess`), `RowCondition` (`hideWhen`/`disabledWhen`), most kinds' own `data` binding (`DetailView`, `SelectableList`, `GridKitTable`, ...) | A kind's own render function chooses to read a field of this shape from wherever its own spec schema places it (`FormView` puts a `SubmitSpec` at `spec.submit`; `GridKitTable` puts one at `spec.columns.actions.items[].submit`) and pass it into a runtime-provided dispatcher (`ctx.actions.submit`, `ctx.bindings.write`, `ctx.data.resolve`) |
+| Kind-owned | Everything else | Checked only against that kind's own `specSchema`; the runtime never looks inside it |
+
+| Envelope field | Condition | Effect |
+| --- | --- | --- |
+| `variables` | Any resource, any kind | `VariableDeclaration[]`, scanned recursively across the whole document tree and auto-declared as flat (`string \| string[]`), read/write page variables |
+| `events` | Only as a fallback when the kind manifest has no `behaviorPolicy.events[event]` for the fired event | Read as an `EventPolicy` map, keyed by event name |
+| `objectState` | Any resource, any kind | `ObjectStateDeclaration[]`, scanned recursively — shared, writable, object-shaped state slots (the structured counterpart to `variables`; see `ObjectStateRef`/`Resource.bindings`) |
+| `record` | Only when the kind's manifest sets `recordScope: true` | Read as a `DataBinding` (a real fetch) or an `ObjectStateRef` (a pointer to an `objectState` slot); the runtime resolves it into `RenderContext.record` before the kind renders |
+| `scope` | Only when the kind's manifest sets `scopeProvider: true` | `{ name, binding, policy? }` — the runtime resolves `binding` (once, or repeatedly if `policy.refresh` is set) and publishes the raw result to every descendant as `{ "$scope": name }`, resolvable via `ctx.data.resolve` |
+
 ## Registry and adapters
 
 The registry is a runtime plugin host. Plugins can contribute kind manifests,
-data resolvers, mutation resolvers, and connection adapters.
+data resolvers, mutation resolvers, and connection adapters — `registry.use()`
+takes one `ResourceKitPlugin` object:
+
+| Field | Purpose |
+| --- | --- |
+| `name` | Plugin identifier, for diagnostics only |
+| `kinds` | `KindManifest[]` this plugin registers |
+| `patternExamples` | Multi-kind pattern examples surfaced to `selectExamples()` for AI generation guidance |
+| `dataResolvers` | `source` → `DataResolver` map dispatched by `spec.data`/`scope.binding` |
+| `dataSourceAdapters` | Optional `queryKey`/schema enrichment for a `dataResolvers` source — without one, a `QueryCoordinator` falls back to `[nodeId, JSON.stringify(binding)]` as the cache key |
+| `mutationResolvers` | `target` → `MutationResolver` map dispatched by `submit.mutation` |
+| `connectionAdapters` | Connection *type* adapters (`rest`, `datasourcekit`, ...) — not connection instances, see [Registered connections](#registered-connections) |
 
 ```ts
 registry.use(createDesignKitPlugin())
@@ -243,14 +322,22 @@ prompt.
 ## Scoping and validation
 
 `registry.scope(...)` creates the restricted view that may be exposed to an
-AI/MCP client. A scope can restrict:
+AI/MCP client. It takes one `ScopeOptions` object — this is the entire host
+ceiling in one place; nothing an AI/MCP client can reach lives outside it:
 
-- API versions and kinds
-- spec fields and locked values
-- slots
-- variables, datasources, and actions
-- registered connections and MCP capabilities
-- root composition levels and maximum depth
+| Field | Purpose |
+| --- | --- |
+| `apiVersions` | Allowed `apiVersion` values |
+| `kinds.include` / `kinds.exclude` | Allowed / denied kind names |
+| `spec.pick` / `spec.omit` / `spec.lock` | Per-kind spec field allowlist, denylist, and fixed values |
+| `slots.include` / `slots.exclude` | Per-kind allowed slot names |
+| `variables.allow` / `variables.lock` | Allowed page variables and fixed values |
+| `datasources.allow` | Allowed resolver `source` values |
+| `actions.allow` | Allowed named actions — both `submit.action` and `EventPolicy.kind: "action"` |
+| `connections.allow` / `connections.capabilities` | Allowed connection UIDs and the MCP capability ceiling (`test`/`inspect`/`preview`/`mutate`) applied to all of them |
+| `maxDepth` | Maximum slot nesting depth |
+| `rootLevels` | Allowed [levels](docs/kind-level-taxonomy.md) for the document root |
+| `queryPolicy` | Host ceiling (`allowPolling`, `minIntervalMs`, `maxIntervalMs`, `maxRetries`) that clamps an AI-authored named scope's `QueryPolicy` before it reaches a `QueryCoordinator` — see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds) |
 
 ```ts
 const scope = registry.scope({
@@ -271,6 +358,11 @@ const scope = registry.scope({
     allow: ['crm-api'],
     capabilities: { test: true, preview: true, mutate: false },
   },
+  queryPolicy: {
+    allowPolling: true,
+    minIntervalMs: 2000,
+    maxRetries: 2,
+  },
   rootLevels: ['template'],
   maxDepth: 8,
 })
@@ -285,10 +377,10 @@ if (!result.valid) {
 
 Validation checks the common envelope, registered kinds, kind spec schemas,
 binding ports, slot policies, required slots, scoped capabilities, variable
-references, resolver registration, and datasource/action allowlists. For a
-`ResourceDocument`, `validateResourceDocument` additionally checks its data
-graph, references, cycles, and writable-state targets. Validate every
-AI-produced document before rendering it.
+references, resolver registration, and datasource/action allowlists —
+including that a `{ "$scope": "name" }` reference is only used where some
+ancestor `scopeProvider: true` kind actually provides that name. Validate
+every AI-produced document before rendering it.
 
 Never give an AI/MCP client a schema built from the unrestricted registry.
 
@@ -412,21 +504,19 @@ A selectable kind can update the same variable through an event policy:
   "bindings": {
     "selected": { "$variable": "customerId" }
   },
-  "spec": {
-    "events": {
-      "select": {
-        "kind": "setVariable",
-        "variable": "customerId",
-        "from": "row.id"
-      }
+  "events": {
+    "select": {
+      "kind": "setVariable",
+      "variable": "customerId",
+      "from": "row.id"
     }
   }
 }
 ```
 
-The React runtime applies `setVariable` and `setData` policies and forwards
-`emit` policies through `ResourceRenderer`'s `onEvent` callback. A writable
-port writes through `ctx.bindings.write`; adapters never own a parallel
+The React runtime applies `setVariable` policies and forwards `emit`
+policies through `ResourceRenderer`'s `onEvent` callback. A writable port
+writes through `ctx.bindings.write`; adapters never own a parallel
 integration store. `internal` behavior stays inside the kind. After the
 scoped action allowlist is checked, `action` crosses the React host boundary
 as an opaque request. ResourceKit does not interpret, register, or execute
@@ -487,92 +577,79 @@ can actually block the underlying request. `disabled` is unrelated to
 value, a data source the runtime has no access to, so they keep their own
 `RowCondition` shape instead of `VisibilityCondition`.
 
-## Document dataflow
+## Named scopes: sharing a fetch across sibling kinds
 
-`ResourceDocument` adds one document-scoped reactive store and data graph
-around the existing root resource. `state` nodes retain values; `resolve`
-nodes dispatch registered resolver bindings. Structural `{ "$data": "..." }`
-references define consumers and dependency edges.
+Most kinds fetch through their own `spec.data` binding directly — no extra
+mechanism needed, and `${variable}` interpolation already covers "refetch
+when a page variable changes". A named **scope** only earns its keep for the
+one thing a plain binding can't do: letting two *unrelated* sibling kinds
+(e.g. a compact selector and a full table showing the same list) share one
+fetch, or letting a mutation's `refetchData`/`invalidateData` effect target
+it by a stable name regardless of where it lives in the tree.
 
-```ts
-import {
-  buildResourceDocumentSchema,
-  validateResourceDocument,
-} from '@loykin/resourcekit'
-import type { ResourceDocument } from '@loykin/resourcekit'
+A `scopeProvider: true` kind (`DataScope` is the built-in one) resolves
+`resource.scope.binding` — once, or repeatedly if `scope.policy.refresh` is
+set — and publishes the raw result to every descendant as
+`{ "$scope": "name" }`, resolvable through the same `ctx.data.resolve` every
+kind already uses for its own `spec.data`:
 
-const document: ResourceDocument = {
-  data: {
-    nodes: {
-      selectedCluster: { kind: 'state', initialValue: 'us-east' },
-      selectedHost: { kind: 'state' },
-      metrics: {
-        kind: 'resolve',
-        binding: {
-          source: 'connection',
-          connection: 'metrics',
-          request: {
-            operation: 'metrics',
-            cluster: { $data: 'selectedCluster' },
-          },
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "DataScope",
+  "variables": [{ "name": "selectedHost", "default": "web-1" }],
+  "scope": {
+    "name": "hostCpu",
+    "binding": {
+      "source": "connection",
+      "connection": "metrics",
+      "request": { "operation": "metrics", "cluster": "us-east" }
+    }
+  },
+  "spec": {},
+  "slots": [
+    {
+      "items": [
+        {
+          "apiVersion": "resourcekit.dev/v1alpha1",
+          "kind": "SelectableList",
+          "bindings": { "selected": { "$variable": "selectedHost" } },
+          "spec": { "data": { "$scope": "hostCpu" }, "primary": { "field": "host" } },
+          "events": { "select": { "kind": "setVariable", "variable": "selectedHost", "from": "row.host" } }
         },
-      },
-    },
-  },
-  resource: {
-    apiVersion: 'resourcekit.dev/v1alpha1',
-    kind: 'SelectableList',
-    bindings: {
-      selected: { $data: 'selectedHost' },
-    },
-    spec: {
-      data: { $data: 'metrics' },
-      primary: { field: 'name' },
-      events: {
-        select: { kind: 'setData', node: 'selectedHost', from: 'row.id' },
-      },
-    },
-  },
+        {
+          "apiVersion": "resourcekit.dev/v1alpha1",
+          "kind": "TableView",
+          "spec": { "data": { "$scope": "hostCpu" }, "columns": { "host": { "label": "Host" } } }
+        }
+      ]
+    }
+  ]
 }
-
-const schema = buildResourceDocumentSchema(scope)
-const validation = validateResourceDocument(document, scope)
 ```
 
-`ResourceRenderer` accepts either a bare `Resource` or a `ResourceDocument`.
-Its default `RuntimeStore` is in memory; hosts can provide one through the
-`runtimeStore` prop. This is the common namespaced KV snapshot/watch plane for
-document-visible variables, data, named executions, and plugin namespaces.
-Consumers opt into exact keys or namespaces; the
-store does not own their subscription policy. A shared store must pair each
-renderer with a unique `runtimeScope` (or a root `metadata.name`) so pages do
-not collide.
+Both `SelectableList` and `TableView` read the *same* fetched value — one
+request, shared by both. The value flows down through ordinary React
+props/render-tree recursion, the same way `record` flows to descendants of a
+`recordScope: true` kind — there is no separate shared store for this part.
 
-```ts
-const store = createMemoryRuntimeStore()
+The only piece that *does* need a shared, tree-position-independent handle is
+letting a mutation's `onSuccess` effect (`invalidateData`/`refetchData`,
+`scopes: [...]`) reach a named scope provider mounted anywhere else in the
+tree. That's a thin in-memory registry, not a dependency graph — no
+generations, no epochs, no cascade: naming a scope in `refetchData` re-runs
+exactly that scope's own fetch, nothing implicitly downstream of it.
 
-store.subscribe(
-  { kind: 'key', key: runtimeKeys.data('processes', 'pipelines-page') },
-  ({ snapshot }) => renderProcesses(snapshot),
-)
+```json
+{
+  "submit": {
+    "mutation": { "target": "operations", "connection": "service-operations" },
+    "onSuccess": [{ "kind": "refetchData", "scopes": ["incidents", "incidentDetail"] }]
+  }
+}
 ```
 
-External publishers may write or remove the same scoped keys. Dataflow watches
-its `data` namespace and reconciles external ready/error/removal changes
-through the same dependency graph; an optional opaque write `origin` prevents
-a subscriber from reacting to its own publication.
-
-The common runtime stops at storing snapshots and notifying subscribers.
-Variable, dataflow, form, query, and host integrations decide how to react to
-the keys they own; the store contains no adapter action registry or command
-semantics. Same-microtask data writes are batched, downstream resolves use
-latest-wins cancellation, and fan-in nodes observe a coherent propagation
-wave.
-
-The dataflow API is currently experimental. The v1 node vocabulary is limited
-to `state` and `resolve`; there is no general transform DSL.
-
-A `resolve` node can carry an AI-authored `QueryPolicy` — `refresh: { kind:
+A `scope.policy` carries an AI-authored `QueryPolicy` — `refresh: { kind:
 'interval', ms }`, `staleForMs`, `retainPreviousData`, `retry: { maxAttempts
 }` — using resourcekit-generic vocabulary, never a specific query library's
 option names. A host clamps it against its own `QueryScopePolicy` ceiling
@@ -580,11 +657,12 @@ option names. A host clamps it against its own `QueryScopePolicy` ceiling
 `clampQueryPolicy(policy, scope)` before running it; this never rejects, it
 only narrows an AI-authored policy down to what the host already allows.
 
-Internally, `resolve` execution goes through a swappable `QueryCoordinator`
-boundary rather than talking to a data source directly.
-`createDirectQueryCoordinator()` does one-shot resolves with no cache, polling,
-dedup, or retry. TanStack Query hosts can install `@tanstack/query-core` and use
-the supplied connector with their existing `QueryClient`:
+A policy-bearing scope routes its fetch through a swappable
+`QueryCoordinator` boundary instead of talking to a data resolver directly.
+`createDirectQueryCoordinator()` does one-shot resolves with no cache,
+polling, dedup, or retry. TanStack Query hosts can install
+`@tanstack/query-core` and use the supplied connector with their existing
+`QueryClient`:
 
 ```ts
 import { createTanStackQueryCoordinator } from '@loykin/resourcekit/connectors/tanstack-query'
@@ -592,27 +670,37 @@ import { createTanStackQueryCoordinator } from '@loykin/resourcekit/connectors/t
 const coordinator = createTanStackQueryCoordinator(queryClient)
 
 <ResourceRenderer
-  resource={document}
+  resource={resource}
   registry={scope}
-  runtimeStore={runtimeStore}
-  runtimeScope="pipelines-page"
   queryCoordinator={coordinator}
 />
 ```
 
 Use the application's existing `QueryClient`. A data source adapter's
-`queryKey` determines cache identity; `refetchData` still names document node
-IDs, and the connector maps those nodes back to their active Query observers.
-This is the integration shape used by Piper-like hosts—ResourceKit owns graph
-propagation while TanStack Query owns server-state caching and scheduling.
+`queryKey` determines cache identity; `refetchData` names the scope, and the
+connector maps it back to its active Query observer. This is the
+integration shape used by Piper-like hosts — ResourceKit owns which named
+scope exists and where its value flows, while TanStack Query owns
+server-state caching and scheduling.
 
-An explicit `refetchData` submit effect forces the cached coordinator handle to
-refetch; its new snapshot is then published into the common runtime store and
-propagated through the dataflow graph.
+An explicit `refetchData` submit effect forces a fresh fetch through the
+scope's own coordinator handle (or, with no coordinator, bypasses
+`resolveThroughRuntime`'s cache) and publishes the new value into the
+mounted `DataScope` instance's own state.
 
-`invalidateData` only marks the graph snapshot and coordinator cache stale;
-it does not execute a request. Use `refetchData` when the mutation must wait
-for fresh server data.
+`invalidateData` only marks the coordinator cache (or the scope's published
+snapshot) stale; it does not execute a request. Use `refetchData` when the
+mutation must wait for fresh server data.
+
+`ResourceRenderer`'s default `RuntimeStore` is in memory; hosts can provide
+one through the `runtimeStore` prop. This is the common namespaced KV
+snapshot/watch plane underlying page variables, object-state slots, named
+scopes' change notifications, and named executions. Consumers opt into exact
+keys or namespaces; the store does not own their subscription policy. A
+shared store must pair each renderer with a unique `runtimeScope` (or a root
+`metadata.name`) so pages do not collide. The common runtime stops at
+storing snapshots and notifying subscribers — it contains no adapter action
+registry or command semantics of its own.
 
 ## Mutations and submit
 
@@ -633,7 +721,7 @@ and success effects.
     "description": "This cannot be undone."
   },
   "onSuccess": [
-    { "kind": "invalidateData", "nodes": ["customers"] },
+    { "kind": "invalidateData", "scopes": ["customers"] },
     { "kind": "emit", "event": "customer.deleted" }
   ]
 }
@@ -647,7 +735,7 @@ references fail before confirmation or mutation.
 The submit runtime checks the scoped action allowlist, resolves references, verifies
 the mutation resolver and confirmation handler, waits for confirmation,
 executes the mutation, and only then applies success effects through the
-variable engine, document dataflow, and runtime store that own those values. A declared
+variable engine, scope registry, object-state engine, and runtime store that own those values. A declared
 confirmation fails closed when the host does not provide
 `ResourceRenderer.confirmDialog`:
 
@@ -667,59 +755,55 @@ after cancellation. Repeated form controls with the same name are submitted
 as an array rather than losing all but one value. Headless callers provide the
 same confirmation callback through `SubmitRuntime.confirm`.
 
-`setData`, `invalidateData`, and `refetchData` effects require a
-`ResourceDocument` data graph. `setVariable` and `emit` also work for a bare
-`Resource`.
+`setVariable` and `emit` work on any resource. `invalidateData`/`refetchData`
+name one or more `scope.name`s to mark stale or force a fresh fetch on —
+see [Named scopes](#named-scopes-sharing-a-fetch-across-sibling-kinds).
 
 ### Controlled FormView drafts
 
 `FormView` is backed by React Hook Form and can optionally connect its `draft`
-binding port to a writable dataflow `state` node. Without this binding RHF
-keeps values local to the form. A controlled draft is an identity-bearing
+binding port to a writable, shared `objectState` slot. Without this binding
+RHF keeps values local to the form. A controlled draft is an identity-bearing
 envelope. A new identity always resets the form; a same-identity refresh
 preserves dirty edits. This distinguishes record navigation from polling
 without asking the form to infer host intent.
 
 ```ts
-const document: ResourceDocument = {
-  data: {
-    nodes: {
-      processDraft: {
-        kind: 'state',
-        initialValue: {
-          identity: 'process-7',
-          value: {
-            id: 'process-7',
-            command: 'nginx -g daemon off;',
-            name: 'nginx',
-          },
+const resource: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'FormView',
+  objectState: [
+    {
+      name: 'processDraft',
+      initialValue: {
+        identity: 'process-7',
+        value: {
+          id: 'process-7',
+          command: 'nginx -g daemon off;',
+          name: 'nginx',
         },
       },
     },
+  ],
+  bindings: {
+    draft: { $state: 'processDraft' },
   },
-  resource: {
-    apiVersion: 'resourcekit.dev/v1alpha1',
-    kind: 'FormView',
-    bindings: {
-      draft: { $data: 'processDraft' },
+  spec: {
+    sections: [
+      {
+        id: 'main',
+        fields: [
+          { name: 'command', label: 'Command', required: true },
+        ],
+      },
+    ],
+    draftPolicy: {
+      syncDelayMs: 100,
+      markCleanOnSuccess: true,
     },
-    spec: {
-      sections: [
-        {
-          id: 'main',
-          fields: [
-            { name: 'command', label: 'Command', required: true },
-          ],
-        },
-      ],
-      draftPolicy: {
-        syncDelayMs: 100,
-        markCleanOnSuccess: true,
-      },
-      submit: {
-        action: 'process.update',
-        mutation: { target: 'process-api' },
-      },
+    submit: {
+      action: 'process.update',
+      mutation: { target: 'process-api' },
     },
   },
 }
@@ -752,14 +836,14 @@ synchronization remains disabled; it does not fail the surrounding document.
 `display: "actions"`. Each item must choose exactly one of `event` or
 `submit`; submit items use the same contract as forms and receive the complete
 `row.original` object as their payload. Event items route their event name
-through the table's normal `spec.events` policy map.
+through the table's normal envelope `events` policy map.
 
 ```json
 {
   "apiVersion": "resourcekit.dev/v1alpha1",
   "kind": "GridKitTable",
   "spec": {
-    "data": { "$data": "users" },
+    "data": { "source": "rest", "url": "/api/users" },
     "columns": {
       "name": { "label": "Name" },
       "actions": {
@@ -908,6 +992,255 @@ registry.registerConnection({
 })
 ```
 
+## Full example: wiring it together
+
+Each piece above is introduced where it becomes relevant. This section wires
+them into one realistic app — reusing the `crm-api` connection and `roles`
+variable from the sections above — so it's clear how they actually connect,
+not just what each one does in isolation.
+
+### 1. Registry: plugins, resolvers, connections
+
+```ts
+const registry = createRegistry<KindRenderFn>()
+registry.use(createDesignKitPlugin())
+registry.use(createGridKitPlugin())
+registry.use({
+  name: 'connections',
+  connectionAdapters: { rest: restConnectionAdapter },
+  dataResolvers: { connection: createConnectionDataResolver(registry) },
+})
+registry.use({
+  name: 'app-mutations',
+  mutationResolvers: { rest: myRestMutationResolver },
+})
+
+registry.registerConnection({
+  uid: 'crm-api',
+  type: 'rest',
+  name: 'CRM API',
+  config: { baseUrl: 'https://api.example.com' },
+  policy: { methods: ['GET', 'DELETE'], pathPrefixes: ['/customers'] },
+  mcpPolicy: { test: true, preview: true, mutate: false },
+})
+```
+
+### 2. Scope: the host ceiling exposed to AI/MCP
+
+```ts
+const scope = registry.scope({
+  apiVersions: ['resourcekit.dev/v1alpha1'],
+  kinds: { include: ['Panel', 'TableView'] },
+  variables: { allow: ['roles'] },
+  actions: { allow: ['customer.delete'] },
+  connections: {
+    allow: ['crm-api'],
+    capabilities: { test: true, preview: true, mutate: false },
+  },
+  queryPolicy: { allowPolling: true, minIntervalMs: 5000 },
+  rootLevels: ['template'],
+  maxDepth: 4,
+})
+```
+
+### 3. Document: a named scope, visibility, and a submit row action
+
+This is the actual JSON payload an AI/MCP client emits (validated with
+`validateResource(resource, scope)` before it ever reaches
+`ResourceRenderer`) — not a TypeScript value. `customers` is wrapped in a
+`DataScope` here not because two sibling kinds share it (only `TableView`
+reads it in this example) but because the delete mutation below needs to
+target it by name with `refetchData`:
+
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "DataScope",
+  "scope": {
+    "name": "customers",
+    "binding": {
+      "source": "connection",
+      "connection": "crm-api",
+      "request": { "path": "/customers" }
+    },
+    "policy": { "refresh": { "kind": "interval", "ms": 5000 } }
+  },
+  "spec": {},
+  "slots": [
+    {
+      "items": [
+        {
+          "apiVersion": "resourcekit.dev/v1alpha1",
+          "kind": "Panel",
+          "visible": { "$variable": "roles", "contains": "admin" },
+          "variables": [{ "name": "roles", "type": "string[]" }],
+          "spec": { "title": "Customers" },
+          "slots": [
+            {
+              "items": [
+                {
+                  "apiVersion": "resourcekit.dev/v1alpha1",
+                  "kind": "TableView",
+                  "spec": {
+                    "data": { "$scope": "customers" },
+                    "columns": {
+                      "name": { "label": "Name" },
+                      "actions": {
+                        "label": "",
+                        "display": "actions",
+                        "items": [
+                          {
+                            "id": "view",
+                            "label": "View",
+                            "event": "view"
+                          },
+                          {
+                            "id": "delete",
+                            "label": "Delete",
+                            "variant": "destructive",
+                            "submit": {
+                              "action": "customer.delete",
+                              "mutation": {
+                                "target": "rest",
+                                "url": "/customers/${payload.id}",
+                                "method": "DELETE"
+                              },
+                              "confirm": { "title": "Delete ${payload.name}?" },
+                              "onSuccess": [
+                                { "kind": "refetchData", "scopes": ["customers"] },
+                                { "kind": "emit", "event": "customer.deleted" }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "events": {
+                    "view": { "kind": "emit", "event": "customer.viewRequested" }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`Panel`'s `variables` declares `roles` so the document is self-contained (a
+real AI-authored document must declare every variable it references, not
+just use it). `TableView`'s row action uses the `event` variant (see
+[Grid row actions](#grid-row-actions)) instead of `submit` — its event name
+routes through the table's own `events`, which is envelope content (a
+sibling of `spec`), not a `spec` field, exactly like `Panel`'s `visible`
+above reads `roles` from the envelope.
+
+`record` (a fifth envelope field, alongside `variables`/`events`/
+`bindings`/`visible`/`scope`) only applies to a `recordScope: true` kind — it
+doesn't fit naturally into this list/delete flow, so here it is in
+isolation, resolving one customer directly by ID instead of through the
+`customers` scope above:
+
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "RecordScope",
+  "record": {
+    "source": "connection",
+    "connection": "crm-api",
+    "request": { "path": "/customers/${customerId}" }
+  },
+  "spec": {},
+  "slots": [
+    {
+      "items": [
+        {
+          "apiVersion": "resourcekit.dev/v1alpha1",
+          "kind": "DataBody",
+          "spec": { "title": "Customer" },
+          "slots": [
+            {
+              "items": [
+                {
+                  "apiVersion": "resourcekit.dev/v1alpha1",
+                  "kind": "DataBodyGroup",
+                  "spec": {},
+                  "slots": [
+                    {
+                      "items": [
+                        {
+                          "apiVersion": "resourcekit.dev/v1alpha1",
+                          "kind": "DataBodyField",
+                          "spec": { "label": "Name", "fieldRef": "name" }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`RecordScope`'s own `slotPolicy` only accepts `DataBody`/`ResourceForm`
+directly — a leaf like `DataBodyField` has to nest inside one of those (here
+`DataBody` → `DataBodyGroup` → `DataBodyField`) to reach the record scope.
+`DataBodyField` has no `data`/`bindings` of its own; its `fieldRef` is a
+dot-path read from the nearest ancestor's `record`, not a resolver binding.
+
+The host loads this JSON as a typed `Resource` — nothing above is
+TypeScript-only syntax, `${...}` interpolation and all:
+
+```ts
+const resource: Resource = resourceJson
+```
+
+### 4. Render: every `ResourceRendererProps` field earning its place
+
+```tsx
+const runtimeStore = createMemoryRuntimeStore()
+const coordinator = createTanStackQueryCoordinator(queryClient)
+
+<ResourceRenderer
+  resource={document}
+  registry={scope}
+  runtimeStore={runtimeStore}
+  runtimeScope="customers-page"
+  queryCoordinator={coordinator}
+  confirmDialog={(options) => Promise.resolve(window.confirm(options.title))}
+  onEvent={(event) => {
+    if (event === 'customer.deleted') toast('Deleted')
+  }}
+  onDataError={(error, node) => reportError(error, { node })}
+  renderUnknownKind={(node) => <p>Unsupported kind: {node.kind}</p>}
+  renderLoading={() => <p>Loading…</p>}
+  renderError={(error) => <p>{String(error)}</p>}
+/>
+```
+
+Tracing one interaction through this: `roles` — a page variable the host sets
+from its own auth context after login — gates the whole `Panel` through
+`visible`. `customers` polls every 5s through the TanStack coordinator wired
+in step 4, clamped to the `queryPolicy` ceiling set in step 2. Clicking
+**Delete** is checked against `actions.allow` from step 2, confirms through
+`confirmDialog`, runs the `customer.delete` mutation through the `rest`
+mutation resolver registered in step 1, then refetches `customers` and emits
+`customer.deleted`, which `onEvent` turns into a toast.
+
+This particular document has no `EventPolicy.kind: "action"` node, so
+`onAction` never fires here — see
+[Resource bindings, variables, and events](#resource-bindings-variables-and-events)
+for the opaque host-action path that takes instead of a `submit` when a kind
+needs to reach adapter-specific, non-mutation host behavior.
+
 ## AI/MCP staged generation
 
 For non-trivial registries, generate a document one position at a time instead
@@ -915,7 +1248,7 @@ of sending one large recursive schema to a model:
 
 ```ts
 import {
-  buildResourceDocumentSchema,
+  buildDocumentSchema,
   nextStage,
   nextStageBatch,
   singleKindSchema,
@@ -928,7 +1261,7 @@ const slots = nextStageBatch(scope, {
 })
 const kindSchema = singleKindSchema(scope, apiVersion, kind)
 const validation = validateResource(resource, scope)
-const documentSchema = buildResourceDocumentSchema(scope)
+const documentSchema = buildDocumentSchema(scope)
 ```
 
 The orchestration loop is intentionally owned by the caller:
@@ -1075,10 +1408,10 @@ The playground separates its examples by what they prove:
 - **Component fragment** — a renderable embed whose root is intentionally not eligible in a full-page `rootLevels: ['template']` scope.
 
 Each example carries its own scope. The playground uses that same scope for
-root selection, staged slot replay, final `validateResource` or
-`validateResourceDocument`, and rendering. The composition panel reports the
-final validation result and does not present runtime or fragment examples as
-evidence of an MCP generation session.
+root selection, staged slot replay, final `validateResource`, and rendering.
+The composition panel reports the final validation result and does not
+present runtime or fragment examples as evidence of an MCP generation
+session.
 
 ## Development
 

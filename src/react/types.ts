@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
-import type { DataRef } from '../core/types'
-import type { DataBinding, Resource, SubmitSpec } from '../core/types'
+import type { DataBinding, Resource, ScopeRef, SubmitSpec } from '../core/types'
 import type { SubmitResult } from '../runtime/submit'
 
 export interface HostActionRequest {
@@ -23,13 +22,9 @@ export type KindRenderFn<TSpec = unknown> = (
 export interface RenderContext {
   slots: SlotAccessor
   data: {
-    /** Interpolates the binding and dispatches it to the registered resolver. */
-    resolve: (binding: DataBinding | DataRef) => Promise<Record<string, unknown>[]>
-    /** Reads a data node without coercing its value into rows. */
-    read: (ref: DataRef) => Promise<unknown>
-    /** Writes a document-scoped state node. Rejects when no graph or writable node exists. */
-    set: (node: string, value: unknown) => Promise<void>
-    /** Changes when a document data snapshot settles; adapters use it to refresh DataRef consumers. */
+    /** Interpolates the binding and dispatches it to the registered resolver, or reads a named ancestor scope for a `ScopeRef`. */
+    resolve: (binding: DataBinding | ScopeRef) => Promise<Record<string, unknown>[]>
+    /** Changes when a referenced scope/variable settles; adapters use it to refresh `ScopeRef` consumers. */
     revision: number
   }
   bindings: {
@@ -52,6 +47,14 @@ export interface RenderContext {
    * dot-paths (`fieldRef`). Undefined outside any record scope.
    */
   record?: Record<string, unknown>
+  /**
+   * Named ancestor scopes — the raw (non-row-coerced) resolved value of
+   * every enclosing `scopeProvider: true` kind, keyed by its `scope.name`.
+   * Most kinds read a scope via `data.resolve({ "$scope": name })` instead
+   * (row-coerced, cached); this is the direct escape hatch for a kind (or
+   * test) that needs the raw value as-is.
+   */
+  scopes: Record<string, unknown>
   /**
    * `resource.disabled` evaluated against the page variable engine. Unlike
    * `visible`, this never gates rendering — kinds with a natural disabled

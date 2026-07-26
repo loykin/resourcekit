@@ -179,16 +179,6 @@ const eventPolicySchema: JsonSchema = {
         from: { type: 'string', description: 'Dot-path into the event payload, e.g. "row.id" for a row-select event.' },
       },
     },
-    {
-      type: 'object',
-      additionalProperties: false,
-      required: ['kind', 'node'],
-      properties: {
-        kind: { const: 'setData' },
-        node: { type: 'string', description: 'Writable state node in the enclosing ResourceDocument data graph.' },
-        from: { type: 'string', description: 'Dot-path into the event payload. Omit to publish the complete payload.' },
-      },
-    },
   ],
 }
 
@@ -216,13 +206,15 @@ interface WellKnownRefOptions {
 }
 
 /**
- * Rewrites well-known, generically-shaped spec properties (`data`, `mutation`,
- * `events`, `variables`) into refs against the shared `$defs` schemas built
- * from the scope's registered resolvers and the core `EventPolicy`/
- * `VariableDeclaration` types, instead of the bare `specSchema` a kind
- * manifest ships (which can't know the scope's resolvers or repeat the
- * runtime's own types by hand). `events`/`variables` are always rewritten —
- * their shape doesn't depend on scope state.
+ * Rewrites well-known, generically-shaped spec properties (`data`,
+ * `mutation`/`action`) into refs against the shared `$defs` schemas built
+ * from the scope's registered resolvers, instead of the bare `specSchema` a
+ * kind manifest ships (which can't know the scope's resolvers by hand). This
+ * only covers kind-placed bindings — a kind's own `spec.data` (most kinds)
+ * or `spec.submit.mutation` (any kind with a submit action). `events` and
+ * `variables` are *not* kind-placed — the runtime reads `resource.events`/
+ * `resource.variables` directly regardless of kind, so those are envelope
+ * properties added by `commonEnvelopeProperties`, not rewritten here.
  */
 function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): JsonSchema {
   const cloned = cloneSchema(schema)
@@ -234,13 +226,20 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
     const object = value as Record<string, unknown>
     if (typeof object.properties === 'object' && object.properties !== null && !Array.isArray(object.properties)) {
       const properties = object.properties as Record<string, unknown>
-      if (options.hasDataBindingSchema && 'data' in properties) properties.data = { $ref: '#/$defs/dataBinding' }
+      // Gated on hasDataBindingSchema (same as the mutation branch below) —
+      // not just because `dataBinding` needs a registered resolver to mean
+      // anything, but because this rewrite walks the *whole* schema
+      // recursively, including a kind's own embedded nested $defs (e.g.
+      // chartkit's `chartDefs`). Rewriting unconditionally would also catch
+      // an unrelated third-party `data` property nested in there that has
+      // nothing to do with DataBinding/ScopeRef.
+      if (options.hasDataBindingSchema && 'data' in properties) {
+        properties.data = { oneOf: [{ $ref: '#/$defs/dataBinding' }, { $ref: '#/$defs/scopeRef' }] }
+      }
       if (options.hasMutationBindingSchema && 'mutation' in properties) properties.mutation = { $ref: '#/$defs/mutationBinding' }
       if ('mutation' in properties && 'action' in properties && options.allowedActions) {
         properties.action = { type: 'string', enum: options.allowedActions }
       }
-      if ('events' in properties) properties.events = { type: 'object', additionalProperties: { $ref: '#/$defs/eventPolicy' } }
-      if ('variables' in properties) properties.variables = { type: 'array', items: { $ref: '#/$defs/variableDeclaration' } }
     }
     for (const [key, item] of Object.entries(object)) {
       object[key] = visit(item)
@@ -251,16 +250,70 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
   return visit(cloned) as JsonSchema
 }
 
+/**
+ * The envelope properties the runtime reads directly regardless of kind:
+ * `variables`/`events`/`objectState` unconditionally (like `visible`/
+ * `disabled`), `record` only for a `recordScope: true` kind with a
+ * registered `DataBinding` schema, `scope` only for a `scopeProvider: true`
+ * kind (mirrors `withWellKnownRefs`'s `hasDataBindingSchema` guard for
+ * kind-placed `spec.data`).
+ */
+function commonEnvelopeProperties(manifest: KindManifest, refOptions: WellKnownRefOptions): Record<string, unknown> {
+  return {
+    variables: { type: 'array', items: { $ref: '#/$defs/variableDeclaration' } },
+    events: { type: 'object', additionalProperties: { $ref: '#/$defs/eventPolicy' } },
+    objectState: { type: 'array', items: { $ref: '#/$defs/objectStateDeclaration' } },
+    // Matches the runtime's accepted union (RecordScopeNode reads `record`
+    // as either a resolver DataBinding or a `{ $state }` reference into an
+    // object-state slot) — same dual shape as `bindings`' own `ValueBinding`.
+    ...(manifest.recordScope && refOptions.hasDataBindingSchema
+      ? { record: { oneOf: [{ $ref: '#/$defs/dataBinding' }, { $ref: '#/$defs/objectStateRef' }] } }
+      : {}),
+    ...(manifest.scopeProvider && refOptions.hasDataBindingSchema
+      ? {
+          scope: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['name', 'binding'],
+            properties: {
+              name: { type: 'string', description: 'Name descendants reference via { "$scope": name }.' },
+              binding: { $ref: '#/$defs/dataBinding' },
+              policy: { $ref: '#/$defs/queryPolicy' },
+            },
+          },
+        }
+      : {}),
+  }
+}
+
 /** Adds the always-available `eventPolicy`/`variableDeclaration` defs, plus `dataBinding`/`mutationBinding` when the scope has registered resolvers for them. */
 function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry): WellKnownRefOptions {
   defs.eventPolicy = eventPolicySchema
   defs.variableDeclaration = variableDeclarationSchema
-  defs.dataRef = {
+  defs.objectStateDeclaration = {
     type: 'object',
     additionalProperties: false,
-    required: ['$data'],
+    required: ['name'],
     properties: {
-      $data: { type: 'string' },
+      name: { type: 'string' },
+      initialValue: {},
+    },
+  }
+  defs.scopeRef = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['$scope'],
+    properties: {
+      $scope: { type: 'string', description: 'Name provided by an ancestor scopeProvider kind (its scope.name).' },
+      path: { type: 'string' },
+    },
+  }
+  defs.objectStateRef = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['$state'],
+    properties: {
+      $state: { type: 'string', description: 'Name of an object-state slot declared in this document\'s objectState.' },
       path: { type: 'string' },
     },
   }
@@ -270,7 +323,30 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
     required: ['$variable'],
     properties: { $variable: { type: 'string' } },
   }
-  defs.valueBinding = { oneOf: [{ $ref: '#/$defs/dataRef' }, { $ref: '#/$defs/variableRef' }] }
+  defs.valueBinding = { oneOf: [{ $ref: '#/$defs/objectStateRef' }, { $ref: '#/$defs/variableRef' }] }
+  defs.queryPolicy = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      refresh: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'ms'],
+        properties: {
+          kind: { const: 'interval' },
+          ms: { type: 'integer', minimum: 1 },
+        },
+      },
+      staleForMs: { type: 'integer', minimum: 0 },
+      retainPreviousData: { type: 'boolean' },
+      retry: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['maxAttempts'],
+        properties: { maxAttempts: { type: 'integer', minimum: 0 } },
+      },
+    },
+  }
   const visibleVariableNames = scoped.options.variables?.allow
   const visibilityLeaf = {
     type: 'object',
@@ -345,7 +421,14 @@ function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOpti
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['apiVersion', 'kind', 'spec', ...(hasRequiredBindings(manifest) ? ['bindings'] : [])],
+    required: [
+      'apiVersion',
+      'kind',
+      'spec',
+      ...(hasRequiredBindings(manifest) ? ['bindings'] : []),
+      ...(manifest.recordScope && refOptions.hasDataBindingSchema ? ['record'] : []),
+      ...(manifest.scopeProvider && refOptions.hasDataBindingSchema ? ['scope'] : []),
+    ],
     properties: {
       $schema: { type: 'string' },
       apiVersion: { const: manifest.apiVersion },
@@ -354,6 +437,7 @@ function nodeEnvelopeSchema(manifest: KindManifest, refOptions: WellKnownRefOpti
       spec: embedSpecSchema(manifest, refOptions, defs),
       visible: { $ref: '#/$defs/visibilityCondition' },
       disabled: { $ref: '#/$defs/visibilityCondition' },
+      ...commonEnvelopeProperties(manifest, refOptions),
       ...(bindings ? { bindings } : {}),
     },
     ...(manifest.description ? { description: manifest.description } : {}),
@@ -494,11 +578,14 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
       spec: embedSpecSchema(manifest, refOptions, definitions),
       visible: { $ref: '#/$defs/visibilityCondition' },
       disabled: { $ref: '#/$defs/visibilityCondition' },
+      ...commonEnvelopeProperties(manifest, refOptions),
     }
     const bindings = bindingsSchema(manifest)
     if (bindings) properties.bindings = bindings
     const required = ['apiVersion', 'kind', 'spec']
     if (hasRequiredBindings(manifest)) required.push('bindings')
+    if (manifest.recordScope && refOptions.hasDataBindingSchema) required.push('record')
+    if (manifest.scopeProvider && refOptions.hasDataBindingSchema) required.push('scope')
 
     if (manifest.slotPolicy) {
       const slotBranches: JsonSchema[] = []
@@ -560,118 +647,6 @@ export function buildDocumentSchema(scoped: ScopedRegistry): JsonSchema {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $ref: '#/$defs/resource',
     $defs: definitions,
-  }
-}
-
-/**
- * Experimental AI-facing schema for a root resource plus document-scoped
- * state/resolve nodes. The existing document definitions are reused so kind,
- * slot and scope constraints cannot drift from `buildDocumentSchema`.
- */
-export interface BuildResourceDocumentSchemaOptions {
-  /**
-   * Node ids already declared in the in-progress document (a staged
-   * generation caller's own bookkeeping — resourcekit doesn't track this
-   * itself, see docs/staged-generation-experiment.md). When given,
-   * `$data` is constrained to this exact enum instead of a free string —
-   * generation-quality.md hallucination surface (b): kinds are already
-   * enum-constrained by scope, so a free-string node id was the one
-   * inconsistent escape hatch.
-   */
-  knownNodeIds?: string[]
-}
-
-export function buildResourceDocumentSchema(scoped: ScopedRegistry, options: BuildResourceDocumentSchemaOptions = {}): JsonSchema {
-  const resourceSchema = buildDocumentSchema(scoped)
-  const defs = structuredClone((resourceSchema.$defs ?? {}) as Record<string, unknown>)
-  const executableDataBinding = defs.dataBinding
-
-  defs.dataRef = {
-    type: 'object',
-    additionalProperties: false,
-    required: ['$data'],
-    properties: {
-      $data:
-        options.knownNodeIds === undefined
-          ? { type: 'string', description: 'ID of a node in this document data graph.' }
-          : options.knownNodeIds.length > 0
-            ? { type: 'string', enum: options.knownNodeIds, description: 'ID of a node already declared in this document data graph.' }
-            : false,
-      path: { type: 'string', description: 'Optional dot-path into the referenced node value.' },
-    },
-  }
-
-  if (executableDataBinding) {
-    defs.executableDataBinding = executableDataBinding
-    defs.dataBinding = { oneOf: [{ $ref: '#/$defs/executableDataBinding' }, { $ref: '#/$defs/dataRef' }] }
-  }
-
-  defs.stateDataNode = {
-    type: 'object',
-    additionalProperties: false,
-    required: ['kind'],
-    properties: {
-      kind: { const: 'state' },
-      initialValue: {},
-    },
-  }
-  defs.resolveDataNode = executableDataBinding
-    ? {
-        type: 'object',
-        additionalProperties: false,
-        required: ['kind', 'binding'],
-        properties: {
-          kind: { const: 'resolve' },
-          binding: { $ref: '#/$defs/executableDataBinding' },
-          policy: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              refresh: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['kind', 'ms'],
-                properties: {
-                  kind: { const: 'interval' },
-                  ms: { type: 'integer', minimum: 1 },
-                },
-              },
-              staleForMs: { type: 'integer', minimum: 0 },
-              retainPreviousData: { type: 'boolean' },
-              retry: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['maxAttempts'],
-                properties: { maxAttempts: { type: 'integer', minimum: 0 } },
-              },
-            },
-          },
-        },
-      }
-    : false
-  defs.dataGraph = {
-    type: 'object',
-    additionalProperties: false,
-    required: ['nodes'],
-    properties: {
-      nodes: {
-        type: 'object',
-        propertyNames: { pattern: '^[A-Za-z_][A-Za-z0-9_/-]*$' },
-        additionalProperties: { oneOf: [{ $ref: '#/$defs/stateDataNode' }, { $ref: '#/$defs/resolveDataNode' }] },
-      },
-    },
-  }
-
-  return {
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
-    type: 'object',
-    additionalProperties: false,
-    required: ['resource'],
-    properties: {
-      data: { $ref: '#/$defs/dataGraph' },
-      resource: { $ref: '#/$defs/resource' },
-    },
-    $defs: defs,
   }
 }
 

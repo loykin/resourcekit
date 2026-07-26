@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import type { Resource, ResourceDocument } from '@loykin/resourcekit'
+import type { Resource } from '@loykin/resourcekit'
 
 let app: typeof import('./App')
 
@@ -26,10 +26,6 @@ beforeAll(async () => {
   app = await import('./App')
 })
 
-function rootResource(value: Resource | ResourceDocument): Resource {
-  return 'resource' in value ? value.resource : value
-}
-
 function kindsIn(resource: Resource): string[] {
   return [resource.kind, ...(resource.slots ?? []).flatMap((slot) => slot.items.flatMap(kindsIn))]
 }
@@ -49,7 +45,7 @@ describe('playground example catalog', () => {
 
     const internalKind = /^(DesignKit|GridKit|ChartKit|BaseKit)[A-Z]/
     for (const example of app.examples) {
-      expect(kindsIn(rootResource(example.resource)).filter((kind) => internalKind.test(kind)), example.id).toEqual([])
+      expect(kindsIn(example.resource).filter((kind) => internalKind.test(kind)), example.id).toEqual([])
     }
   })
 

@@ -117,8 +117,8 @@ const dataBodySplit: Resource = {
   metadata: { name: 'designkit-databody-split-parity' },
   spec: {
     title: 'Users',
-    variables: [{ name: 'userId', type: 'string', default: '1' }],
   },
+  variables: [{ name: 'userId', type: 'string', default: '1' }],
   slots: [
     {
       name: 'topBar',
@@ -146,8 +146,8 @@ const dataBodySplit: Resource = {
                     idField: 'id',
                     primary: { field: 'name' },
                     secondary: [{ field: 'email' }],
-                    events: { select: { kind: 'setVariable', variable: 'userId', from: 'row.id' } },
                   },
+                  events: { select: { kind: 'setVariable', variable: 'userId', from: 'row.id' } },
                 },
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',

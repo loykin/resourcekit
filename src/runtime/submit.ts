@@ -15,10 +15,9 @@ export interface SubmitRuntime {
     set(name: string, value: VariableValue): void
   }
   store: Pick<RuntimeStore, 'publish'>
-  data?: {
-    set(node: string, value: unknown): Promise<void>
-    invalidate(nodes: string[]): Promise<void>
-    refetch(nodes: string[]): Promise<void>
+  scopes: {
+    invalidate(names: string[]): void
+    refetch(names: string[]): Promise<void>
   }
   /** When provided, submits whose `action` is not listed are rejected. */
   allowedActions?: string[]
@@ -84,18 +83,11 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
       if (effect.kind === 'emit') {
         runtime.emit?.(effect.event, result)
       }
-      if (effect.kind === 'setData') {
-        const next = effect.value !== undefined ? effect.value : effect.from !== undefined ? getValueAtPath(result, effect.from) : result
-        if (!runtime.data) throw new Error('setData requires a ResourceDocument data graph')
-        await runtime.data.set(effect.node, next)
-      }
       if (effect.kind === 'invalidateData') {
-        if (!runtime.data) throw new Error('invalidateData requires a ResourceDocument data graph')
-        await runtime.data.invalidate(effect.nodes)
+        runtime.scopes.invalidate(effect.scopes)
       }
       if (effect.kind === 'refetchData') {
-        if (!runtime.data) throw new Error('refetchData requires a ResourceDocument data graph')
-        await runtime.data.refetch(effect.nodes)
+        await runtime.scopes.refetch(effect.scopes)
       }
     }
 

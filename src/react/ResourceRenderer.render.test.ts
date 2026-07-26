@@ -4,11 +4,12 @@ import { QueryClient } from '@tanstack/query-core'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTanStackQueryCoordinator } from '../connectors/tanstack-query'
-import type { ResourceDocument } from '../runtime/dataflow'
 import { createDirectQueryCoordinator } from '../runtime/queryCoordinator'
 import type { QueryCoordinator } from '../runtime/queryCoordinator'
+import { createMemoryRuntimeStore, runtimeKeys } from '../runtime/store'
 import { createRegistry } from '../core/registry'
 import type { Resource } from '../core/types'
+import { createResourceViewPlugin } from '../adapters'
 import { ResourceRenderer } from './ResourceRenderer'
 import type { KindRenderFn, RenderContext } from './types'
 
@@ -44,45 +45,45 @@ function setup() {
     ],
   })
 
-  const document: ResourceDocument = {
-    data: { nodes: { a: { kind: 'state', initialValue: 1 }, b: { kind: 'state', initialValue: 1 } } },
-    resource: {
-      apiVersion: 'resourcekit.dev/v1alpha1',
-      kind: 'Group',
-      spec: { variables: [{ name: 'shared', default: 'v1' }] },
-      slots: [
-        {
-          items: [
-            {
-              apiVersion: 'resourcekit.dev/v1alpha1',
-              kind: 'Probe',
-              metadata: { name: 'probeA' },
-              bindings: { value: { $data: 'a' } },
-              spec: { events: { touch: { kind: 'setVariable', variable: 'shared', from: 'value' } } },
-            },
-            {
-              apiVersion: 'resourcekit.dev/v1alpha1',
-              kind: 'Probe',
-              metadata: { name: 'probeB' },
-              bindings: { value: { $data: 'b' } },
-              spec: {},
-            },
-          ] satisfies Resource[],
-        },
-      ],
-    },
+  const resource: Resource = {
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'Group',
+    spec: {},
+    variables: [
+      { name: 'shared', default: 'v1' },
+      { name: 'a', default: '1' },
+      { name: 'b', default: '1' },
+    ],
+    slots: [
+      {
+        items: [
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'Probe',
+            metadata: { name: 'probeA' },
+            bindings: { value: { $variable: 'a' } },
+            spec: {},
+            events: { touch: { kind: 'setVariable', variable: 'shared', from: 'value' } },
+          },
+          {
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'Probe',
+            metadata: { name: 'probeB' },
+            bindings: { value: { $variable: 'b' } },
+            spec: {},
+          },
+        ] satisfies Resource[],
+      },
+    ],
   }
 
-  return { registry, document, renderCounts, contexts }
+  return { registry, resource, renderCounts, contexts }
 }
 
 describe('ResourceRenderer node-level re-render scoping', () => {
-  it('re-renders only the resource whose own $data dependency changed', async () => {
-    const { registry, document, renderCounts, contexts } = setup()
-    render(createElement(ResourceRenderer, { resource: document, registry }))
-    // Let the dataflow runtime's own async start()/initial state snapshot
-    // writes (and the re-renders they trigger) fully settle before taking
-    // a "before" baseline — otherwise this races with the assertions below.
+  it('re-renders only the resource whose own variable dependency changed', async () => {
+    const { registry, resource, renderCounts, contexts } = setup()
+    render(createElement(ResourceRenderer, { resource, registry }))
     await act(async () => {})
 
     expect(renderCounts.probeA).toBeGreaterThanOrEqual(1)
@@ -90,7 +91,7 @@ describe('ResourceRenderer node-level re-render scoping', () => {
     const [countsBeforeA, countsBeforeB] = [renderCounts.probeA, renderCounts.probeB]
 
     await act(async () => {
-      await contexts.probeA.data.set('a', 2)
+      contexts.probeA.variables.set('a', '2')
     })
 
     expect(renderCounts.probeA).toBeGreaterThan(countsBeforeA)
@@ -98,7 +99,7 @@ describe('ResourceRenderer node-level re-render scoping', () => {
 
     const countsAfterFirstA = renderCounts.probeA
     await act(async () => {
-      await contexts.probeB.data.set('b', 2)
+      contexts.probeB.variables.set('b', '2')
     })
 
     expect(renderCounts.probeB).toBeGreaterThan(countsBeforeB)
@@ -106,8 +107,8 @@ describe('ResourceRenderer node-level re-render scoping', () => {
   })
 
   it('does not re-render resources that do not subscribe to a changed variable', async () => {
-    const { registry, document, renderCounts, contexts } = setup()
-    render(createElement(ResourceRenderer, { resource: document, registry }))
+    const { registry, resource, renderCounts, contexts } = setup()
+    render(createElement(ResourceRenderer, { resource, registry }))
     await act(async () => {})
 
     const [countsBeforeA, countsBeforeB] = [renderCounts.probeA, renderCounts.probeB]
@@ -121,34 +122,33 @@ describe('ResourceRenderer node-level re-render scoping', () => {
   })
 
   it('does not recreate document state when the host replaces its action callback', async () => {
-    const { registry, document, contexts } = setup()
+    const { registry, resource, contexts } = setup()
     const first = vi.fn()
     const view = render(createElement(ResourceRenderer, {
-      resource: document,
+      resource,
       registry,
       onAction: first,
     }))
     await act(async () => {})
     await act(async () => {
-      await contexts.probeA.data.set('a', 2)
+      contexts.probeA.variables.set('a', '2')
     })
 
     const second = vi.fn()
     view.rerender(createElement(ResourceRenderer, {
-      resource: document,
+      resource,
       registry,
       onAction: second,
     }))
     await act(async () => {})
 
-    expect(await contexts.probeA.data.read({ $data: 'a' })).toBe(2)
+    expect(contexts.probeA.variables.get('a')).toBe('2')
   })
 })
 
-describe('RecordScopeNode refetches on a pure $data dependency change', () => {
-  it('re-fetches the record when the underlying dataflow node changes with no ${variable} involved', async () => {
+describe('RecordScopeNode refetches on a pure $state dependency change', () => {
+  it('re-fetches the record when the underlying object-state slot changes with no ${variable} involved', async () => {
     let latestRecord: Record<string, unknown> | undefined
-    let context: RenderContext | undefined
     const registry = createRegistry<KindRenderFn>()
     registry.use({
       name: 'record-scope',
@@ -160,37 +160,70 @@ describe('RecordScopeNode refetches on a pure $data dependency change', () => {
           recordScope: true,
           render: (_resource, ctx) => {
             latestRecord = ctx.record
-            context = ctx
             return createElement('div', null, JSON.stringify(ctx.record))
           },
         },
       ],
     })
-    const document: ResourceDocument = {
-      data: { nodes: { customer: { kind: 'state', initialValue: { name: 'Ada' } } } },
-      resource: {
-        apiVersion: 'resourcekit.dev/v1alpha1',
-        kind: 'RecordProbe',
-        spec: { data: { $data: 'customer' } },
-      },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'RecordProbe',
+      spec: {},
+      objectState: [{ name: 'customer', initialValue: { name: 'Ada' } }],
+      record: { $state: 'customer' },
     }
+    const runtimeStore = createMemoryRuntimeStore()
 
-    render(createElement(ResourceRenderer, { resource: document, registry }))
+    render(createElement(ResourceRenderer, { resource, registry, runtimeStore, runtimeScope: 'record-scope' }))
     await act(async () => {})
     expect(latestRecord).toEqual({ name: 'Ada' })
 
     // No ${variable} is involved in this binding at all — before the fix,
-    // stateKey never changed for a pure $data binding, so this update never
+    // stateKey never changed for a pure $state binding, so this update never
     // re-triggered the record fetch and latestRecord stayed { name: 'Ada' }.
     await act(async () => {
-      await context?.data.set('customer', { name: 'Bob' })
+      runtimeStore.publish(runtimeKeys.objectState('customer', 'record-scope'), { status: 'ready', value: { name: 'Bob' } })
     })
 
     expect(latestRecord).toEqual({ name: 'Bob' })
   })
 })
 
-describe('ResourceRenderer mutation-to-dataflow integration', () => {
+describe('ScopeProviderNode with no resource.scope', () => {
+  it('degrades via renderError instead of throwing and crashing the tree', async () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'scope-provider-no-scope',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'ScopeProbe',
+          specSchema: { type: 'object' },
+          scopeProvider: true,
+          render: () => createElement('div', null, 'should not render'),
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'ScopeProbe',
+      spec: {},
+    }
+
+    const { container } = render(
+      createElement(ResourceRenderer, {
+        resource,
+        registry,
+        renderError: (error) => createElement('div', { 'data-testid': 'error' }, String(error)),
+      }),
+    )
+    await act(async () => {})
+
+    expect(container.querySelector('[data-testid="error"]')?.textContent).toContain('has scopeProvider: true but no resource.scope')
+  })
+})
+
+describe('ResourceRenderer mutation-to-scope-registry integration', () => {
   it.each([
     ['direct', () => createDirectQueryCoordinator()],
     [
@@ -208,6 +241,7 @@ describe('ResourceRenderer mutation-to-dataflow integration', () => {
       .mockResolvedValueOnce([{ id: 'before' }])
       .mockResolvedValueOnce([{ id: 'after' }])
     const registry = createRegistry<KindRenderFn>()
+    registry.use(createResourceViewPlugin())
     registry.use({
       name: 'e2e',
       dataResolvers: { query },
@@ -224,20 +258,18 @@ describe('ResourceRenderer mutation-to-dataflow integration', () => {
         },
       ],
     })
-    const document: ResourceDocument = {
-      data: {
-        nodes: {
-          selected: { kind: 'state' },
-          rows: { kind: 'resolve', binding: { source: 'query' } },
-        },
-      },
-      resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} },
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'DataScope',
+      scope: { name: 'rows', binding: { source: 'query' } },
+      spec: {},
+      slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} }] }],
     }
 
     const coordinator = createCoordinator()
     const invalidate = vi.spyOn(coordinator, 'invalidate')
     render(createElement(ResourceRenderer, {
-      resource: document,
+      resource,
       registry,
       queryCoordinator: coordinator,
     }))
@@ -249,21 +281,81 @@ describe('ResourceRenderer mutation-to-dataflow integration', () => {
         {
           mutation: { target: 'memory' },
           onSuccess: [
-            { kind: 'setData', node: 'selected', from: 'id' },
-            { kind: 'invalidateData', nodes: ['rows'] },
-            { kind: 'refetchData', nodes: ['rows'] },
+            { kind: 'invalidateData', scopes: ['rows'] },
+            { kind: 'refetchData', scopes: ['rows'] },
           ],
         },
         { draft: true },
       )
     })
 
-    expect(await context?.data.read({ $data: 'selected' })).toBe('saved')
     expect(invalidate).toHaveBeenCalledWith(['rows'])
     expect(query).toHaveBeenCalledTimes(2)
-    expect(await context?.data.read({ $data: 'rows' })).toEqual([{ id: 'after' }])
+    expect(context?.scopes.rows).toEqual([{ id: 'after' }])
     },
   )
+})
+
+describe('ScopeProviderNode guards against out-of-order fetch completion', () => {
+  it('ignores a stale fetch that settles after a newer one', async () => {
+    let context: RenderContext | undefined
+    const deferred: Array<(rows: Record<string, unknown>[]) => void> = []
+    const query = vi.fn(() => new Promise<Record<string, unknown>[]>((resolve) => deferred.push(resolve)))
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createResourceViewPlugin())
+    registry.use({
+      name: 'race',
+      dataResolvers: { query },
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'ActionProbe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div', null, 'probe')
+          },
+        },
+      ],
+    })
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'DataScope',
+      variables: [{ name: 'sel', default: 'a' }],
+      scope: { name: 'rows', binding: { source: 'query', id: '${sel}' } },
+      spec: {},
+      slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionProbe', spec: {} }] }],
+    }
+    const runtimeStore = createMemoryRuntimeStore()
+
+    // Both fetches stay pending (unresolved deferred promises) across this
+    // whole setup, so the child (and `context`) never mounts — ScopeProviderNode
+    // renders its loading fallback until a fetch settles. The variable change
+    // has to be driven through the store directly rather than through
+    // `context.variables.set`, which isn't available yet.
+    render(createElement(ResourceRenderer, { resource, registry, runtimeStore, runtimeScope: 'race' }))
+    await act(async () => {})
+    expect(query).toHaveBeenCalledTimes(1) // first fetch in flight for sel=a
+
+    act(() => {
+      runtimeStore.publish(runtimeKeys.variable('sel', 'race'), { status: 'ready', value: 'b' })
+    })
+    await act(async () => {})
+    expect(query).toHaveBeenCalledTimes(2) // second fetch in flight for sel=b
+
+    // Resolve out of order: the newer (sel=b) fetch settles first, then the
+    // stale (sel=a) one settles after. Before the generation-counter fix,
+    // the stale settle would overwrite the newer value.
+    await act(async () => {
+      deferred[1]([{ id: 'b' }])
+    })
+    expect(context?.scopes.rows).toEqual([{ id: 'b' }])
+
+    await act(async () => {
+      deferred[0]([{ id: 'a' }])
+    })
+    expect(context?.scopes.rows).toEqual([{ id: 'b' }])
+  })
 })
 
 describe('ResourceRenderer visibility', () => {
@@ -288,7 +380,8 @@ describe('ResourceRenderer visibility', () => {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Probe',
       visible: { $variable: 'roles', contains: 'admin' },
-      spec: { variables: [{ name: 'roles', type: 'string[]', default: ['admin'] }] },
+      spec: {},
+      variables: [{ name: 'roles', type: 'string[]', default: ['admin'] }],
     }
 
     const view = render(createElement(ResourceRenderer, { resource, registry }))
@@ -330,7 +423,8 @@ describe('ResourceRenderer visibility', () => {
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Group',
-      spec: { variables: [{ name: 'showFirst', default: '' }] },
+      spec: {},
+      variables: [{ name: 'showFirst', default: '' }],
       slots: [
         {
           name: 'content',
@@ -375,7 +469,8 @@ describe('ResourceRenderer visibility', () => {
       visible: { $or: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'roles', contains: 'operator' }] },
       // Starts visible so the kind's render() runs at least once and captures `context` —
       // an invisible root never renders, so there would be no engine handle to flip it back.
-      spec: { variables: [{ name: 'roles', type: 'string[]', default: ['operator'] }] },
+      spec: {},
+      variables: [{ name: 'roles', type: 'string[]', default: ['operator'] }],
     }
 
     const view = render(createElement(ResourceRenderer, { resource, registry }))
@@ -411,12 +506,11 @@ describe('ResourceRenderer visibility', () => {
       visible: { $not: { $and: [{ $variable: 'roles', contains: 'admin' }, { $variable: 'locked' }] } },
       // Starts visible (locked unset, so $and is false and $not flips it to true) so the
       // kind's render() runs at least once and captures `context`.
-      spec: {
-        variables: [
-          { name: 'roles', type: 'string[]', default: ['admin'] },
-          { name: 'locked', default: '' },
-        ],
-      },
+      spec: {},
+      variables: [
+        { name: 'roles', type: 'string[]', default: ['admin'] },
+        { name: 'locked', default: '' },
+      ],
     }
 
     const view = render(createElement(ResourceRenderer, { resource, registry }))
@@ -452,7 +546,8 @@ describe('ResourceRenderer disabled', () => {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Probe',
       disabled: { $variable: 'roles', contains: 'admin' },
-      spec: { variables: [{ name: 'roles', type: 'string[]', default: [] }] },
+      spec: {},
+      variables: [{ name: 'roles', type: 'string[]', default: [] }],
     }
 
     const view = render(createElement(ResourceRenderer, { resource, registry }))

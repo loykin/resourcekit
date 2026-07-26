@@ -4,12 +4,12 @@
   "metadata": { "name": "scenario-customer-crm" },
   "spec": {
     "listWidth": 340,
-    "selectionVariable": "customerId",
-    "variables": [
-      { "name": "customerId", "type": "string", "default": "1", "persist": "url" },
-      { "name": "status", "type": "string", "default": "active" }
-    ]
+    "selectionVariable": "customerId"
   },
+  "variables": [
+    { "name": "customerId", "type": "string", "default": "1", "persist": "url" },
+    { "name": "status", "type": "string", "default": "active" }
+  ],
   "slots": [
     {
       "name": "topBar",
@@ -36,9 +36,9 @@
                         { "label": "Prospect", "value": "prospect" }
                       ],
                       "behavior": { "clearable": true }
-                    },
-                    "events": { "change": { "kind": "setVariable", "variable": "status", "from": "value" } }
-                  }
+                    }
+                  },
+                  "events": { "change": { "kind": "setVariable", "variable": "status", "from": "value" } }
                 }
               ]
             }
@@ -64,9 +64,9 @@
             "secondary": [
               { "field": "status", "label": "Status" },
               { "field": "revenue", "label": "Revenue" }
-            ],
-            "events": { "select": { "kind": "setVariable", "variable": "customerId", "from": "row.id" } }
-          }
+            ]
+          },
+          "events": { "select": { "kind": "setVariable", "variable": "customerId", "from": "row.id" } }
         }
       ]
     },

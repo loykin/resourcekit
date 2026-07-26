@@ -15,7 +15,7 @@ const KitFilterInput = FilterInput as ComponentType<Record<string, unknown>>
 function FilterControlNode({ spec, ctx }: { spec: FilterInputSpec; ctx: RenderContext }) {
   const value = useBindingValue(ctx, 'value', spec.value)
   return (
-    <div className="min-w-[14rem] max-w-full shrink-0 overflow-visible">
+    <div className="min-w-56 max-w-full shrink-0 overflow-visible">
       <KitFilterInput
         className="w-full"
         classNames={{ row: 'flex-nowrap', control: 'min-w-0', clearButton: 'shrink-0' }}
@@ -126,7 +126,6 @@ export function createBaseKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             properties: {
               config: filterInputConfigSchema,
               value: {},
-              events: { type: 'object' },
             },
           },
           bindingPolicy: {

@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDataflowRuntime } from './dataflow'
 import type { DataBinding, DataSourceAdapter } from '../core/types'
 import {
   createCoordinatorResolve,
@@ -245,7 +244,7 @@ describe('createCoordinatorResolve', () => {
     expect(opened).toHaveLength(1) // second call reused the cached handle instead of opening a new one
   })
 
-  it('forces a cached handle to refetch when the dataflow reason is refetch', async () => {
+  it('forces a cached handle to refetch when the resolve reason is refetch', async () => {
     let value = 'first'
     const resolveFn = vi.fn(async () => value)
     const bridge = createCoordinatorResolve({
@@ -294,11 +293,13 @@ describe('createCoordinatorResolve', () => {
       coordinator,
       registry: fakeRegistry(),
       resolve: async () => 'v',
-      getPolicy: () => ({ refresh: { kind: 'interval', ms: 100 } }),
       scopePolicy: { minIntervalMs: 5000 },
     })
 
-    await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(
+      { source: 'processes' } as DataBinding,
+      { nodeId: 'n', variables: {}, reason: 'initial', policy: { refresh: { kind: 'interval', ms: 100 } } },
+    )
 
     expect(seenPolicy).toEqual({ refresh: { kind: 'interval', ms: 5000 } })
   })
@@ -402,47 +403,5 @@ describe('createCoordinatorResolve', () => {
     bridge.dispose()
 
     expect(disposedNodes.sort()).toEqual(['a', 'b'])
-  })
-})
-
-describe('QueryCoordinator + DataflowRuntime integration (P0 vertical slice)', () => {
-  it('a coordinator refetch reaches downstream resolve nodes through DataflowRuntime.publish', async () => {
-    // "processes" starts through the runtime's own options.resolve (the
-    // initial evaluation at start()); a later background refresh instead
-    // goes through the coordinator and is folded back in via publish() —
-    // proving the two layers actually compose, not just typecheck together.
-    let backend = [{ id: '1' }]
-    const coordinator = createDirectQueryCoordinator()
-
-    const runtime = createDataflowRuntime({
-      graph: {
-        nodes: {
-          processes: { kind: 'resolve', binding: { source: 'poll' } },
-          count: { kind: 'resolve', binding: { source: 'test', rows: { $data: 'processes' } } },
-        },
-      },
-      resolve: async (binding) => {
-        const b = binding as DataBinding & { rows?: unknown[] }
-        return b.source === 'poll' ? backend : (b.rows ?? []).length
-      },
-    })
-
-    await runtime.start()
-    expect(await runtime.resolve('count')).toBe(1)
-
-    backend = [{ id: '1' }, { id: '2' }, { id: '3' }]
-    const handle = coordinator.open({
-      nodeId: 'processes',
-      key: ['processes'],
-      execute: async () => backend,
-    })
-
-    await waitFor(handle, (s) => s.status === 'ready')
-    await runtime.publish('processes', { status: 'ready', value: handle.getSnapshot().value })
-
-    expect(await runtime.resolve('processes')).toEqual(backend)
-    expect(await runtime.resolve('count')).toBe(3)
-
-    handle.dispose()
   })
 })

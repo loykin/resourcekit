@@ -42,9 +42,9 @@ describe('GridKitTable row actions with the real GridKit component', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'GridKitTable',
+          events: { rowSelect: { kind: 'emit', event: 'selected' } },
           spec: {
             data: { source: 'static', rows: [{ id: '7', name: 'Ada', role: 'Editor' }] },
-            events: { rowSelect: { kind: 'emit', event: 'selected' } },
             columns: {
               name: { label: 'Name' },
               actions: {

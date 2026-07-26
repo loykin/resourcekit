@@ -38,13 +38,11 @@ import {
   singleKindSchema,
   staticResolver,
   validateResource,
-  validateResourceDocument,
 } from '@loykin/resourcekit'
 import type {
   DataResolver,
   JsonSchema,
   Resource,
-  ResourceDocument,
   MutationBinding,
   MutationResolver,
   ScopeOptions,
@@ -71,7 +69,7 @@ export interface PlaygroundExample {
   category: PlaygroundExampleCategory
   evidence?: 'scenario-test' | 'mcp-session' | 'blind-mcp'
   scope?: ScopeOptions
-  resource: Resource | ResourceDocument
+  resource: Resource
 }
 
 const customerRows = [
@@ -212,11 +210,11 @@ const customerWorkspace: Resource = {
   bindings: { selection: { $variable: 'customerId' } },
   spec: {
     listWidth: 360,
-    variables: [
-      { name: 'customerId', type: 'string', default: '1', persist: 'url' },
-      { name: 'status', type: 'string', default: 'active' },
-    ],
   },
+  variables: [
+    { name: 'customerId', type: 'string', default: '1', persist: 'url' },
+    { name: 'status', type: 'string', default: 'active' },
+  ],
   slots: [
     {
       name: 'topBar',
@@ -244,9 +242,9 @@ const customerWorkspace: Resource = {
                       ],
                       behavior: { clearable: true },
                     },
-                    events: {
-                      change: { kind: 'setVariable', variable: 'status', from: 'value' },
-                    },
+                  },
+                  events: {
+                    change: { kind: 'setVariable', variable: 'status', from: 'value' },
                   },
                 },
               ],
@@ -273,9 +271,9 @@ const customerWorkspace: Resource = {
               { field: 'status', label: 'Status' },
               { field: 'revenue', label: 'Revenue' },
             ],
-            events: {
-              select: { kind: 'setVariable', variable: 'customerId', from: 'row.id' },
-            },
+          },
+          events: {
+            select: { kind: 'setVariable', variable: 'customerId', from: 'row.id' },
           },
         },
       ],
@@ -286,12 +284,11 @@ const customerWorkspace: Resource = {
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
-          spec: {
-            data: {
-              source: 'datasource',
-              datasourceUid: 'crm',
-              query: { id: '${customerId}' },
-            },
+          spec: {},
+          record: {
+            source: 'datasource',
+            datasourceUid: 'crm',
+            query: { id: '${customerId}' },
           },
           slots: [
             {
@@ -712,8 +709,8 @@ const fromValueBinding: Resource = {
   spec: {
     title: 'from: value binding',
     eyebrow: 'Button event writes a variable',
-    variables: [{ name: 'selectedPlan', type: 'string', default: 'starter' }],
   },
+  variables: [{ name: 'selectedPlan', type: 'string', default: 'starter' }],
   slots: [
     {
       name: 'actions',
@@ -725,9 +722,9 @@ const fromValueBinding: Resource = {
             label: 'Set Growth',
             value: 'growth',
             size: 'sm',
-            events: {
-              click: { kind: 'setVariable', variable: 'selectedPlan', from: 'value' },
-            },
+          },
+          events: {
+            click: { kind: 'setVariable', variable: 'selectedPlan', from: 'value' },
           },
         },
         {
@@ -738,9 +735,9 @@ const fromValueBinding: Resource = {
             value: 'enterprise',
             size: 'sm',
             variant: 'outline',
-            events: {
-              click: { kind: 'setVariable', variable: 'selectedPlan', from: 'value' },
-            },
+          },
+          events: {
+            click: { kind: 'setVariable', variable: 'selectedPlan', from: 'value' },
           },
         },
       ],
@@ -789,8 +786,8 @@ const fromRowBinding: Resource = {
   metadata: { name: 'from-row-binding' },
   spec: {
     rightPaneWidth: 320,
-    variables: [{ name: 'ticketId', type: 'string', default: 'INC-1001' }],
   },
+  variables: [{ name: 'ticketId', type: 'string', default: 'INC-1001' }],
   slots: [
     {
       name: 'mainPane',
@@ -804,9 +801,9 @@ const fromRowBinding: Resource = {
               source: 'static',
               rows: incidentRows,
             },
-            events: {
-              rowSelect: { kind: 'setVariable', variable: 'ticketId', from: 'row.id' },
-            },
+          },
+          events: {
+            rowSelect: { kind: 'setVariable', variable: 'ticketId', from: 'row.id' },
           },
         },
       ],
@@ -904,11 +901,11 @@ const datasourceDataTable: Resource = {
   spec: {
     title: 'CRM Customers',
     description: 'Rows resolved through source: "datasource" as a datasourcekit adapter would register it.',
-    variables: [
-      { name: 'customerId', type: 'string', default: '1' },
-      { name: 'status', type: 'string', default: 'active' },
-    ],
   },
+  variables: [
+    { name: 'customerId', type: 'string', default: '1' },
+    { name: 'status', type: 'string', default: 'active' },
+  ],
   slots: [
     {
       name: 'actions',
@@ -942,9 +939,9 @@ const datasourceDataTable: Resource = {
                 { label: 'Prospect', value: 'prospect' },
               ],
             },
-            events: {
-              change: { kind: 'setVariable', variable: 'status', from: 'value' },
-            },
+          },
+          events: {
+            change: { kind: 'setVariable', variable: 'status', from: 'value' },
           },
         },
       ],
@@ -996,11 +993,11 @@ const userManagement: Resource = {
   spec: {
     title: 'Team members',
     description: 'Invite, edit, and manage workspace access.',
-    variables: [
-      { name: 'usersVersion', type: 'string', default: '0' },
-      { name: 'createOpen', type: 'string' },
-    ],
   },
+  variables: [
+    { name: 'usersVersion', type: 'string', default: '0' },
+    { name: 'createOpen', type: 'string' },
+  ],
   slots: [
     {
       name: 'actions',
@@ -1012,9 +1009,9 @@ const userManagement: Resource = {
             label: 'Add member',
             size: 'sm',
             value: '1',
-            events: {
-              click: { kind: 'setVariable', variable: 'createOpen', from: 'value' },
-            },
+          },
+          events: {
+            click: { kind: 'setVariable', variable: 'createOpen', from: 'value' },
           },
         },
       ],
@@ -1182,11 +1179,11 @@ const userEditor: Resource = {
   bindings: { selection: { $variable: 'userId' } },
   spec: {
     listWidth: 380,
-    variables: [
-      { name: 'userId', type: 'string', default: '1' },
-      { name: 'usersVersion', type: 'string', default: '0' },
-    ],
   },
+  variables: [
+    { name: 'userId', type: 'string', default: '1' },
+    { name: 'usersVersion', type: 'string', default: '0' },
+  ],
   slots: [
     {
       name: 'list',
@@ -1204,9 +1201,9 @@ const userEditor: Resource = {
               { field: 'role', label: 'Role' },
               { field: 'status', label: 'Status' },
             ],
-            events: {
-              select: { kind: 'setVariable', variable: 'userId', from: 'row.id' },
-            },
+          },
+          events: {
+            select: { kind: 'setVariable', variable: 'userId', from: 'row.id' },
           },
         },
       ],
@@ -1224,9 +1221,8 @@ const userEditor: Resource = {
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'RecordScope',
-                  spec: {
-                    data: { source: 'memory', collection: 'users', id: '${userId}', v: '${usersVersion}' },
-                  },
+                  spec: {},
+                  record: { source: 'memory', collection: 'users', id: '${userId}', v: '${usersVersion}' },
                   slots: [
                     {
                       items: [
@@ -1357,8 +1353,8 @@ const demoUsersConnectionPage: Resource = {
   bindings: { selection: { $variable: 'userId' } },
   spec: {
     listWidth: 320,
-    variables: [{ name: 'userId', type: 'string', default: '1', persist: 'url' }],
   },
+  variables: [{ name: 'userId', type: 'string', default: '1', persist: 'url' }],
   slots: [
     {
       name: 'topBar',
@@ -1376,8 +1372,8 @@ const demoUsersConnectionPage: Resource = {
             idField: 'id',
             primary: { field: 'name' },
             secondary: [{ field: 'role', label: 'Role' }],
-            events: { select: { kind: 'setVariable', variable: 'userId', from: 'row.id' } },
           },
+          events: { select: { kind: 'setVariable', variable: 'userId', from: 'row.id' } },
         },
       ],
     },
@@ -1464,7 +1460,6 @@ const connectionWriteReadPage: Resource = {
 const dynamicDatasourceKitResource: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Workbench',
-  metadata: { name: 'dynamic-datasourcekit-metrics' },
   spec: {
     leftPaneWidth: 280,
     rightPaneWidth: 340,
@@ -1491,8 +1486,8 @@ const dynamicDatasourceKitResource: Resource = {
           spec: {
             label: 'Show US West',
             value: 'us-west',
-            events: { click: { kind: 'setData', node: 'region', from: 'value' } },
           },
+          events: { click: { kind: 'setVariable', variable: 'region', from: 'value' } },
         },
       ],
     },
@@ -1509,17 +1504,17 @@ const dynamicDatasourceKitResource: Resource = {
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'SelectableList',
-                  bindings: { selected: { $data: 'selectedHost' } },
+                  bindings: { selected: { $variable: 'selectedHost' } },
                   spec: {
-                    data: { $data: 'hostCpu' },
+                    data: { $scope: 'hostCpu' },
                     idField: 'host',
                     primary: { field: 'host' },
                     secondary: [
                       { field: 'region', label: 'Region' },
                       { field: 'cpuPercent', label: 'CPU %' },
                     ],
-                    events: { select: { kind: 'setData', node: 'selectedHost', from: 'row.host' } },
                   },
+                  events: { select: { kind: 'setVariable', variable: 'selectedHost', from: 'row.host' } },
                 },
               ],
             },
@@ -1540,7 +1535,7 @@ const dynamicDatasourceKitResource: Resource = {
               region: { label: 'Region' },
               cpuPercent: { label: 'CPU %', type: 'number', align: 'right' },
             },
-            data: { $data: 'hostCpu' },
+            data: { $scope: 'hostCpu' },
           },
         },
       ],
@@ -1559,7 +1554,11 @@ const dynamicDatasourceKitResource: Resource = {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DetailView',
                   spec: {
-                    data: { $data: 'hostMemory' },
+                    data: {
+                      source: 'connection',
+                      connection: 'demo-metrics-dynamic',
+                      request: { metric: 'memoryPercent', host: '${selectedHost}' },
+                    },
                     fields: [
                       { field: 'host', label: 'Host', emphasis: 'strong' },
                       { field: 'region', label: 'Region', display: 'badge' },
@@ -1617,97 +1616,89 @@ const dynamicDatasourceKitResource: Resource = {
   ],
 }
 
-const dynamicDatasourceKitPage: ResourceDocument = {
-  data: {
-    nodes: {
-      region: { kind: 'state', initialValue: 'us-east' },
-      selectedHost: { kind: 'state', initialValue: 'web-1' },
-      hostCpu: {
-        kind: 'resolve',
-        binding: {
-          source: 'connection',
-          connection: 'demo-metrics-dynamic',
-          request: { metric: 'cpuPercent', region: { $data: 'region' } },
-        },
-      },
-      hostMemory: {
-        kind: 'resolve',
-        binding: {
-          source: 'connection',
-          connection: 'demo-metrics-dynamic',
-          request: { metric: 'memoryPercent', host: { $data: 'selectedHost' } },
-        },
-      },
+const dynamicDatasourceKitPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataScope',
+  metadata: { name: 'dynamic-datasourcekit-metrics' },
+  variables: [
+    { name: 'region', default: 'us-east' },
+    { name: 'selectedHost', default: 'web-1' },
+  ],
+  scope: {
+    name: 'hostCpu',
+    binding: {
+      source: 'connection',
+      connection: 'demo-metrics-dynamic',
+      request: { metric: 'cpuPercent', region: '${region}' },
     },
   },
-  resource: dynamicDatasourceKitResource,
+  spec: {},
+  slots: [{ items: [dynamicDatasourceKitResource] }],
 }
 
 // docs/dataflow-and-server-state-direction.md P1 item 1 — proves the
 // TanStack Query coordinator actually polls: `tick`/`time` change on their
 // own every 2s with zero user interaction, driven entirely by `policy`.
-const tanStackPollingDemoPage: ResourceDocument = {
-  data: {
-    nodes: {
-      liveTick: {
-        kind: 'resolve',
-        binding: { source: 'liveClock' },
-        policy: { refresh: { kind: 'interval', ms: 2000 } },
-      },
-    },
+const tanStackPollingDemoPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataScope',
+  scope: {
+    name: 'liveTick',
+    binding: { source: 'liveClock' },
+    policy: { refresh: { kind: 'interval', ms: 2000 } },
   },
-  resource: {
-    apiVersion: 'resourcekit.dev/v1alpha1',
-    kind: 'Panel',
-    spec: { title: 'TanStack Query polling demo' },
-    slots: [
-      {
-        items: [
-          {
-            apiVersion: 'resourcekit.dev/v1alpha1',
-            kind: 'DetailView',
-            spec: {
-              data: { $data: 'liveTick' },
-              fields: [
-                { field: 'tick', label: 'Tick count (increments every poll)' },
-                { field: 'time', label: 'Resolved at' },
+  spec: {},
+  slots: [
+    {
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          spec: { title: 'TanStack Query polling demo' },
+          slots: [
+            {
+              items: [
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'DetailView',
+                  spec: {
+                    data: { $scope: 'liveTick' },
+                    fields: [
+                      { field: 'tick', label: 'Tick count (increments every poll)' },
+                      { field: 'time', label: 'Resolved at' },
+                    ],
+                  },
+                },
               ],
             },
-          },
-        ],
-      },
-    ],
-  },
+          ],
+        },
+      ],
+    },
+  ],
 }
 
-export const serviceOperationsPage: ResourceDocument = {
-  data: {
-    nodes: {
-      incidentStatus: { kind: 'state', initialValue: 'all' },
-      selectedIncident: { kind: 'state', initialValue: 'INC-2048' },
-      incidents: {
-        kind: 'resolve',
-        binding: {
-          source: 'connection',
-          connection: 'service-operations',
-          request: { path: '/incidents', query: { status: { $data: 'incidentStatus' } } },
-        },
-        policy: { refresh: { kind: 'interval', ms: 30_000 }, staleForMs: 10_000, retainPreviousData: true, retry: { maxAttempts: 2 } },
-      },
-      incidentDetail: {
-        kind: 'resolve',
-        binding: {
-          source: 'connection',
-          connection: 'service-operations',
-          request: { path: '/incidents', query: { id: { $data: 'selectedIncident' } } },
-        },
-      },
+export const serviceOperationsPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataScope',
+  metadata: { name: 'service-operations-command-center' },
+  variables: [
+    { name: 'incidentStatus', default: 'all' },
+    { name: 'selectedIncident', default: 'INC-2048' },
+  ],
+  scope: {
+    name: 'incidents',
+    binding: {
+      source: 'connection',
+      connection: 'service-operations',
+      request: { path: '/incidents', query: { status: '${incidentStatus}' } },
     },
+    policy: { refresh: { kind: 'interval', ms: 30_000 }, staleForMs: 10_000, retainPreviousData: true, retry: { maxAttempts: 2 } },
   },
-  resource: {
+  spec: {},
+  slots: [{ items: [{
     apiVersion: 'resourcekit.dev/v1alpha1',
     kind: 'Workbench',
-    metadata: { name: 'service-operations-command-center' },
     spec: { leftPaneWidth: 280, rightPaneWidth: 330, bottomPaneHeight: 210, minLeftPaneWidth: 250, minRightPaneWidth: 300, resizable: true },
     slots: [
       {
@@ -1720,7 +1711,7 @@ export const serviceOperationsPage: ResourceDocument = {
           {
             apiVersion: 'resourcekit.dev/v1alpha1',
             kind: 'FilterControl',
-            bindings: { value: { $data: 'incidentStatus' } },
+            bindings: { value: { $variable: 'incidentStatus' } },
             spec: {
               config: {
                 key: 'status',
@@ -1733,8 +1724,8 @@ export const serviceOperationsPage: ResourceDocument = {
                   { label: 'Resolved', value: 'Resolved' },
                 ],
               },
-              events: { change: { kind: 'setData', node: 'incidentStatus', from: 'value' } },
             },
+            events: { change: { kind: 'setVariable', variable: 'incidentStatus', from: 'value' } },
           },
         ],
       },
@@ -1761,17 +1752,17 @@ export const serviceOperationsPage: ResourceDocument = {
                   {
                     apiVersion: 'resourcekit.dev/v1alpha1',
                     kind: 'SelectableList',
-                    bindings: { selected: { $data: 'selectedIncident' } },
+                    bindings: { selected: { $variable: 'selectedIncident' } },
                     spec: {
-                      data: { $data: 'incidents' },
+                      data: { $scope: 'incidents' },
                       idField: 'id',
                       primary: { field: 'service' },
                       secondary: [
                         { field: 'severity', label: 'Severity' },
                         { field: 'age', label: 'Open' },
                       ],
-                      events: { select: { kind: 'setData', node: 'selectedIncident', from: 'row.id' } },
                     },
+                    events: { select: { kind: 'setVariable', variable: 'selectedIncident', from: 'row.id' } },
                   },
                 ],
               },
@@ -1787,7 +1778,7 @@ export const serviceOperationsPage: ResourceDocument = {
             kind: 'TableView',
             spec: {
               title: 'Active incidents',
-              data: { $data: 'incidents' },
+              data: { $scope: 'incidents' },
               enableSorting: true,
               globalSearch: true,
               searchPlaceholder: 'Search incident, service, or owner…',
@@ -1799,8 +1790,8 @@ export const serviceOperationsPage: ResourceDocument = {
                 severity: { label: 'Severity', flex: 0.8, display: 'badge', map: { Critical: 'destructive', High: 'secondary', Medium: 'outline', Low: 'outline' } },
                 age: { label: 'Age', flex: 0.6, tone: 'muted' },
               },
-              events: { rowSelect: { kind: 'setData', node: 'selectedIncident', from: 'row.id' } },
             },
+            events: { rowSelect: { kind: 'setVariable', variable: 'selectedIncident', from: 'row.id' } },
           },
         ],
       },
@@ -1816,16 +1807,29 @@ export const serviceOperationsPage: ResourceDocument = {
                 items: [
                   {
                     apiVersion: 'resourcekit.dev/v1alpha1',
-                    kind: 'DetailView',
-                    spec: {
-                      data: { $data: 'incidentDetail' },
-                      fields: [
-                        { field: 'summary', label: 'Summary' },
-                        { field: 'status', label: 'Status', display: 'badge' },
-                        { field: 'severity', label: 'Severity', display: 'badge' },
-                        { field: 'owner', label: 'Commander' },
-                      ],
+                    kind: 'DataScope',
+                    scope: {
+                      name: 'incidentDetail',
+                      binding: {
+                        source: 'connection',
+                        connection: 'service-operations',
+                        request: { path: '/incidents', query: { id: '${selectedIncident}' } },
+                      },
                     },
+                    spec: {},
+                    slots: [{ items: [{
+                      apiVersion: 'resourcekit.dev/v1alpha1',
+                      kind: 'DetailView',
+                      spec: {
+                        data: { $scope: 'incidentDetail' },
+                        fields: [
+                          { field: 'summary', label: 'Summary' },
+                          { field: 'status', label: 'Status', display: 'badge' },
+                          { field: 'severity', label: 'Severity', display: 'badge' },
+                          { field: 'owner', label: 'Commander' },
+                        ],
+                      },
+                    }] }],
                   },
                   {
                     apiVersion: 'resourcekit.dev/v1alpha1',
@@ -1844,7 +1848,7 @@ export const serviceOperationsPage: ResourceDocument = {
                       ],
                       submit: {
                         mutation: { target: 'operations', connection: 'service-operations' },
-                        onSuccess: [{ kind: 'refetchData', nodes: ['incidents', 'incidentDetail'] }],
+                        onSuccess: [{ kind: 'refetchData', scopes: ['incidents', 'incidentDetail'] }],
                       },
                       submitLabel: 'Save handoff',
                       successMessage: 'Handoff saved and incident data refreshed',
@@ -1877,7 +1881,7 @@ export const serviceOperationsPage: ResourceDocument = {
         ],
       },
     ],
-  },
+  } ] } ],
 }
 
 // Built via a live MCP client session against examples/mcp-server's
@@ -1893,8 +1897,8 @@ const githubOrgReposPage: Resource = {
   bindings: { selection: { $variable: 'repoFullName' } },
   spec: {
     listWidth: 320,
-    variables: [{ name: 'repoFullName', type: 'string', default: 'vercel/eve', persist: 'url' }],
   },
+  variables: [{ name: 'repoFullName', type: 'string', default: 'vercel/eve', persist: 'url' }],
   slots: [
     {
       name: 'topBar',
@@ -1915,8 +1919,8 @@ const githubOrgReposPage: Resource = {
               { field: 'stargazers_count', label: 'Stars' },
               { field: 'language', label: 'Language' },
             ],
-            events: { select: { kind: 'setVariable', variable: 'repoFullName', from: 'row.full_name' } },
           },
+          events: { select: { kind: 'setVariable', variable: 'repoFullName', from: 'row.full_name' } },
         },
       ],
     },
@@ -2078,7 +2082,7 @@ export const examples: readonly PlaygroundExample[] = [
   {
     id: 'tanstack-query-polling-demo',
     name: 'TanStack Query polling demo',
-    description: 'Component fragment: a resolve node with policy.refresh actually polls via the TanStack Query coordinator — tick/time update every 2s on their own (docs/dataflow-and-server-state-direction.md P1 item 1).',
+    description: 'Component fragment: a DataScope with scope.policy.refresh actually polls via the TanStack Query coordinator — tick/time update every 2s on their own (docs/dataflow-and-server-state-direction.md P1 item 1).',
     category: 'fragment',
     resource: tanStackPollingDemoPage,
   },
@@ -2104,8 +2108,8 @@ registry.setConnectionProvider(createPlaygroundConnectionProvider())
 
 // docs/dataflow-and-server-state-direction.md P1 item 1 — a real,
 // polling-capable QueryCoordinator. Wired into the main ResourceRenderer
-// below; any resolve node's `policy.refresh` (e.g. serviceOperationsPage's
-// `incidents` node, already authored with one) actually polls now instead of
+// below; any DataScope's `scope.policy.refresh` (e.g. serviceOperationsPage's
+// `incidents` scope, already authored with one) actually polls now instead of
 // resolving once and never again.
 const tanStackCoordinator = createTanStackQueryCoordinator(new QueryClient())
 
@@ -2201,9 +2205,7 @@ export function scopeForExample(example: PlaygroundExample): ScopedRegistry<Kind
 
 export function validatePlaygroundExample(example: PlaygroundExample): ValidationResult {
   const scope = scopeForExample(example)
-  return isPlaygroundDocument(example.resource)
-    ? validateResourceDocument(example.resource, scope)
-    : validateResource(example.resource, scope)
+  return validateResource(example.resource, scope)
 }
 
 interface StepWorkingNode {
@@ -2406,7 +2408,7 @@ function replayResource(resource: Resource, scope: ScopedRegistry<KindRenderFn> 
 
 export function inspectPlaygroundExample(example: PlaygroundExample) {
   const scope = scopeForExample(example)
-  const rootResource = isPlaygroundDocument(example.resource) ? example.resource.resource : example.resource
+  const rootResource = example.resource
   const stage = nextStage(scope, {})
   const defs = (stage.schema?.$defs ?? {}) as Record<string, JsonSchema>
   const candidateKinds = stage.fixed
@@ -2421,9 +2423,7 @@ export function inspectPlaygroundExample(example: PlaygroundExample) {
       candidateKinds,
     },
     checks: replayResource(rootResource, scope),
-    validation: isPlaygroundDocument(example.resource)
-      ? validateResourceDocument(example.resource, scope)
-      : validateResource(example.resource, scope),
+    validation: validateResource(example.resource, scope),
   }
 }
 
@@ -2939,10 +2939,6 @@ function ExampleSelect({ value, onValueChange }: { value: string; onValueChange:
 
 function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
-}
-
-function isPlaygroundDocument(value: Resource | ResourceDocument): value is ResourceDocument {
-  return 'resource' in value
 }
 
 function JsonEditor({ value, onChange, readOnly = false }: { value: string; onChange?: (value: string) => void; readOnly?: boolean }) {
@@ -3552,7 +3548,7 @@ export function App() {
 
   const [view, setView] = useState<'runtime' | 'step-by-step'>('runtime')
   const [selectedExampleId, setSelectedExampleId] = useState<(typeof examples)[number]['id']>(() => initialExample().id)
-  const [resource, setResource] = useState<Resource | ResourceDocument>(() => initialExample().resource)
+  const [resource, setResource] = useState<Resource>(() => initialExample().resource)
   const [loadError, setLoadError] = useState<string>()
   const [jsonSheetOpen, setJsonSheetOpen] = useState(false)
   const [aiTraceSheetOpen, setAiTraceSheetOpen] = useState(false)
@@ -3751,7 +3747,7 @@ export function App() {
                       )}
                       <p className={composition.validation.valid ? 'rk-workflow-validation-ok' : 'rk-workflow-validation-error'}>
                         {composition.validation.valid
-                          ? `✓ ${isPlaygroundDocument(resource) ? 'validateResourceDocument' : 'validateResource'}: valid under the same example scope`
+                          ? '✓ validateResource: valid under the same example scope'
                           : `✗ final validation: ${composition.validation.issues.map((issue) => `${issue.path || '/'} ${issue.message}`).join('; ')}`}
                       </p>
                     </div>

@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http'
 import { createElement } from 'react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { ResourceRenderer } from '@loykin/resourcekit/react'
-import { validateResourceDocument } from '@loykin/resourcekit'
+import { validateResource } from '@loykin/resourcekit'
 import { createServiceOperationsApi } from '../server/service-operations-api'
 
 let app: typeof import('./App')
@@ -30,6 +30,13 @@ beforeAll(async () => {
       disconnect() {}
     },
   )
+  // Base UI (used by @loykin/filter-input's Select/Combobox) calls these
+  // pointer-capture APIs during option selection; jsdom doesn't implement
+  // them at all, which otherwise breaks click-to-select interactions.
+  Element.prototype.hasPointerCapture = vi.fn(() => false)
+  Element.prototype.setPointerCapture = vi.fn()
+  Element.prototype.releasePointerCapture = vi.fn()
+  Element.prototype.scrollIntoView = vi.fn()
   server = createServer((req, res) => {
     backend.middleware(req, res, () => {
       res.statusCode = 404
@@ -58,7 +65,7 @@ afterAll(() => new Promise<void>((resolve, reject) => server.close((error) => (e
 
 describe('service operations command center', () => {
   it('renders and completes real HTTP query, selection, mutation, and refetch flows', async () => {
-    expect(validateResourceDocument(app.serviceOperationsPage, app.registry)).toEqual({ valid: true, issues: [] })
+    expect(validateResource(app.serviceOperationsPage, app.registry)).toEqual({ valid: true, issues: [] })
     render(createElement(ResourceRenderer, { registry: app.registry, resource: app.serviceOperationsPage }))
 
     expect(await screen.findByText('Incident queue')).toBeTruthy()
@@ -66,7 +73,10 @@ describe('service operations command center', () => {
 
     const readsBeforeFilter = backend.stats.incidentReads
     fireEvent.click(screen.getByRole('combobox'))
-    fireEvent.click(await screen.findByRole('option', { name: 'Monitoring' }))
+    const option = await screen.findByRole('option', { name: 'Monitoring' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
     await waitFor(() => expect(backend.stats.incidentReads).toBeGreaterThan(readsBeforeFilter))
     expect(screen.queryByRole('button', { name: 'Checkout API Severity: CriticalOpen: 18m' })).toBeNull()
 

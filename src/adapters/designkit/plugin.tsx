@@ -911,7 +911,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           additionalProperties: true,
           properties: {
             listWidth: { type: 'number' },
-            variables: { type: 'array' },
           },
         },
         slotPolicy: {
@@ -1494,7 +1493,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             value: { type: 'string', description: 'Included as `value` in the click event payload emitted on click.' },
             variant: { type: 'string' },
             size: { type: 'string' },
-            events: { type: 'object' },
           },
         },
         render: (resource, ctx) => {
@@ -1523,7 +1521,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
             required: { type: 'boolean' },
             disabled: { type: 'boolean' },
-            events: { type: 'object' },
           },
         },
         bindingPolicy: {
@@ -1553,7 +1550,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             required: { type: 'boolean' },
             disabled: { type: 'boolean' },
             rows: { type: 'number' },
-            events: { type: 'object' },
           },
         },
         bindingPolicy: {
@@ -1583,7 +1579,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             fieldRef: { type: 'string', description: 'Prefill checked state from this dot-path into the nearest record scope.' },
             required: { type: 'boolean' },
             disabled: { type: 'boolean' },
-            events: { type: 'object' },
           },
         },
         render: (resource, ctx) => {
@@ -1620,7 +1615,6 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
                 },
               },
             },
-            events: { type: 'object' },
           },
         },
         bindingPolicy: {
@@ -1666,16 +1660,12 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         kind: 'DesignKitRecord',
         level: ['organism'],
         description:
-          'Fetches one record via `data` and publishes it as the record scope for descendants (fieldRef lookups resolve against it). Wrap detail content (e.g. a DataBody) in this when it should read from a single fetched record rather than page variables directly.',
+          'Fetches one record via `record` and publishes it as the record scope for descendants (fieldRef lookups resolve against it). Wrap detail content (e.g. a DataBody) in this when it should read from a single fetched record rather than page variables directly.',
         recordScope: true,
         specSchema: {
           type: 'object',
           additionalProperties: false,
-          required: ['data'],
-          properties: {
-            data: { type: 'object' },
-            variables: { type: 'array' },
-          },
+          properties: {},
         },
         slotPolicy: {
           defaultSlot: {

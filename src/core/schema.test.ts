@@ -111,6 +111,88 @@ describe('buildDocumentSchema', () => {
     expect(validateResource(resource('secret') as Resource, scoped).valid).toBe(false)
   })
 
+  it('adds variables/events to every kind envelope, and record only for a recordScope kind with a registered data binding', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object', additionalProperties: false, properties: {} },
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Record',
+          specSchema: { type: 'object', additionalProperties: false, properties: {} },
+          recordScope: true,
+        },
+      ],
+      dataResolvers: { static: staticResolver },
+    })
+    const schema = buildDocumentSchema(registry.scope({}))
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    const panelWithVariablesAndEvents = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Panel',
+      spec: {},
+      variables: [{ name: 'region' }],
+      events: { activate: { kind: 'emit', event: 'x' } },
+    }
+    expect(validate(panelWithVariablesAndEvents)).toBe(true)
+    // Panel is not recordScope — `record` isn't in its schema at all.
+    expect(validate({ ...panelWithVariablesAndEvents, record: { source: 'static', rows: [] } })).toBe(false)
+
+    const recordResource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Record',
+      spec: {},
+      record: { source: 'static', rows: [] },
+    }
+    expect(validate(recordResource)).toBe(true)
+    // recordScope kind requires `record`.
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Record', spec: {} })).toBe(false)
+  })
+
+  it('adds scope only for a scopeProvider kind with a registered data binding, and requires it', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object', additionalProperties: false, properties: {} },
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DataScope',
+          specSchema: { type: 'object', additionalProperties: false, properties: {} },
+          scopeProvider: true,
+        },
+      ],
+      dataResolvers: { static: staticResolver },
+    })
+    const schema = buildDocumentSchema(registry.scope({}))
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    // Panel is not scopeProvider — `scope` isn't in its schema at all.
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, scope: { name: 'rows', binding: { source: 'static', rows: [] } } })).toBe(false)
+
+    const scopeResource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'DataScope',
+      spec: {},
+      scope: { name: 'rows', binding: { source: 'static', rows: [] } },
+    }
+    expect(validate(scopeResource)).toBe(true)
+    // scopeProvider kind requires `scope`.
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'DataScope', spec: {} })).toBe(false)
+  })
+
   it('requires a min>0 slot and rejects a duplicate slot name in the generated schema, matching runtime validateResource', () => {
     const registry = createRegistry()
     registry.use({

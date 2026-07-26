@@ -18,6 +18,10 @@ function makeRuntime(overrides: Partial<SubmitRuntime> = {}): SubmitRuntime & { 
       },
     },
     store: createMemoryRuntimeStore(),
+    scopes: {
+      invalidate: vi.fn(),
+      refetch: vi.fn(async () => undefined),
+    },
     ...overrides,
   }
 }
@@ -134,50 +138,27 @@ describe('runSubmit', () => {
     expect(emitted[0][0]).toBe('users.created')
   })
 
-  it('delegates data effects directly to the document dataflow boundary', async () => {
-    const data = {
-      set: vi.fn(async () => undefined),
-      invalidate: vi.fn(async () => undefined),
+  it('delegates invalidateData/refetchData effects directly to the scope registry', async () => {
+    const scopes = {
+      invalidate: vi.fn(),
       refetch: vi.fn(async () => undefined),
     }
-    const runtime = makeRuntime({ data })
+    const runtime = makeRuntime({ scopes })
 
     await runSubmit(
       runtime,
       {
         mutation: { target: 'memory' },
         onSuccess: [
-          { kind: 'setData', node: 'selectedCustomer', from: 'id' },
-          { kind: 'invalidateData', nodes: ['customers', 'customerDetail'] },
-          { kind: 'refetchData', nodes: ['customers'] },
+          { kind: 'invalidateData', scopes: ['customers', 'customerDetail'] },
+          { kind: 'refetchData', scopes: ['customers'] },
         ],
       },
       {},
     )
 
-    expect(data.set).toHaveBeenCalledWith('selectedCustomer', '7')
-    expect(data.invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
-    expect(data.refetch).toHaveBeenCalledWith(['customers'])
-  })
-
-  it('setData falls back to the whole mutation result when no from/value is given', async () => {
-    const data = {
-      set: vi.fn(async () => undefined),
-      invalidate: vi.fn(async () => undefined),
-      refetch: vi.fn(async () => undefined),
-    }
-    const runtime = makeRuntime({ data })
-
-    await runSubmit(runtime, { mutation: { target: 'memory' }, onSuccess: [{ kind: 'setData', node: 'lastResult' }] }, {})
-
-    expect(data.set).toHaveBeenCalledWith('lastResult', { id: '7', echoed: {}, version: 'v2' })
-  })
-
-  it('rejects data effects when the document has no data graph', async () => {
-    const runtime = makeRuntime()
-    await expect(
-      runSubmit(runtime, { mutation: { target: 'memory' }, onSuccess: [{ kind: 'invalidateData', nodes: ['x'] }] }, {}),
-    ).rejects.toThrow(/ResourceDocument data graph/)
+    expect(scopes.invalidate).toHaveBeenCalledWith(['customers', 'customerDetail'])
+    expect(scopes.refetch).toHaveBeenCalledWith(['customers'])
   })
 
   it('rejects unresolved variables in the binding', async () => {

@@ -54,9 +54,9 @@ describe('GridKitTable row actions', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'GridKitTable',
+          events: { rowSelect: { kind: 'emit', event: 'selected' } },
           spec: {
             data: { source: 'static', rows: [{ id: '7', name: 'Ada' }] },
-            events: { rowSelect: { kind: 'emit', event: 'selected' } },
             columns: {
               name: { label: 'Name' },
               actions: {
