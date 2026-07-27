@@ -1731,6 +1731,19 @@ export const serviceOperationsPage: Resource = {
       },
     },
   ],
+  // A single declared write shared by two different trigger sites (the
+  // queue's row action and the inspector's handoff form) — each keeps its
+  // own action name/confirm copy/onSuccess inline, only `binding` is shared.
+  mutations: [
+    {
+      name: 'operationsHandoff',
+      binding: {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'operations',
+        spec: { connection: 'service-operations' },
+      },
+    },
+  ],
   spec: { leftPaneWidth: 280, rightPaneWidth: 330, bottomPaneHeight: 210, minLeftPaneWidth: 250, minRightPaneWidth: 300, resizable: true },
   slots: [
       {
@@ -1866,11 +1879,8 @@ export const serviceOperationsPage: Resource = {
                         },
                       ],
                       submit: {
-                        mutation: {
-                          apiVersion: 'resourcekit.dev/v1alpha1',
-                          kind: 'operations',
-                          spec: { connection: 'service-operations' },
-                        },
+                        action: 'incidents.handoff',
+                        mutation: { $mutation: 'operationsHandoff' },
                         onSuccess: [{ kind: 'refetchData', dataflow: ['incidents', 'incidentDetail'] }],
                       },
                       submitLabel: 'Save handoff',

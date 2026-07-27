@@ -53,6 +53,8 @@ export interface Resource<TSpec = unknown> {
   objectState?: ObjectStateDeclaration[]
   /** Runtime-owned, document-level named data-fetch declarations, scanned recursively across the whole document tree regardless of kind — see `DataflowUnit`. Read-only, tree-position-independent (unlike `record`, which is ancestor-owned and first-row-reduced). */
   dataflow?: DataflowUnit[]
+  /** Runtime-owned, document-level named mutation declarations, scanned recursively across the whole document tree regardless of kind — the write-path counterpart to `dataflow`, but a passive lookup table only: never executed automatically, only on an explicit `runSubmit` call via a `MutationRef`. See `MutationUnit`. */
+  mutations?: MutationUnit[]
 }
 
 export interface ObjectStateDeclaration {
@@ -299,6 +301,29 @@ export type MutationBinding =
   | { apiVersion: string; kind: 'datasource'; spec: DatasourceMutationSpec }
   | { apiVersion: string; kind: string; spec: unknown }
 
+/** Points at a document-wide, passively-declared `MutationUnit` — resolved once, synchronously, only inside `runSubmit`, never through `ctx.data.resolve`. No `path`: unlike `DataflowRef`, a mutation has no resolved value to sub-index into. */
+export interface MutationRef {
+  $mutation: string
+}
+
+/**
+ * A flat, document-level, named mutation binding — the write-path
+ * counterpart to `DataflowUnit`, but deliberately NOT engine-owned: no
+ * fetch lifecycle, no caching, no `policy`, no `dependOn` — nothing async
+ * to gate at declare time, since a mutation only ever runs on an explicit
+ * `runSubmit` call, never automatically on document mount. `binding` may
+ * reference `${variables}`/`${payload.x}` via the same interpolation
+ * `runSubmit` already applies to an inline `SubmitSpec.mutation`; ref
+ * resolution happens BEFORE that interpolation, so the declared binding may
+ * itself still carry unresolved `${payload.x}` placeholders meant to be
+ * filled in per call site. Like `DataflowUnit`, a unit's binding must never
+ * read another unit's (mutation or dataflow) resolved value.
+ */
+export interface MutationUnit {
+  name: string
+  binding: MutationBinding
+}
+
 /** See `DataResolver<TSpec>` — same live-narrowing rationale, applied to `MutationBinding`. */
 export type MutationResolver<TSpec = unknown> = (
   binding: MutationBinding & { spec: TSpec },
@@ -339,7 +364,7 @@ export type SubmitEffect =
  */
 export interface SubmitSpec {
   action?: string
-  mutation: MutationBinding
+  mutation: MutationBinding | MutationRef
   confirm?: ConfirmSpec
   onSuccess?: SubmitEffect[]
 }

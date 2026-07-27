@@ -35,6 +35,8 @@ export type {
   DataResolver,
   DataSourceManifest,
   MutationBinding,
+  MutationRef,
+  MutationUnit,
   RestMutationSpec,
   DatasourceMutationSpec,
   MutationResolver,
@@ -112,6 +114,7 @@ export { canonicalizeJson, canonicalizeResource, canonicalStringify } from './co
 
 export { clampQueryPolicy } from './runtime/queryPolicy'
 export { isDataflowRef, scanDataflowRefs } from './dataflow/ref'
+export { isMutationRef, scanMutationRefs } from './runtime/mutationRef'
 export { isObjectStateRef, scanObjectStateRefs, createObjectStateEngine } from './runtime/objectState'
 export type { ObjectStateEngine } from './runtime/objectState'
 

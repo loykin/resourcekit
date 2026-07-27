@@ -1,6 +1,7 @@
 import { interpolate } from './variables'
 import { coerceVariableValue, getValueAtPath } from '../core/path'
-import type { ConfirmSpec, MutationBinding, MutationSourceManifest, SubmitSpec, VariableValue } from '../core/types'
+import type { ConfirmSpec, MutationBinding, MutationRef, MutationSourceManifest, SubmitSpec, VariableValue } from '../core/types'
+import { isMutationRef } from './mutationRef'
 import { runtimeKeys } from './store'
 import type { RuntimeStore } from './store'
 
@@ -10,6 +11,10 @@ export type SubmitResult = unknown | typeof SUBMIT_CANCELLED
 export interface SubmitRuntime {
   scope: string
   getMutationSourceManifest(apiVersion: string, kind: string): MutationSourceManifest | undefined
+  /** Passive, document-wide named-mutation lookup — see `MutationUnit`. Never fetches, never caches; a name simply resolves to its declared `MutationBinding` or is undeclared. */
+  mutations: {
+    resolve(name: string): MutationBinding | undefined
+  }
   variables: {
     snapshot(): Record<string, VariableValue>
     set(name: string, value: VariableValue): void
@@ -37,8 +42,10 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
     throw new Error(`action ${submit.action} is not allowed in this scope`)
   }
 
+  const mutationBinding = resolveMutationBinding(runtime, submit.mutation)
+
   const snapshot = runtime.variables.snapshot()
-  const mutation = resolveSubmitValue(submit.mutation, snapshot, payload)
+  const mutation = resolveSubmitValue(mutationBinding, snapshot, payload)
   const confirm = submit.confirm ? resolveSubmitValue(submit.confirm, snapshot, payload) : undefined
   const unresolved = new Set([...mutation.unresolved, ...(confirm?.unresolved ?? [])])
   if (unresolved.size > 0) {
@@ -101,6 +108,16 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
     }
     throw error
   }
+}
+
+/** Resolves a `SubmitSpec.mutation` ref BEFORE `resolveSubmitValue`'s `${variables}`/`${payload.x}` interpolation — a declared unit's binding may itself still carry unresolved `${payload.x}` placeholders meant to be filled in per call site. */
+function resolveMutationBinding(runtime: SubmitRuntime, mutation: MutationBinding | MutationRef): MutationBinding {
+  if (!isMutationRef(mutation)) return mutation
+  const resolved = runtime.mutations.resolve(mutation.$mutation)
+  if (!resolved) {
+    throw new Error(`referenced mutation ${mutation.$mutation} is not declared anywhere in this document`)
+  }
+  return resolved
 }
 
 const PAYLOAD_REF_RE = /\$\{payload\.([^}]+)}/g

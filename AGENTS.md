@@ -27,10 +27,14 @@ own `behaviorPolicy.events` doesn't cover the fired event), `objectState`
 (shared, writable, object-shaped state slots — the structured counterpart to
 `variables`, read/written via `ObjectStateRef`/`{"$state": name}`), `record`
 (only for a `recordScope: true` kind — resolved into `ctx.record`; a
-`DataBinding` fetch or an `ObjectStateRef` pointer), and `dataflow` (a flat
+`DataBinding` fetch or an `ObjectStateRef` pointer), `dataflow` (a flat
 array of named data-fetch units — `{name, binding, policy?, dependOn?}` —
 scanned recursively across the whole document, same footing as `variables`;
-available on every kind, no manifest flag gates it). Never add a same-named
+available on every kind, no manifest flag gates it), and `mutations` (a flat
+array of named, passive mutation-binding declarations — `{name, binding}`,
+no `policy`/`dependOn` — the write-path counterpart to `dataflow`, resolved
+only inside `runSubmit` via a `{"$mutation": name}` reference in
+`SubmitSpec.mutation`, never automatically). Never add a same-named
 placeholder property to a kind's own `specSchema` for these — they live on
 the envelope, not in `spec`. Everything else in `spec` is either kind-owned
 outright, or a shared vocabulary type (`SubmitSpec`, `DataBinding`) that the
@@ -165,8 +169,8 @@ MCP server example.
 - `spec`'s `data`/`events`/`variables`-shaped placeholders must not be
   reintroduced. If a new runtime-owned, kind-independent concern comes up,
   it belongs on the `Resource` envelope (like
-  `variables`/`events`/`objectState`/`record`/`dataflow`), not inside a
-  kind's `specSchema` under a well-known name.
+  `variables`/`events`/`objectState`/`record`/`dataflow`/`mutations`), not
+  inside a kind's `specSchema` under a well-known name.
 - A `dataflow` unit's `binding` is a single fetch — it must never gain a way
   to reference another unit's resolved *value* (no document-level value
   graph, no multi-hop value chaining). `dependOn` may express
@@ -174,6 +178,15 @@ MCP server example.
   Sharing across sibling kinds works through the flat, document-wide
   `{"$dataflow": name}` ref, tree-position-independent; chained/cascading
   *value* dependencies belong to dashboardkit.
+- A `mutations` unit is a passive lookup table only — it must never gain a
+  `policy`, `dependOn`, fetch lifecycle, caching, or any engine-owned
+  eager-execution semantics (unlike `DataflowEngine`, which eagerly attempts
+  every declared unit's fetch on document mount). A mutation executes
+  exactly once, only when `runSubmit` is explicitly called with a
+  `SubmitSpec` referencing it — never automatically, never speculatively,
+  never on document mount. If you find yourself adding a
+  `declare()`/`dispose()` lifecycle or a subscription to `mutations`, stop —
+  that boundary belongs to `dataflow`, not here.
 
 ## Conventions
 

@@ -2,9 +2,10 @@ import Ajv from 'ajv'
 import type { ErrorObject } from 'ajv'
 import { isObjectStateRef } from '../runtime/objectState'
 import { scanDataflowRefs } from '../dataflow/ref'
+import { scanMutationRefs } from '../runtime/mutationRef'
 import { scanVariableRefs } from '../runtime/variables'
 import { listExampleEntries } from './examples'
-import type { DataflowUnit, Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
+import type { DataflowUnit, MutationUnit, Resource, ScopeOptions, SlotRule, ValidationIssue, ValidationResult, VariableDeclaration } from './types'
 import type { ResourceRegistry, ScopedRegistry } from './registry'
 
 export interface ExampleValidationFailure {
@@ -95,6 +96,9 @@ function validateEnvelope(resource: unknown, path: string, issues: ValidationIss
   }
   if ('dataflow' in resource && !Array.isArray(resource.dataflow)) {
     addIssue(issues, `${path}/dataflow`, 'dataflow must be an array', 'remove dataflow or replace it with an array of { name, binding, policy?, dependOn? } units')
+  }
+  if ('mutations' in resource && !Array.isArray(resource.mutations)) {
+    addIssue(issues, `${path}/mutations`, 'mutations must be an array', 'remove mutations or replace it with an array of { name, binding } units')
   }
   // `variables`/`events` are never legitimate spec content for any kind —
   // the runtime only ever reads them from the envelope. A kind whose own
@@ -383,6 +387,28 @@ function validateDataflowGraph(units: DataflowUnit[], issues: ValidationIssue[])
   for (const name of deps.keys()) dfs(name, [])
 }
 
+/** Same recursive-collection shape as `collectDataflowUnits` — `mutations` is document-wide, not tree-bound. */
+function collectMutationUnits(resource: Resource, units: MutationUnit[] = []): MutationUnit[] {
+  units.push(...(resource.mutations ?? []))
+  for (const slot of resource.slots ?? []) {
+    for (const child of children(slot)) {
+      if (isRecord(child)) collectMutationUnits(child as unknown as Resource, units)
+    }
+  }
+  return units
+}
+
+/** Unlike `validateDataflowGraph`, there's no `dependOn` to form a cycle over — a mutation unit only ever needs a unique name. */
+function validateMutationUnits(units: MutationUnit[], issues: ValidationIssue[]): void {
+  const seen = new Set<string>()
+  for (const unit of units) {
+    if (seen.has(unit.name)) {
+      addIssue(issues, '/mutations', `mutation unit name ${unit.name} is declared more than once`, 'give each mutation unit a unique name — a duplicate would silently overwrite the first in the lookup table')
+    }
+    seen.add(unit.name)
+  }
+}
+
 function scanValueRefs(value: unknown): Set<string> {
   const refs = new Set<string>()
   const visit = (current: unknown) => {
@@ -539,6 +565,7 @@ function validateDatasourceAndActions(resource: Resource, registry: ResourceRegi
   if (resource.record) visit(resource.record, `${path}/record`)
   if (resource.events) visit(resource.events, `${path}/events`)
   if (resource.dataflow) visit(resource.dataflow, `${path}/dataflow`)
+  if (resource.mutations) visit(resource.mutations, `${path}/mutations`)
 }
 
 /**
@@ -557,6 +584,25 @@ function validateDataflowRefs(resource: Resource, path: string, declaredNames: S
         `${path}/spec`,
         `referenced dataflow unit ${ref.$dataflow} is not declared anywhere in this document`,
         `declare a dataflow unit named "${ref.$dataflow}" (anywhere in the document — dataflow is document-wide, not tree-bound), or use one of: ${[...declaredNames].join(', ') || '(none declared)'}`,
+      )
+    }
+  }
+}
+
+/**
+ * `$mutation` refs resolve inside `runSubmit` only — never through
+ * `ctx.data.resolve` — but the declared-name-exists check is identical in
+ * shape to `validateDataflowRefs`: a ref to an undeclared name would
+ * otherwise only fail at submit time, deep in a user interaction.
+ */
+function validateMutationRefs(resource: Resource, path: string, declaredNames: Set<string>, issues: ValidationIssue[]): void {
+  for (const ref of scanMutationRefs(resource.spec)) {
+    if (!declaredNames.has(ref.$mutation)) {
+      addIssue(
+        issues,
+        `${path}/spec`,
+        `referenced mutation unit ${ref.$mutation} is not declared anywhere in this document`,
+        `declare a mutation unit named "${ref.$mutation}" (anywhere in the document — mutations are document-wide, not tree-bound), or use one of: ${[...declaredNames].join(', ') || '(none declared)'}`,
       )
     }
   }
@@ -583,10 +629,15 @@ export function validateResource(
   validateDataflowGraph(dataflowUnits, issues)
   const declaredDataflowNames = new Set(dataflowUnits.map((unit) => unit.name))
 
+  const mutationUnits = collectMutationUnits(resource)
+  validateMutationUnits(mutationUnits, issues)
+  const declaredMutationNames = new Set(mutationUnits.map((unit) => unit.name))
+
   const visit = (current: unknown, path: string, depth: number) => {
     if (!validateEnvelope(current, path, issues)) return
     validateScopedCapabilities(current, options, path, depth, issues)
     validateDataflowRefs(current, path, declaredDataflowNames, issues)
+    validateMutationRefs(current, path, declaredMutationNames, issues)
     const manifest = registry.getKind(current.apiVersion, current.kind)
     if (!manifest) {
       addIssue(

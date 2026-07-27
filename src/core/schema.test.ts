@@ -189,6 +189,98 @@ describe('buildDocumentSchema', () => {
     expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, dataflow: [{ binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: [] } } }] })).toBe(false)
   })
 
+  it('adds mutations unconditionally when a mutation binding schema exists, gated only on registered resolvers, and never requires it', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object', additionalProperties: false, properties: {} },
+        },
+      ],
+    })
+    const noMutationSchema = buildDocumentSchema(registry.scope({}))
+    expect(JSON.stringify(noMutationSchema)).not.toContain('mutationUnit')
+
+    const withResolver = createRegistry()
+    withResolver.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Panel',
+          specSchema: { type: 'object', additionalProperties: false, properties: {} },
+        },
+      ],
+      mutationSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', resolve: async () => ({}) }],
+    })
+    const schema = buildDocumentSchema(withResolver.scope({}))
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {} })).toBe(true)
+
+    const withMutations = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'Panel',
+      spec: {},
+      mutations: [{ name: 'deleteUser', binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: {} } }],
+    }
+    expect(validate(withMutations)).toBe(true)
+
+    // mutations must be an array of { name, binding } units — no policy/dependOn.
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, mutations: 'not-an-array' })).toBe(false)
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, mutations: [{ binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: {} } }] })).toBe(false)
+  })
+
+  it('rewrites a nested submit.mutation property to accept either an inline MutationBinding or a $mutation ref', () => {
+    const registry = createRegistry()
+    registry.use({
+      name: 'test',
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'FormPanel',
+          specSchema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              submit: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['mutation'],
+                properties: { action: { type: 'string' }, mutation: { type: 'object' } },
+              },
+            },
+          },
+        },
+      ],
+      mutationSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', resolve: async () => ({}) }],
+    })
+    const schema = buildDocumentSchema(registry.scope({}))
+    const ajv = new Ajv2020({ strict: false })
+    const validate = ajv.compile(schema)
+
+    const inline = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormPanel',
+      spec: { submit: { mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: {} } } },
+    }
+    expect(validate(inline)).toBe(true)
+
+    const byRef = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'FormPanel',
+      spec: { submit: { mutation: { $mutation: 'deleteUser' } } },
+    }
+    expect(validate(byRef)).toBe(true)
+
+    const invalid = { ...byRef, spec: { submit: { mutation: { $mutation: 'deleteUser', extra: true } } } }
+    expect(validate(invalid)).toBe(false)
+  })
+
   it('requires a min>0 slot and rejects a duplicate slot name in the generated schema, matching runtime validateResource', () => {
     const registry = createRegistry()
     registry.use({

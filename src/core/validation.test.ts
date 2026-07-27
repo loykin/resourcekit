@@ -39,6 +39,17 @@ function registry() {
   return registry
 }
 
+function mutationRegistry() {
+  const registry = createRegistry()
+  registry.use({
+    name: 'test',
+    kinds: [panel, text],
+    dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }],
+    mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async () => ({}) }],
+  })
+  return registry
+}
+
 const page = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Page',
@@ -497,5 +508,82 @@ describe('validateResource', () => {
     )
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.message)).toContain('dataflow unit name rows is declared more than once')
+  })
+
+  it('rejects a $mutation ref to an undeclared unit', () => {
+    const result = validateResource(
+      { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'x', data: { $mutation: 'deleteUser' } } },
+      mutationRegistry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('referenced mutation unit deleteUser is not declared anywhere in this document')
+  })
+
+  it('accepts a $mutation ref to a unit declared in a sibling subtree, not an ancestor', () => {
+    const nestablePanel = { ...panel, slotPolicy: { defaultSlot: { min: 0, accepts: ['Panel'] } } }
+    const nested = createRegistry()
+    nested.use({
+      name: 'test',
+      kinds: [nestablePanel],
+      mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async () => ({}) }],
+    })
+
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        mutations: [{ name: 'deleteUser', binding: { apiVersion: API_VERSION, kind: 'memory', spec: {} } }],
+        slots: [
+          {
+            items: [
+              { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'y', data: { $mutation: 'deleteUser' } } },
+            ],
+          },
+        ],
+      },
+      nested,
+    )
+    expect(result.valid).toBe(true)
+  })
+
+  it('rejects a duplicate mutation unit name', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        mutations: [
+          { name: 'deleteUser', binding: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
+          { name: 'deleteUser', binding: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
+        ],
+      },
+      mutationRegistry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('mutation unit name deleteUser is declared more than once')
+  })
+
+  it('rejects an unregistered mutation source referenced from a declared mutation unit', () => {
+    const result = validateResource(
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'Panel',
+        spec: { title: 'x' },
+        mutations: [{ name: 'deleteUser', binding: { apiVersion: API_VERSION, kind: 'nope', spec: {} } }],
+      },
+      mutationRegistry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.some((issue) => issue.message.includes(`no data source or mutation source manifest ${API_VERSION}/nope is registered`))).toBe(true)
+  })
+
+  it('rejects a non-array mutations envelope field', () => {
+    const result = validateResource(
+      { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: { title: 'x' }, mutations: 'not-an-array' as unknown as never },
+      mutationRegistry(),
+    )
+    expect(result.valid).toBe(false)
+    expect(result.issues.map((issue) => issue.message)).toContain('mutations must be an array')
   })
 })

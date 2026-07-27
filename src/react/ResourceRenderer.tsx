@@ -7,7 +7,7 @@ import { createCoordinatorResolve } from '../dataflow/coordinator'
 import type { QueryCoordinator } from '../dataflow/coordinator'
 import { createDataflowEngine } from '../dataflow/engine'
 import type { DataflowEngine } from '../dataflow/engine'
-import type { ConfirmSpec, DataBinding, DataflowRef, DataflowUnit, EventPolicy, KindManifest, ObjectStateDeclaration, ObjectStateRef, Resource, VariableDeclaration, VariableValue, VisibilityCondition } from '../core/types'
+import type { ConfirmSpec, DataBinding, DataflowRef, DataflowUnit, EventPolicy, KindManifest, MutationBinding, MutationUnit, ObjectStateDeclaration, ObjectStateRef, Resource, VariableDeclaration, VariableValue, VisibilityCondition } from '../core/types'
 import type { ResourceRegistry, ScopedRegistry } from '../core/registry'
 import { createVariableEngine, interpolate, scanVariableRefs } from '../runtime/variables'
 import type { VariableEngine } from '../runtime/variables'
@@ -48,6 +48,8 @@ interface Runtime {
   engine: VariableEngine
   objectState: ObjectStateEngine
   dataflowEngine: DataflowEngine
+  /** Passive, document-wide named-mutation lookup — see `MutationUnit`. Never fetches, never caches. */
+  mutations: Map<string, MutationBinding>
   store: RuntimeStore
   scope: string
   dataCache: Map<string, { fingerprint: string; promise: Promise<Record<string, unknown>[]> }>
@@ -91,6 +93,16 @@ function collectDataflow(resource: Resource, units: DataflowUnit[] = []): Datafl
 
   for (const slot of resource.slots ?? []) {
     for (const child of slot.items) collectDataflow(child, units)
+  }
+
+  return units
+}
+
+function collectMutations(resource: Resource, units: MutationUnit[] = []): MutationUnit[] {
+  units.push(...(resource.mutations ?? []))
+
+  for (const slot of resource.slots ?? []) {
+    for (const child of slot.items) collectMutations(child, units)
   }
 
   return units
@@ -401,6 +413,7 @@ function renderKindNode(
             {
               scope: runtime.scope,
               getMutationSourceManifest: (apiVersion, kind) => registry.getMutationSourceManifest(apiVersion, kind),
+              mutations: { resolve: (name) => runtime.mutations.get(name) },
               variables: {
                 snapshot: () => runtime.engine.snapshot(),
                 set: runtime.engine.set,
@@ -559,7 +572,9 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
       scopePolicy: 'options' in props.registry ? props.registry.options.queryPolicy : undefined,
     })
 
-    return { engine, objectState, dataflowEngine, store, scope: runtimeScope, dataCache }
+    const mutations = new Map(collectMutations(resource).map((unit) => [unit.name, unit.binding]))
+
+    return { engine, objectState, dataflowEngine, mutations, store, scope: runtimeScope, dataCache }
   }, [props.runtimeStore, props.runtimeScope, props.registry, props.queryCoordinator, resource])
 
   useEffect(() => {

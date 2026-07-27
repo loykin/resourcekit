@@ -261,6 +261,118 @@ describe('ResourceRenderer mutation-to-dataflow-engine integration', () => {
   )
 })
 
+describe('ResourceRenderer named mutations', () => {
+  it('resolves the same declared mutation from two different call sites with different confirm copy', async () => {
+    let rowContext: RenderContext | undefined
+    let detailContext: RenderContext | undefined
+    const resolve = vi.fn(async (_binding: unknown, payload: unknown) => ({ id: payload }))
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'e2e',
+      mutationSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', resolve }],
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'RowProbe',
+          specSchema: { type: 'object' },
+          slotPolicy: { defaultSlot: { min: 0 } },
+          render: (_resource, ctx) => {
+            rowContext = ctx
+            return createElement('div', null, ctx.slots.children())
+          },
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DetailProbe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            detailContext = ctx
+            return createElement('div')
+          },
+        },
+      ],
+    })
+
+    const resource: Resource = {
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'RowProbe',
+      mutations: [
+        {
+          name: 'deleteUser',
+          binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { url: '/api/users/${payload.id}' } },
+        },
+      ],
+      spec: {},
+      slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'DetailProbe', spec: {} }] }],
+    }
+
+    const confirmTitles: string[] = []
+    render(createElement(ResourceRenderer, {
+      resource,
+      registry,
+      confirmDialog: async (options) => {
+        confirmTitles.push(options.title)
+        return true
+      },
+    }))
+    await act(async () => {})
+
+    await act(async () => {
+      await rowContext?.actions.submit(
+        { mutation: { $mutation: 'deleteUser' }, confirm: { title: 'Delete from row?' } },
+        { id: 'r1' },
+      )
+    })
+    await act(async () => {
+      await detailContext?.actions.submit(
+        { mutation: { $mutation: 'deleteUser' }, confirm: { title: 'Delete this record?' } },
+        { id: 'd1' },
+      )
+    })
+
+    expect(confirmTitles).toEqual(['Delete from row?', 'Delete this record?'])
+    expect(resolve).toHaveBeenCalledTimes(2)
+    expect(resolve).toHaveBeenNthCalledWith(
+      1,
+      { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { url: '/api/users/r1' } },
+      { id: 'r1' },
+      expect.anything(),
+    )
+    expect(resolve).toHaveBeenNthCalledWith(
+      2,
+      { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { url: '/api/users/d1' } },
+      { id: 'd1' },
+      expect.anything(),
+    )
+  })
+
+  it('rejects a submit whose $mutation ref is undeclared', async () => {
+    let context: RenderContext | undefined
+    const registry = createRegistry<KindRenderFn>()
+    registry.use({
+      name: 'e2e',
+      mutationSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', resolve: async () => ({}) }],
+      kinds: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Probe',
+          specSchema: { type: 'object' },
+          render: (_resource, ctx) => {
+            context = ctx
+            return createElement('div')
+          },
+        },
+      ],
+    })
+    const resource: Resource = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} }
+
+    render(createElement(ResourceRenderer, { resource, registry }))
+    await act(async () => {})
+
+    await expect(context?.actions.submit({ mutation: { $mutation: 'nope' } }, {})).rejects.toThrow(/nope.*not declared/)
+  })
+})
+
 describe('DataflowEngine guards against out-of-order fetch completion', () => {
   it('ignores a stale fetch that settles after a newer one', async () => {
     let context: RenderContext | undefined

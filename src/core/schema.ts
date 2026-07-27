@@ -272,7 +272,9 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
       if (options.hasDataBindingSchema && 'data' in properties) {
         properties.data = { oneOf: [{ $ref: '#/$defs/dataBinding' }, { $ref: '#/$defs/dataflowRef' }] }
       }
-      if (options.hasMutationBindingSchema && 'mutation' in properties) properties.mutation = { $ref: '#/$defs/mutationBinding' }
+      if (options.hasMutationBindingSchema && 'mutation' in properties) {
+        properties.mutation = { oneOf: [{ $ref: '#/$defs/mutationBinding' }, { $ref: '#/$defs/mutationRef' }] }
+      }
       if ('mutation' in properties && 'action' in properties && options.allowedActions) {
         properties.action = { type: 'string', enum: options.allowedActions }
       }
@@ -294,7 +296,9 @@ function withWellKnownRefs(schema: JsonSchema, options: WellKnownRefOptions): Js
  * envelope, same footing as `variables`/`objectState` — no manifest flag
  * gates it, since a dataflow unit is never tied to any particular kind
  * (only gated on `hasDataBindingSchema`, since a unit's `binding` is
- * meaningless with zero registered resolvers).
+ * meaningless with zero registered resolvers). `mutations` is the write-path
+ * counterpart to `dataflow` — same "no manifest flag" treatment, gated only
+ * on `hasMutationBindingSchema`.
  */
 function commonEnvelopeProperties(manifest: KindManifest, refOptions: WellKnownRefOptions): Record<string, unknown> {
   return {
@@ -309,6 +313,9 @@ function commonEnvelopeProperties(manifest: KindManifest, refOptions: WellKnownR
       : {}),
     ...(refOptions.hasDataBindingSchema
       ? { dataflow: { type: 'array', items: { $ref: '#/$defs/dataflowUnit' } } }
+      : {}),
+    ...(refOptions.hasMutationBindingSchema
+      ? { mutations: { type: 'array', items: { $ref: '#/$defs/mutationUnit' } } }
       : {}),
   }
 }
@@ -437,7 +444,26 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
 
   const mutationSchemas = mutationBindingSchemas(scoped.listMutationSourceManifests(), scoped.options.datasources?.allow)
   const hasMutationBindingSchema = mutationSchemas.length > 0
-  if (hasMutationBindingSchema) defs.mutationBinding = mutationSchemas.length === 1 ? mutationSchemas[0] : { oneOf: mutationSchemas }
+  if (hasMutationBindingSchema) {
+    defs.mutationBinding = mutationSchemas.length === 1 ? mutationSchemas[0] : { oneOf: mutationSchemas }
+    defs.mutationRef = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['$mutation'],
+      properties: {
+        $mutation: { type: 'string', description: 'Name of a mutation unit declared anywhere in this document (see the document-wide mutations array).' },
+      },
+    }
+    defs.mutationUnit = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'binding'],
+      properties: {
+        name: { type: 'string', description: 'Referenced elsewhere via { "$mutation": name }.' },
+        binding: { $ref: '#/$defs/mutationBinding' },
+      },
+    }
+  }
 
   return { hasDataBindingSchema, hasMutationBindingSchema, allowedActions: scoped.options.actions?.allow }
 }

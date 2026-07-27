@@ -270,6 +270,7 @@ own:
 | `objectState` | Any resource, any kind | `ObjectStateDeclaration[]`, scanned recursively — shared, writable, object-shaped state slots (the structured counterpart to `variables`; see `ObjectStateRef`/`Resource.bindings`) |
 | `record` | Only when the kind's manifest sets `recordScope: true` | Read as a `DataBinding` (a real fetch) or an `ObjectStateRef` (a pointer to an `objectState` slot); the runtime resolves it into `RenderContext.record` before the kind renders |
 | `dataflow` | Any resource, any kind | `DataflowUnit[]` (`{name, binding, policy?, dependOn?}`), scanned recursively — flat, document-wide named data-fetch units; the runtime resolves each `binding` (once, or repeatedly if `policy.refresh` is set) and any kind anywhere can read the current value via `{ "$dataflow": name }`, resolvable through `ctx.data.resolve` |
+| `mutations` | Any resource, any kind | `MutationUnit[]` (`{name, binding}`, no `policy`/`dependOn`), scanned recursively — flat, document-wide named mutation declarations; a passive lookup table only, never fetched/executed automatically. `SubmitSpec.mutation` may be an inline `MutationBinding` or `{ "$mutation": name }`, resolved only inside `runSubmit` on an explicit submit |
 
 ## Registry and adapters
 
@@ -804,6 +805,55 @@ same confirmation callback through `SubmitRuntime.confirm`.
 `setVariable` and `emit` work on any resource. `invalidateData`/`refetchData`
 name one or more dataflow unit names to mark stale or force a fresh fetch on
 — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds).
+
+### Named mutations: sharing a declared write across call sites
+
+Most `SubmitSpec.mutation` values stay inline — no extra mechanism needed.
+A named **mutation unit** only earns its keep when the *same* mutation
+(e.g. "delete this record") is invoked from multiple different UI locations
+that want different confirm copy or different `onSuccess` effects — a list
+row action and a detail-page action both deleting the same kind of record,
+say. `action`/`confirm`/`onSuccess` stay inline at each call site; only
+`binding` is shared:
+
+```json
+{
+  "mutations": [
+    {
+      "name": "deleteUser",
+      "binding": {
+        "apiVersion": "resourcekit.dev/v1alpha1",
+        "kind": "rest",
+        "spec": { "url": "/api/users/${payload.id}", "method": "DELETE" }
+      }
+    }
+  ]
+}
+```
+
+Two call sites referencing it, each with their own confirm copy:
+
+```json
+{ "submit": { "mutation": { "$mutation": "deleteUser" }, "confirm": { "title": "Remove this user?" } } }
+```
+
+```json
+{
+  "submit": {
+    "mutation": { "$mutation": "deleteUser" },
+    "confirm": { "title": "Delete ${payload.name}'s account?" },
+    "onSuccess": [{ "kind": "refetchData", "dataflow": ["users"] }]
+  }
+}
+```
+
+Unlike `dataflow`, `mutations` is a **passive lookup table** — no
+`DataflowEngine`-style fetch-owner, no `policy`, no `dependOn`, no auto-run
+on document mount. A declared mutation unit only ever executes inside
+`runSubmit`, triggered by an explicit `ctx.actions.submit` call; resolving a
+`{ "$mutation": name }` ref happens before the usual `${variables}`/
+`${payload.x}` interpolation, so the declared binding may itself still carry
+unresolved `${payload.x}` placeholders filled in per call site.
 
 ### Controlled FormView drafts
 

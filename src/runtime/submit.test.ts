@@ -20,6 +20,7 @@ function makeRuntime(overrides: Partial<SubmitRuntime> = {}): SubmitRuntime & { 
     values,
     scope: 'test',
     getMutationSourceManifest: () => manifestFor('memory', async (_binding, payload) => ({ id: '7', echoed: payload, version: 'v2' })),
+    mutations: { resolve: () => undefined },
     variables: {
       snapshot: () => Object.fromEntries(values.entries()),
       set: (name, value) => {
@@ -207,5 +208,35 @@ describe('runSubmit', () => {
     await expect(
       runSubmit(runtime, { action: 'users.update', mutation: mutation('memory') }, {}),
     ).resolves.toBeDefined()
+  })
+
+  it('resolves a $mutation ref to its declared binding, then interpolates it like an inline binding', async () => {
+    const resolve = vi.fn(async () => ({ ok: true }))
+    const runtime = makeRuntime({
+      getMutationSourceManifest: () => manifestFor('rest', resolve),
+      mutations: {
+        resolve: (name) => (name === 'deleteUser' ? mutation('rest', { url: '/api/users/${payload.id}', method: 'DELETE' }) : undefined),
+      },
+    })
+
+    await runSubmit(runtime, { mutation: { $mutation: 'deleteUser' } }, { id: '9' })
+
+    expect(resolve).toHaveBeenCalledWith(
+      mutation('rest', { url: '/api/users/9', method: 'DELETE' }),
+      { id: '9' },
+      { variables: { customerId: '7' } },
+    )
+  })
+
+  it('rejects a $mutation ref to an undeclared name', async () => {
+    const runtime = makeRuntime({ mutations: { resolve: () => undefined } })
+    await expect(runSubmit(runtime, { mutation: { $mutation: 'missing' } }, {})).rejects.toThrow(/missing.*not declared/)
+  })
+
+  it('never consults the mutations lookup for an inline MutationBinding (regression)', async () => {
+    const resolveMutation = vi.fn()
+    const runtime = makeRuntime({ mutations: { resolve: resolveMutation } })
+    await runSubmit(runtime, { mutation: mutation('memory') }, {})
+    expect(resolveMutation).not.toHaveBeenCalled()
   })
 })
