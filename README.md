@@ -55,7 +55,8 @@ registration:
 | `@loykin/resourcekit/adapters/chartkit` | chartkit kinds |
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
 | `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionManifest` bridging registered connections to `@loykin/datasourcekit` |
-| `@loykin/resourcekit/adapters` | All first-party kind adapters plus resource views; use when all required kit peers are installed. Connection adapters (e.g. `datasourcekit`) are not included — import them from their own subpath. |
+| `@loykin/resourcekit/adapters/rjsf` | `JSONSchemaForm` kind bridging [react-jsonschema-form](https://rjsf-team.github.io/react-jsonschema-form/) in for cross-field validation and native array-of-objects fields — see [Complex forms: the RJSF adapter](#complex-forms-the-rjsf-adapter) |
+| `@loykin/resourcekit/adapters` | All first-party kind adapters plus resource views; use when all required kit peers are installed. Connection adapters (e.g. `datasourcekit`) and the `rjsf` adapter are not included — import them from their own subpath. |
 | `@loykin/resourcekit/dataflow/tanstack-query` | `QueryCoordinator` backed by `@tanstack/query-core` (optional peer) for real polling/caching/dedup |
 
 The corresponding Tailwind v4 source entries are
@@ -928,6 +929,79 @@ The playground's **User management** sample demonstrates the full
 row-action → confirmation → in-memory mutation → reactive refetch flow. It
 uses `window.confirm` only as a self-contained host implementation; production
 applications should inject their own accessible application dialog.
+
+### Complex forms: the RJSF adapter
+
+A composed designkit form (`ResourceForm`/`FormView` + `Textarea`/`Checkbox`/
+`Select`) covers most CRUD forms, but not everything — cross-field
+validation (e.g. "confirm password must match password") and dynamic
+array-of-objects fields (a variable-length list of structured records) need
+more than field-by-field composition can express.
+`@loykin/resourcekit/adapters/rjsf` bridges in
+[react-jsonschema-form](https://rjsf-team.github.io/react-jsonschema-form/)
+(RJSF) as an ordinary `ResourceKitPlugin` — no resourcekit core changes
+needed, same shape as the designkit/gridkit adapters — to close exactly
+those two gaps. Install its peers directly (`@rjsf/core`, `@rjsf/utils`,
+`@rjsf/validator-ajv8`, all optional peer dependencies of resourcekit):
+
+```bash
+pnpm add @rjsf/core @rjsf/utils @rjsf/validator-ajv8
+```
+
+```ts
+import { createRJSFPlugin } from '@loykin/resourcekit/adapters/rjsf'
+
+registry.use(
+  createRJSFPlugin({
+    // Named validators the document references by key — `customValidate`
+    // itself is a JS function, so it can't live inside a spec meant to stay
+    // AI-safe/serializable, the same by-name-reference pattern resourcekit
+    // already uses for a DataBinding/MutationBinding kind.
+    passwordsMatch: (formData, errors) => {
+      const data = formData as { password?: string; confirmPassword?: string }
+      if (data.password !== data.confirmPassword) {
+        errors.confirmPassword?.addError('Passwords must match')
+      }
+      return errors
+    },
+  }),
+)
+```
+
+```json
+{
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "JSONSchemaForm",
+  "spec": {
+    "jsonSchema": {
+      "type": "object",
+      "required": ["password", "confirmPassword"],
+      "properties": {
+        "password": { "type": "string", "title": "Password" },
+        "confirmPassword": { "type": "string", "title": "Confirm password" }
+      }
+    },
+    "submit": { "mutation": { "apiVersion": "resourcekit.dev/v1alpha1", "kind": "rest", "spec": { "url": "/users", "method": "POST" } } },
+    "customValidateKey": "passwordsMatch"
+  }
+}
+```
+
+`JSONSchemaForm`'s own `formData` is a real structured JS value from the
+start (unlike native `FormData`'s flat key→string collection), so a
+repeating array field arrives at the mutation resolver as a genuine nested
+array — never a hidden-JSON string a host has to parse back out.
+
+**`JSONSchemaForm` registers `hostAuthoredOnly: true` and is meant to stay
+that way.** Its own `jsonSchema` field is itself an open JSON Schema —
+schema-*shaped*, not schema-*conforming* data. Exposing that to AI/MCP
+generation would let a generator define an arbitrary field set, bypassing
+the enumerable, reviewable kind catalog `ScopedRegistry`/`kinds.include`
+exists to enforce — so `registry.scope(...)` drops this kind
+unconditionally, even from a scope whose `kinds.include` names it
+explicitly (see [Custom kinds](#custom-kinds)'s `hostAuthoredOnly`
+explanation). Use it the way a host registers a `connection`: hand-authored
+into a document, never generated.
 
 ## Registered connections
 
