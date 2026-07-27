@@ -92,7 +92,8 @@ export function createPlaygroundDatasourceManager() {
 export function createPlaygroundConnectionProvider(): ConnectionProvider {
   const connection: RegisteredConnection<DatasourceKitConnectionConfig> = {
     uid: 'demo-metrics-dynamic',
-    type: 'datasourcekit',
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'datasourcekit',
     name: 'Dynamic Playground Metrics',
     description: 'In-browser DatasourceKit connection resolved through ConnectionProvider.',
     config: { datasourceUid: DATASOURCE_UID, datasourceType: DATASOURCE_TYPE },

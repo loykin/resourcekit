@@ -1,6 +1,6 @@
 /**
  * Vendor-neutral server-state boundary between the document-level
- * `DataflowEngine` (`src/dataflow/engine.ts`) and a `DataSourceAdapter`
+ * `DataflowEngine` (`src/dataflow/engine.ts`) and a `DataSourceManifest`
  * (docs/dataflow-and-server-state-direction.md P0 item 2). The engine never
  * talks to a coordinator directly — it only knows about `DataBinding`/
  * `resolve`; wiring a coordinator's background results back into the engine
@@ -151,7 +151,7 @@ function stableStringify(value: unknown): string {
 
 export interface CreateCoordinatorResolveOptions {
   coordinator: QueryCoordinator
-  registry: Pick<ResourceRegistry, 'getDataSourceAdapter'>
+  registry: Pick<ResourceRegistry, 'getDataSourceManifest'>
   /** The actual row-fetching call (e.g. a plain `DataResolver` invocation) — this helper only adds coordinator semantics around it, it doesn't know how to fetch anything itself. */
   resolve: (binding: DataBinding, ctx: DataResolveContext) => Promise<unknown>
   /** Host ceiling applied via `clampQueryPolicy` before the policy reaches the coordinator. */
@@ -195,9 +195,9 @@ interface CachedHandle {
  * Bridges any `QueryCoordinator` (direct or a scheduling one like TanStack
  * Query) into the `(binding, ctx) => Promise<unknown>` shape the
  * `DataflowEngine` needs (docs/dataflow-and-server-state-direction.md P1
- * item 1). Query key comes from a registered `DataSourceAdapter.queryKey`
- * when one exists for the binding's source; otherwise falls back to
- * `[nodeId, stableStringify(binding)]` when a source has no richer adapter
+ * item 1). Query key comes from a registered `DataSourceManifest.queryKey`
+ * when one exists for the binding's kind; otherwise falls back to
+ * `[nodeId, stableStringify(binding)]` when a kind has no richer manifest
  * registration.
  *
  * Keeps exactly one `QueryHandle` per nodeId, reused across repeated
@@ -250,8 +250,8 @@ export function createCoordinatorResolve(options: CreateCoordinatorResolveOption
 
   return {
     async resolve(binding, ctx) {
-      const adapter = options.registry.getDataSourceAdapter(binding.source)
-      const rawKey = adapter ? adapter.queryKey(binding, ctx) : [ctx.nodeId, stableStringify(binding)]
+      const manifest = options.registry.getDataSourceManifest(binding.apiVersion, binding.kind)
+      const rawKey = manifest?.queryKey ? manifest.queryKey(binding, ctx) : [ctx.nodeId, stableStringify(binding)]
       const cacheKey = stableStringify(rawKey)
       const policy = clampQueryPolicy(ctx.policy, options.scopePolicy)
 

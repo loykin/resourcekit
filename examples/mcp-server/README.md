@@ -29,8 +29,9 @@ can't follow a selection — that needs a source that can be parameterized
 per-request. Rather than pointing a raw `rest` binding at the demo API's URL
 directly, it's registered as a connection (uid `demo-users`, see test.md
 §5-7) — the server exposes it through the connection tools below, and
-resource documents reference it by uid, never the URL (`{"source":
-"connection", "connection": "demo-users", "request": {"path": "/users"}}`).
+resource documents reference it by uid, never the URL (`{"apiVersion":
+"resourcekit.dev/v1alpha1", "kind": "connection", "spec": {"connection":
+"demo-users", "request": {"path": "/users"}}}`).
 
 A second connection, `demo-orders` (uid, type `sqlite`), runs against an
 in-memory `node:sqlite` database (`src/demo-db.ts`, no extra dependency) via

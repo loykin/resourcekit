@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { createRegistry } from './registry'
 import { staticResolver } from '../dataflow/resolvers'
-import type { ConnectionAdapter, RegisteredConnection } from './types'
+import type { ConnectionManifest, DataSourceManifest, RegisteredConnection, StaticBindingSpec } from './types'
 
-function testConnectionAdapter(): ConnectionAdapter {
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
+function testConnectionManifest(): ConnectionManifest {
   return {
-    type: 'rest',
+    apiVersion: API_VERSION,
+    kind: 'rest',
     requestSchema: { type: 'object' },
     test: async () => ({ ok: true }),
     preview: async () => ({ schema: { type: 'object' }, rows: [], truncated: false }),
@@ -16,12 +19,17 @@ function testConnectionAdapter(): ConnectionAdapter {
 function testConnection(overrides: Partial<RegisteredConnection> = {}): RegisteredConnection {
   return {
     uid: 'crm-api',
-    type: 'rest',
+    apiVersion: API_VERSION,
+    kind: 'rest',
     name: 'CRM API',
     config: { baseUrl: 'https://api.example.com/crm', token: 'secret-token' },
     mcpPolicy: { mutate: true },
     ...overrides,
   }
+}
+
+function staticManifest(): DataSourceManifest<StaticBindingSpec> {
+  return { apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }
 }
 
 describe('createRegistry', () => {
@@ -31,47 +39,51 @@ describe('createRegistry', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'resourcekit.dev/v1alpha1',
+          apiVersion: API_VERSION,
           kind: 'TestPanel',
           specSchema: { type: 'object' },
         },
       ],
     })
 
-    expect(registry.getKind('resourcekit.dev/v1alpha1', 'TestPanel')).toBeDefined()
-    expect(registry.getKind('resourcekit.dev/v1alpha1', 'Missing')).toBeUndefined()
+    expect(registry.getKind(API_VERSION, 'TestPanel')).toBeDefined()
+    expect(registry.getKind(API_VERSION, 'Missing')).toBeUndefined()
     expect(registry.listKinds()).toHaveLength(1)
   })
 
-  it('registers data resolvers and notifies subscribers', () => {
+  it('registers data source manifests and notifies subscribers', () => {
     const registry = createRegistry()
     let notified = 0
     registry.subscribe(() => notified++)
 
-    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'resolvers', dataSourceManifests: [staticManifest()] })
 
-    expect(registry.getDataResolver('static')).toBe(staticResolver)
-    expect(registry.getDataResolver('rest')).toBeUndefined()
+    expect(registry.getDataSourceManifest(API_VERSION, 'static')?.resolve).toBe(staticResolver)
+    expect(registry.getDataSourceManifest(API_VERSION, 'rest')).toBeUndefined()
     expect(notified).toBe(1)
   })
 
-  it('registers a data source adapter without requiring or replacing its resolver', () => {
+  it('registers a data source manifest with optional queryKey/schema enrichment', () => {
     const registry = createRegistry()
-    const adapter = { source: 'static', resolve: staticResolver, queryKey: () => ['static'] }
+    const manifest: DataSourceManifest<StaticBindingSpec> = {
+      apiVersion: API_VERSION,
+      kind: 'static',
+      resolve: staticResolver,
+      queryKey: () => ['static'],
+      specSchema: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+    }
 
-    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver } })
-    registry.use({ name: 'adapters', dataSourceAdapters: { static: adapter } })
+    registry.use({ name: 'resolvers', dataSourceManifests: [manifest] })
 
-    expect(registry.getDataResolver('static')).toBe(staticResolver)
-    expect(registry.getDataSourceAdapter('static')).toBe(adapter)
-    expect(registry.getDataSourceAdapter('rest')).toBeUndefined()
-    expect(registry.listDataSourceAdapters()).toEqual([adapter])
+    expect(registry.getDataSourceManifest(API_VERSION, 'static')).toBe(manifest)
+    expect(registry.getDataSourceManifest(API_VERSION, 'rest')).toBeUndefined()
+    expect(registry.listDataSourceManifests()).toEqual([manifest])
   })
 
   it('resolves static bindings to their rows', async () => {
     const rows = [{ id: '1' }]
     await expect(
-      staticResolver({ source: 'static', rows }, { variables: {} }),
+      staticResolver({ apiVersion: API_VERSION, kind: 'static', spec: { rows } }, { variables: {} }),
     ).resolves.toBe(rows)
   })
 
@@ -81,7 +93,7 @@ describe('createRegistry', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'resourcekit.dev/v1alpha1',
+          apiVersion: API_VERSION,
           kind: 'Panel',
           specSchema: {
             type: 'object',
@@ -99,12 +111,12 @@ describe('createRegistry', () => {
           },
         },
         {
-          apiVersion: 'resourcekit.dev/v1alpha1',
+          apiVersion: API_VERSION,
           kind: 'Login',
           specSchema: { type: 'object' },
         },
       ],
-      dataResolvers: { static: staticResolver },
+      dataSourceManifests: [staticManifest()],
     })
 
     const scoped = registry.scope({
@@ -113,11 +125,11 @@ describe('createRegistry', () => {
       slots: { Panel: { include: ['main'] } },
     })
 
-    expect(scoped.getKind('resourcekit.dev/v1alpha1', 'Login')).toBeUndefined()
+    expect(scoped.getKind(API_VERSION, 'Login')).toBeUndefined()
     expect(scoped.listKinds().map((kind) => kind.kind)).toEqual(['Panel'])
-    expect(scoped.getDataResolver('static')).toBe(staticResolver)
+    expect(scoped.getDataSourceManifest(API_VERSION, 'static')?.resolve).toBe(staticResolver)
 
-    const scopedPanel = scoped.getKind('resourcekit.dev/v1alpha1', 'Panel')
+    const scopedPanel = scoped.getKind(API_VERSION, 'Panel')
     expect(scopedPanel?.slotPolicy?.slots).toEqual({ main: { min: 1 } })
     expect(scopedPanel?.specSchema).toEqual({
       type: 'object',
@@ -129,7 +141,7 @@ describe('createRegistry', () => {
       required: ['pageSize'],
     })
 
-    expect(registry.getKind('resourcekit.dev/v1alpha1', 'Panel')?.slotPolicy?.slots).toHaveProperty('aside')
+    expect(registry.getKind(API_VERSION, 'Panel')?.slotPolicy?.slots).toHaveProperty('aside')
   })
 
   it('excludes a hostAuthoredOnly kind from scope() even when kinds.include names it explicitly', () => {
@@ -138,13 +150,13 @@ describe('createRegistry', () => {
       name: 'test',
       kinds: [
         {
-          apiVersion: 'resourcekit.dev/v1alpha1',
+          apiVersion: API_VERSION,
           kind: 'JSONSchemaForm',
           specSchema: { type: 'object', properties: { jsonSchema: { type: 'object' } } },
           hostAuthoredOnly: true,
         },
         {
-          apiVersion: 'resourcekit.dev/v1alpha1',
+          apiVersion: API_VERSION,
           kind: 'Panel',
           specSchema: { type: 'object' },
         },
@@ -152,79 +164,81 @@ describe('createRegistry', () => {
     })
 
     // Renders normally when hand-authored (not gated by hostAuthoredOnly).
-    expect(registry.getKind('resourcekit.dev/v1alpha1', 'JSONSchemaForm')).toBeDefined()
+    expect(registry.getKind(API_VERSION, 'JSONSchemaForm')).toBeDefined()
 
     const scoped = registry.scope({ kinds: { include: ['JSONSchemaForm', 'Panel'] } })
-    expect(scoped.getKind('resourcekit.dev/v1alpha1', 'JSONSchemaForm')).toBeUndefined()
+    expect(scoped.getKind(API_VERSION, 'JSONSchemaForm')).toBeUndefined()
     expect(scoped.listKinds().map((kind) => kind.kind)).toEqual(['Panel'])
   })
 
-  it('excludes a dataResolvers source from a scope while the unscoped registry keeps seeing it', () => {
+  it('excludes a dataSourceManifests kind from a scope while the unscoped registry keeps seeing it', () => {
     const registry = createRegistry()
-    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver, rest: staticResolver } })
+    registry.use({
+      name: 'resolvers',
+      dataSourceManifests: [staticManifest(), { apiVersion: API_VERSION, kind: 'rest', resolve: staticResolver }],
+    })
 
-    const scoped = registry.scope({ dataResolvers: { exclude: ['static'] } })
+    const scoped = registry.scope({ dataSourceManifests: { exclude: ['static'] } })
 
-    expect(scoped.getDataResolver('static')).toBeUndefined()
-    expect(scoped.getDataResolver('rest')).toBe(staticResolver)
-    expect(scoped.listDataResolvers()).toEqual(['rest'])
-    expect(registry.getDataResolver('static')).toBe(staticResolver)
+    expect(scoped.getDataSourceManifest(API_VERSION, 'static')).toBeUndefined()
+    expect(scoped.getDataSourceManifest(API_VERSION, 'rest')?.resolve).toBe(staticResolver)
+    expect(scoped.listDataSourceManifests().map((m) => m.kind)).toEqual(['rest'])
+    expect(registry.getDataSourceManifest(API_VERSION, 'static')?.resolve).toBe(staticResolver)
   })
 
-  it('narrows dataResolvers to an include list', () => {
+  it('narrows dataSourceManifests to an include list', () => {
     const registry = createRegistry()
-    registry.use({ name: 'resolvers', dataResolvers: { static: staticResolver, rest: staticResolver, datasource: staticResolver } })
+    registry.use({
+      name: 'resolvers',
+      dataSourceManifests: [
+        staticManifest(),
+        { apiVersion: API_VERSION, kind: 'rest', resolve: staticResolver },
+        { apiVersion: API_VERSION, kind: 'datasource', resolve: staticResolver },
+      ],
+    })
 
-    const scoped = registry.scope({ dataResolvers: { include: ['rest'] } })
+    const scoped = registry.scope({ dataSourceManifests: { include: ['rest'] } })
 
-    expect(scoped.listDataResolvers()).toEqual(['rest'])
-    expect(scoped.getDataResolver('static')).toBeUndefined()
-    expect(scoped.getDataResolver('datasource')).toBeUndefined()
+    expect(scoped.listDataSourceManifests().map((m) => m.kind)).toEqual(['rest'])
+    expect(scoped.getDataSourceManifest(API_VERSION, 'static')).toBeUndefined()
+    expect(scoped.getDataSourceManifest(API_VERSION, 'datasource')).toBeUndefined()
   })
 
-  it('scopes dataSourceAdapters using the same dataResolvers allow-list, since an adapter is enrichment on the same source', () => {
+  it('excludes a mutationSourceManifests kind from a scope', () => {
     const registry = createRegistry()
-    const adapter = { source: 'datasource', resolve: staticResolver, queryKey: () => ['datasource'] }
-    registry.use({ name: 'resolvers', dataResolvers: { datasource: staticResolver } })
-    registry.use({ name: 'adapters', dataSourceAdapters: { datasource: adapter } })
+    const memoryResolve = async () => ({ id: '1' })
+    const restResolve = async () => ({ id: '2' })
+    registry.use({
+      name: 'mutations',
+      mutationSourceManifests: [
+        { apiVersion: API_VERSION, kind: 'memory', resolve: memoryResolve },
+        { apiVersion: API_VERSION, kind: 'rest', resolve: restResolve },
+      ],
+    })
 
-    const scoped = registry.scope({ dataResolvers: { exclude: ['datasource'] } })
+    const scoped = registry.scope({ mutationSourceManifests: { exclude: ['memory'] } })
 
-    expect(scoped.getDataResolver('datasource')).toBeUndefined()
-    expect(scoped.getDataSourceAdapter('datasource')).toBeUndefined()
-    expect(scoped.listDataSourceAdapters()).toEqual([])
-    expect(registry.getDataSourceAdapter('datasource')).toBe(adapter)
+    expect(scoped.getMutationSourceManifest(API_VERSION, 'memory')).toBeUndefined()
+    expect(scoped.getMutationSourceManifest(API_VERSION, 'rest')?.resolve).toBe(restResolve)
+    expect(scoped.listMutationSourceManifests().map((m) => m.kind)).toEqual(['rest'])
+    expect(registry.getMutationSourceManifest(API_VERSION, 'memory')?.resolve).toBe(memoryResolve)
   })
 
-  it('excludes a mutationResolvers target from a scope', () => {
+  it('excludes a connectionManifests kind from a scope', () => {
     const registry = createRegistry()
-    const memoryResolver = async () => ({ id: '1' })
-    const restResolver = async () => ({ id: '2' })
-    registry.use({ name: 'mutations', mutationResolvers: { memory: memoryResolver, rest: restResolver } })
+    const restManifest = testConnectionManifest()
+    registry.use({ name: 'manifests', connectionManifests: [restManifest] })
 
-    const scoped = registry.scope({ mutationResolvers: { exclude: ['memory'] } })
+    const scoped = registry.scope({ connectionManifests: { exclude: ['rest'] } })
 
-    expect(scoped.getMutationResolver('memory')).toBeUndefined()
-    expect(scoped.getMutationResolver('rest')).toBe(restResolver)
-    expect(scoped.listMutationResolvers()).toEqual(['rest'])
-    expect(registry.getMutationResolver('memory')).toBe(memoryResolver)
-  })
-
-  it('excludes a connectionAdapters type from a scope', () => {
-    const registry = createRegistry()
-    const restAdapter = testConnectionAdapter()
-    registry.use({ name: 'adapters', connectionAdapters: { rest: restAdapter } })
-
-    const scoped = registry.scope({ connectionAdapters: { exclude: ['rest'] } })
-
-    expect(scoped.getConnectionAdapter('rest')).toBeUndefined()
-    expect(scoped.listConnectionAdapters()).toEqual([])
-    expect(registry.getConnectionAdapter('rest')).toBe(restAdapter)
+    expect(scoped.getConnectionManifest(API_VERSION, 'rest')).toBeUndefined()
+    expect(scoped.listConnectionManifests()).toEqual([])
+    expect(registry.getConnectionManifest(API_VERSION, 'rest')).toBe(restManifest)
   })
 
   it('registers, looks up, and unregisters connections dynamically without recreating the registry', async () => {
     const registry = createRegistry()
-    registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
+    registry.use({ name: 'rest-connections', connectionManifests: [testConnectionManifest()] })
 
     let notified = 0
     registry.subscribe(() => notified++)
@@ -241,7 +255,7 @@ describe('createRegistry', () => {
 
   it('scopes connections to an allowlist and strips config while computing capabilities', async () => {
     const registry = createRegistry()
-    registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
+    registry.use({ name: 'rest-connections', connectionManifests: [testConnectionManifest()] })
     registry.registerConnection(testConnection())
     registry.registerConnection(testConnection({ uid: 'metrics-main', name: 'Metrics' }))
 
@@ -253,11 +267,12 @@ describe('createRegistry', () => {
     expect(summaries).toHaveLength(1)
     expect(summaries[0]).toEqual({
       uid: 'crm-api',
-      type: 'rest',
+      apiVersion: API_VERSION,
+      kind: 'rest',
       name: 'CRM API',
       description: undefined,
       requestSchema: { type: 'object' },
-      // adapter has test/preview, connection.mcpPolicy allows mutate, but scope caps preview=false and mutate=false
+      // manifest has test/preview, connection.mcpPolicy allows mutate, but scope caps preview=false and mutate=false
       capabilities: { test: true, inspect: false, preview: false, mutate: false },
     })
     expect(summaries[0]).not.toHaveProperty('config')
@@ -267,11 +282,11 @@ describe('createRegistry', () => {
     expect(await scoped.getConnection('metrics-main')).toBeUndefined()
   })
 
-  it('exposes an adapter resultSchema on the connection summary when the adapter declares one', async () => {
+  it('exposes a manifest resultSchema on the connection summary when the manifest declares one', async () => {
     const registry = createRegistry()
     registry.use({
       name: 'rest-connections',
-      connectionAdapters: { rest: { ...testConnectionAdapter(), resultSchema: { type: 'object', properties: { id: { type: 'string' } } } } },
+      connectionManifests: [{ ...testConnectionManifest(), resultSchema: { type: 'object', properties: { id: { type: 'string' } } } }],
     })
     registry.registerConnection(testConnection())
 
@@ -282,7 +297,7 @@ describe('createRegistry', () => {
 
   it('falls back to a ConnectionProvider when a uid is not statically registered, merging list results', async () => {
     const registry = createRegistry()
-    registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
+    registry.use({ name: 'rest-connections', connectionManifests: [testConnectionManifest()] })
     registry.registerConnection(testConnection())
 
     const provided = testConnection({ uid: 'metrics-main', name: 'Metrics (provided)' })
@@ -307,7 +322,7 @@ describe('createRegistry', () => {
 
   it('discards a provider result whose own uid does not match the uid it was looked up by', async () => {
     const registry = createRegistry()
-    registry.use({ name: 'rest-connections', connectionAdapters: { rest: testConnectionAdapter() } })
+    registry.use({ name: 'rest-connections', connectionManifests: [testConnectionManifest()] })
 
     const secret = testConnection({ uid: 'secret', name: 'Secret' })
     registry.setConnectionProvider({

@@ -10,6 +10,8 @@ import { createMemoryRuntimeStore, runtimeKeys } from '../../runtime/store'
 import type { Resource } from '../../core/types'
 import { createDesignKitPlugin } from './plugin'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 afterEach(cleanup)
 
 describe('DesignKit forms', () => {
@@ -17,7 +19,7 @@ describe('DesignKit forms', () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }] })
 
     // Two fields sharing `name: 'roles'` must still have distinct React keys
     // while React Hook Form groups their checked values under one field.
@@ -40,7 +42,7 @@ describe('DesignKit forms', () => {
               },
             ],
             submitLabel: 'Save roles',
-            submit: { mutation: { target: 'memory' } },
+            submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
           },
         },
       }),
@@ -59,7 +61,7 @@ describe('DesignKit forms', () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }] })
 
     const { container } = render(
       createElement(ResourceRenderer, {
@@ -69,7 +71,7 @@ describe('DesignKit forms', () => {
           kind: 'FormView',
           spec: {
             sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command', required: true }] }],
-            submit: { mutation: { target: 'memory' } },
+            submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
           },
         },
       }),
@@ -85,7 +87,7 @@ describe('DesignKit forms', () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }] })
     const runtimeStore = createMemoryRuntimeStore()
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
@@ -103,7 +105,7 @@ describe('DesignKit forms', () => {
       spec: {
         sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
         draftPolicy: { syncDelayMs: 0 },
-        submit: { action: 'process.update', mutation: { target: 'memory' } },
+        submit: { action: 'process.update', mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
       },
     }
 
@@ -130,7 +132,7 @@ describe('DesignKit forms', () => {
   it('preserves a dirty FormView draft when an unrelated external refresh arrives', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async () => ({}) }] })
     const runtimeStore = createMemoryRuntimeStore()
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
@@ -140,7 +142,7 @@ describe('DesignKit forms', () => {
       spec: {
         sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
         draftPolicy: { syncDelayMs: 1000 },
-        submit: { mutation: { target: 'memory' } },
+        submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
       },
     }
 
@@ -163,7 +165,7 @@ describe('DesignKit forms', () => {
   it('resets a dirty FormView when the draft identity changes', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async () => ({}) }] })
     const runtimeStore = createMemoryRuntimeStore()
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
@@ -172,7 +174,7 @@ describe('DesignKit forms', () => {
       bindings: { draft: { $state: 'draft' } },
       spec: {
         sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-        submit: { mutation: { target: 'memory' } },
+        submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
       },
     }
 
@@ -193,7 +195,7 @@ describe('DesignKit forms', () => {
   it('keeps a malformed controlled draft error local to FormView', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async () => ({}) }] })
     const runtimeStore = createMemoryRuntimeStore()
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
@@ -202,7 +204,7 @@ describe('DesignKit forms', () => {
       bindings: { draft: { $state: 'draft' } },
       spec: {
         sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-        submit: { mutation: { target: 'memory' } },
+        submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
       },
     }
 
@@ -215,7 +217,7 @@ describe('DesignKit forms', () => {
   it('treats a null controlled draft as hydration readiness and accepts a later envelope', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: async () => ({}) } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async () => ({}) }] })
     const runtimeStore = createMemoryRuntimeStore()
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
@@ -224,7 +226,7 @@ describe('DesignKit forms', () => {
       bindings: { draft: { $state: 'draft' } },
       spec: {
         sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-        submit: { mutation: { target: 'memory' } },
+        submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
       },
     }
 
@@ -252,7 +254,7 @@ describe('DesignKit forms', () => {
     )
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }] })
 
     render(
       createElement(ResourceRenderer, {
@@ -262,7 +264,7 @@ describe('DesignKit forms', () => {
           kind: 'FormView',
           spec: {
             sections: [{ id: 'main', fields: [{ name: 'command', label: 'Command' }] }],
-            submit: { action: 'process.update', mutation: { target: 'memory' } },
+            submit: { action: 'process.update', mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
           },
         },
       }),
@@ -287,7 +289,7 @@ describe('DesignKit form submit placement', () => {
         resource: {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'ResourceForm',
-          spec: { id: 'user-form', submit: { mutation: { target: 'memory' } } },
+          spec: { id: 'user-form', submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } } },
         },
       }),
     )
@@ -309,7 +311,7 @@ describe('DesignKit form submit placement', () => {
             id: 'user-form',
             hideSubmitButton: true,
             sections: [{ id: 's', fields: [{ name: 'username' }] }],
-            submit: { mutation: { target: 'memory' } },
+            submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } },
           },
         },
       }),
@@ -324,7 +326,7 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation }, dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }], dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     render(
       createElement(ResourceRenderer, {
@@ -333,14 +335,14 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
           spec: {},
-          record: { source: 'static', rows: [{ notes: 'line one\nline two' }] },
+          record: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ notes: 'line one\nline two' }] } },
           slots: [
             {
               items: [
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ResourceForm',
-                  spec: { submit: { mutation: { target: 'memory' } } },
+                  spec: { submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } } },
                   slots: [
                     {
                       items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Textarea', spec: { name: 'notes', fieldRef: 'notes' } }],
@@ -368,7 +370,7 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation }, dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }], dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     render(
       createElement(ResourceRenderer, {
@@ -377,14 +379,14 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
           spec: {},
-          record: { source: 'static', rows: [{ active: true }] },
+          record: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ active: true }] } },
           slots: [
             {
               items: [
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ResourceForm',
-                  spec: { submit: { mutation: { target: 'memory' } } },
+                  spec: { submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } } },
                   slots: [
                     {
                       items: [
@@ -416,7 +418,7 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
   it('Checkbox prefills checked state via array membership for a checkbox-group field', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'runtime', dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     render(
       createElement(ResourceRenderer, {
@@ -425,7 +427,7 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
           spec: {},
-          record: { source: 'static', rows: [{ roles: ['admin', 'viewer'] }] },
+          record: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ roles: ['admin', 'viewer'] }] } },
           slots: [
             {
               items: [
@@ -466,7 +468,7 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
     const mutation = vi.fn(async (_binding, payload) => payload)
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())
-    registry.use({ name: 'runtime', mutationResolvers: { memory: mutation }, dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'runtime', mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }], dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     render(
       createElement(ResourceRenderer, {
@@ -475,14 +477,14 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'RecordScope',
           spec: {},
-          record: { source: 'static', rows: [{ concurrencyPolicy: 'Allow' }] },
+          record: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ concurrencyPolicy: 'Allow' }] } },
           slots: [
             {
               items: [
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'ResourceForm',
-                  spec: { submit: { mutation: { target: 'memory' } } },
+                  spec: { submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } } },
                   slots: [
                     {
                       items: [

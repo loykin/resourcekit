@@ -27,7 +27,7 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
       requiredKinds: ['ListDetail', 'PageTopBar', 'SelectableList', 'DataBody', 'DetailView', 'ChartView', 'FilterControl'],
       requiredVariables: ['customerId', 'status'],
       requiredEvents: ['select', 'change'],
-      requiredBindings: [{ source: 'datasource', datasourceUid: 'crm' }],
+      requiredBindings: [{ kind: 'datasource', datasourceUid: 'crm' }],
       requiredText: ['Customers', 'Customer detail', 'Status'],
       forbiddenKindPrefixes: ['DesignKit', 'GridKit', 'ChartKit', 'BaseKit'],
     },
@@ -52,7 +52,7 @@ export const scenarioDefinitions: Array<ScenarioDefinition<unknown>> = [
     expectedResource: metricsDashboardExpected as Resource,
     rubric: {
       requiredKinds: ['DataBody', 'PageTopBar', 'DataBodySummary', 'DataBodyTab', 'TableView', 'ChartView'],
-      requiredBindings: [{ source: 'datasource', datasourceUid: 'metrics' }],
+      requiredBindings: [{ kind: 'datasource', datasourceUid: 'metrics' }],
       requiredText: ['Service metrics', 'Metrics', 'Overview'],
       forbiddenKindPrefixes: ['DesignKit', 'GridKit', 'ChartKit', 'BaseKit'],
     },

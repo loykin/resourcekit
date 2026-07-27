@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRestConnectionAdapter, restConnectionAdapter } from './connectionAdapters'
+import { createRestConnectionAdapter, restConnectionAdapter } from './connectionManifests'
 import type { RegisteredConnection } from '../core/types'
-import type { RestConnectionConfig, RestConnectionRequest } from './connectionAdapters'
+import type { RestConnectionConfig, RestConnectionRequest } from './connectionManifests'
 
 function connection(overrides: Partial<RegisteredConnection<RestConnectionConfig>> = {}): RegisteredConnection<RestConnectionConfig> {
   return {
     uid: 'crm-api',
-    type: 'rest',
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'rest',
     name: 'CRM API',
     config: { baseUrl: 'https://api.example.com/crm/' },
     policy: { methods: ['GET', 'PATCH'], pathPrefixes: ['/customers'] },

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { DataBinding, DataSourceAdapter } from '../core/types'
+import type { DataBinding, DataSourceManifest } from '../core/types'
 import {
   createCoordinatorResolve,
   createDirectQueryCoordinator,
@@ -8,6 +8,12 @@ import {
   type QueryRequest,
   type QuerySnapshot,
 } from './coordinator'
+
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
+function binding(kind: string, spec: unknown = {}): DataBinding {
+  return { apiVersion: API_VERSION, kind, spec } as DataBinding
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -143,8 +149,8 @@ describe('createDirectQueryCoordinator', () => {
 })
 
 describe('createCoordinatorResolve', () => {
-  function fakeRegistry(adapter?: DataSourceAdapter) {
-    return { getDataSourceAdapter: () => adapter }
+  function fakeRegistry(manifest?: DataSourceManifest) {
+    return { getDataSourceManifest: () => manifest }
   }
 
   function stubCoordinator(open: QueryCoordinator['open']): QueryCoordinator {
@@ -156,10 +162,10 @@ describe('createCoordinatorResolve', () => {
     const resolveFn = vi.fn(async () => [{ id: '1' }])
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: resolveFn })
 
-    const result = await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'processes', variables: {}, reason: 'initial' })
+    const result = await bridge.resolve(binding('processes'), { nodeId: 'processes', variables: {}, reason: 'initial' })
 
     expect(result).toEqual([{ id: '1' }])
-    expect(resolveFn).toHaveBeenCalledWith({ source: 'processes' }, expect.objectContaining({ nodeId: 'processes' }))
+    expect(resolveFn).toHaveBeenCalledWith(binding('processes'), expect.objectContaining({ nodeId: 'processes' }))
   })
 
   it('supports handles whose subscribe callback fires synchronously', async () => {
@@ -178,10 +184,7 @@ describe('createCoordinatorResolve', () => {
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => undefined })
 
     await expect(
-      bridge.resolve(
-        { source: 'sync' } as DataBinding,
-        { nodeId: 'sync', variables: {}, reason: 'initial' },
-      ),
+      bridge.resolve(binding('sync'), { nodeId: 'sync', variables: {}, reason: 'initial' }),
     ).resolves.toBe('synchronous')
     expect(unsubscribeCalls).toBe(1)
   })
@@ -196,28 +199,29 @@ describe('createCoordinatorResolve', () => {
       },
     })
 
-    await expect(bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'processes', variables: {}, reason: 'initial' })).rejects.toThrow('backend down')
+    await expect(bridge.resolve(binding('processes'), { nodeId: 'processes', variables: {}, reason: 'initial' })).rejects.toThrow('backend down')
   })
 
-  it("uses the registered DataSourceAdapter's queryKey when one exists for the binding source", async () => {
+  it("uses the registered DataSourceManifest's queryKey when one exists for the binding kind", async () => {
     const opened: QueryRequest[] = []
     const coordinator = stubCoordinator((request) => {
       opened.push(request)
       return { getSnapshot: () => ({ status: 'ready', value: 'v' }), subscribe: () => () => {}, refetch: async () => {}, dispose: () => {} }
     })
-    const adapter: DataSourceAdapter = {
-      source: 'processes',
+    const manifest: DataSourceManifest = {
+      apiVersion: API_VERSION,
+      kind: 'processes',
       resolve: async () => [],
-      queryKey: (binding) => ['processes', (binding as DataBinding & { status?: string }).status],
+      queryKey: (b) => ['processes', (b.spec as { status?: string }).status],
     }
-    const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(adapter), resolve: async () => 'v' })
+    const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(manifest), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', status: 'running' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes', { status: 'running' }), { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(opened[0]?.key).toEqual(['processes', 'running'])
   })
 
-  it('falls back to [nodeId, stableStringify(binding)] when no adapter is registered', async () => {
+  it('falls back to [nodeId, stableStringify(binding)] when no manifest is registered', async () => {
     const opened: QueryRequest[] = []
     const coordinator = stubCoordinator((request) => {
       opened.push(request)
@@ -225,9 +229,9 @@ describe('createCoordinatorResolve', () => {
     })
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', a: 1, b: 2 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes', { a: 1, b: 2 }), { nodeId: 'n', variables: {}, reason: 'initial' })
 
-    expect(opened[0]?.key).toEqual(['n', '{"a":1,"b":2,"source":"processes"}'])
+    expect(opened[0]?.key).toEqual(['n', `{"apiVersion":"${API_VERSION}","kind":"processes","spec":{"a":1,"b":2}}`])
   })
 
   it('reuses the same handle (no reopen) across repeated resolve() calls with the same effective key, stable across key order', async () => {
@@ -238,8 +242,8 @@ describe('createCoordinatorResolve', () => {
     })
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', a: 1, b: 2 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {}, reason: 'initial' })
-    await bridge.resolve({ source: 'processes', b: 2, a: 1 } as DataBinding & { a: number; b: number }, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes', { a: 1, b: 2 }), { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes', { b: 2, a: 1 }), { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(opened).toHaveLength(1) // second call reused the cached handle instead of opening a new one
   })
@@ -252,11 +256,11 @@ describe('createCoordinatorResolve', () => {
       registry: fakeRegistry(),
       resolve: resolveFn,
     })
-    const binding = { source: 'processes' } as DataBinding
+    const b = binding('processes')
 
-    await expect(bridge.resolve(binding, { nodeId: 'n', variables: {}, reason: 'initial' })).resolves.toBe('first')
+    await expect(bridge.resolve(b, { nodeId: 'n', variables: {}, reason: 'initial' })).resolves.toBe('first')
     value = 'second'
-    await expect(bridge.resolve(binding, { nodeId: 'n', variables: {}, reason: 'refetch' })).resolves.toBe('second')
+    await expect(bridge.resolve(b, { nodeId: 'n', variables: {}, reason: 'refetch' })).resolves.toBe('second')
 
     expect(resolveFn).toHaveBeenCalledTimes(2)
   })
@@ -276,8 +280,8 @@ describe('createCoordinatorResolve', () => {
     })
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'processes', filter: 'a' } as DataBinding & { filter: string }, { nodeId: 'n', variables: {}, reason: 'initial' })
-    await bridge.resolve({ source: 'processes', filter: 'b' } as DataBinding & { filter: string }, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes', { filter: 'a' }), { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes', { filter: 'b' }), { nodeId: 'n', variables: {}, reason: 'initial' })
 
     expect(openCount).toBe(2)
     expect(disposed).toHaveLength(1)
@@ -297,7 +301,7 @@ describe('createCoordinatorResolve', () => {
     })
 
     await bridge.resolve(
-      { source: 'processes' } as DataBinding,
+      binding('processes'),
       { nodeId: 'n', variables: {}, reason: 'initial', policy: { refresh: { kind: 'interval', ms: 100 } } },
     )
 
@@ -317,7 +321,7 @@ describe('createCoordinatorResolve', () => {
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
     const controller = new AbortController()
 
-    const promise = bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial', signal: controller.signal })
+    const promise = bridge.resolve(binding('processes'), { nodeId: 'n', variables: {}, reason: 'initial', signal: controller.signal })
     controller.abort(new Error('cancelled'))
 
     await expect(promise).rejects.toThrow('cancelled')
@@ -343,7 +347,7 @@ describe('createCoordinatorResolve', () => {
     const onUpdate = vi.fn()
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v', onUpdate })
 
-    await bridge.resolve({ source: 'processes' } as DataBinding, { nodeId: 'n', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('processes'), { nodeId: 'n', variables: {}, reason: 'initial' })
     expect(onUpdate).not.toHaveBeenCalled() // the initial value went through the resolve() return value, not onUpdate
 
     snapshot = { status: 'ready', value: 'second' } // simulate a background poll producing a new value
@@ -377,10 +381,7 @@ describe('createCoordinatorResolve', () => {
       resolve: async () => 'unchanged',
       onUpdate,
     })
-    await bridge.resolve(
-      { source: 'processes' } as DataBinding,
-      { nodeId: 'n', variables: {}, reason: 'initial' },
-    )
+    await bridge.resolve(binding('processes'), { nodeId: 'n', variables: {}, reason: 'initial' })
 
     await bridge.invalidate(['n'])
 
@@ -398,8 +399,8 @@ describe('createCoordinatorResolve', () => {
     }))
     const bridge = createCoordinatorResolve({ coordinator, registry: fakeRegistry(), resolve: async () => 'v' })
 
-    await bridge.resolve({ source: 'a' } as DataBinding, { nodeId: 'a', variables: {}, reason: 'initial' })
-    await bridge.resolve({ source: 'b' } as DataBinding, { nodeId: 'b', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('a'), { nodeId: 'a', variables: {}, reason: 'initial' })
+    await bridge.resolve(binding('b'), { nodeId: 'b', variables: {}, reason: 'initial' })
     bridge.dispose()
 
     expect(disposedNodes.sort()).toEqual(['a', 'b'])

@@ -8,13 +8,15 @@ import { ResourceRenderer } from '../../react'
 import type { KindRenderFn } from '../../react'
 import { createResourceViewPlugin } from './plugin'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 afterEach(cleanup)
 
 describe('DetailView', () => {
   it('renders a card summary with mapped title, subtitle, and status fields', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createResourceViewPlugin())
-    registry.use({ name: 'static-data', dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'static-data', dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     const { container } = render(
       createElement(ResourceRenderer, {
@@ -24,8 +26,9 @@ describe('DetailView', () => {
           kind: 'DetailView',
           spec: {
             data: {
-              source: 'static',
-              rows: [{ name: 'Sarah Kim', email: 'sarah@acme.com', role: 'Admin', status: 'active' }],
+              apiVersion: API_VERSION,
+              kind: 'static',
+              spec: { rows: [{ name: 'Sarah Kim', email: 'sarah@acme.com', role: 'Admin', status: 'active' }] },
             },
             layout: 'cards',
             titleField: 'name',

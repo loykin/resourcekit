@@ -16,8 +16,8 @@ export function composeResourceKitPlugins(name: string, plugins: Array<ResourceK
   return {
     name,
     kinds: plugins.flatMap((plugin) => plugin.kinds ?? []),
-    dataResolvers: Object.assign({}, ...plugins.map((plugin) => plugin.dataResolvers ?? {})),
-    mutationResolvers: Object.assign({}, ...plugins.map((plugin) => plugin.mutationResolvers ?? {})),
+    dataSourceManifests: plugins.flatMap((plugin) => plugin.dataSourceManifests ?? []),
+    mutationSourceManifests: plugins.flatMap((plugin) => plugin.mutationSourceManifests ?? []),
   }
 }
 

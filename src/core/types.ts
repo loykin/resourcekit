@@ -177,56 +177,53 @@ export type VariableValue = string | string[] | undefined
 
 // ─── Data bindings (read path) ────────────────────────────────────────────────
 
-export interface DatasourceBinding<TQuery = unknown> {
-  source: 'datasource'
+export interface DatasourceBindingSpec<TQuery = unknown> {
   datasourceUid: string
   datasourceType?: string
   query?: TQuery
   options?: Record<string, unknown>
   cacheTtlMs?: number
   staleWhileRevalidate?: boolean
-  /** Dot-path applied by the runtime after the resolver returns rows. */
-  valuePath?: string
 }
 
-export interface RestBinding {
-  source: 'rest'
+export interface RestBindingSpec {
   url: string
   method?: 'GET' | 'POST'
   body?: unknown
   headers?: Record<string, string>
   /** JSON path to the rows array in the response, e.g. "data.items". */
   rowsPath?: string
-  /** Dot-path applied by the runtime after the resolver returns rows. */
-  valuePath?: string
 }
 
-export interface StaticBinding {
-  source: 'static'
+export interface StaticBindingSpec {
   rows: Record<string, unknown>[]
-  /** Dot-path applied by the runtime after the resolver returns rows. */
-  valuePath?: string
 }
 
 /**
- * References a registered connection (see `ConnectionAdapter`/`RegisteredConnection`
+ * References a registered connection (see `ConnectionManifest`/`RegisteredConnection`
  * below) by UID instead of embedding a raw URL/DSN. `request` is opaque here —
- * its shape is defined by the connection's adapter (`ConnectionAdapter.requestSchema`).
+ * its shape is defined by the connection's manifest (`ConnectionManifest.requestSchema`).
  */
-export interface ConnectionBinding {
-  source: 'connection'
+export interface ConnectionBindingSpec {
   connection: string
   request: unknown
-  /** Dot-path applied by the runtime after the resolver returns rows. */
-  valuePath?: string
 }
 
+/**
+ * Envelope shape mirrors `Resource`/`KindManifest` — `apiVersion`+`kind`
+ * self-describe which registered `DataSourceManifest` resolves this
+ * binding, `spec` is that manifest's own vocabulary. `valuePath` (a
+ * dot-path applied by the runtime after the resolver returns rows) lives on
+ * the envelope, not inside any variant's `spec` — it's a runtime-owned
+ * concern applied uniformly regardless of source, same rule as
+ * `variables`/`events`/`record` on `Resource`.
+ */
 export type DataBinding =
-  | DatasourceBinding
-  | RestBinding
-  | StaticBinding
-  | ConnectionBinding
-  | { source: string; [key: string]: unknown }
+  | { apiVersion: string; kind: 'datasource'; spec: DatasourceBindingSpec; valuePath?: string }
+  | { apiVersion: string; kind: 'rest'; spec: RestBindingSpec; valuePath?: string }
+  | { apiVersion: string; kind: 'static'; spec: StaticBindingSpec; valuePath?: string }
+  | { apiVersion: string; kind: 'connection'; spec: ConnectionBindingSpec; valuePath?: string }
+  | { apiVersion: string; kind: string; spec: unknown; valuePath?: string }
 
 export interface TimeRange {
   from: string
@@ -241,48 +238,82 @@ export interface DataResolveContext {
   meta?: Record<string, unknown>
 }
 
-/** v1 output contract is plain rows. Richer shapes (frames) are an additive later union. */
-export type DataResolver = (
-  binding: DataBinding,
+/**
+ * v1 output contract is plain rows. Richer shapes (frames) are an additive
+ * later union. `TSpec` narrows `binding.spec` for a resolver written against
+ * one specific `DataBinding` kind (e.g. `DataResolver<RestBindingSpec>`);
+ * left at its default `unknown`, `DataBinding & { spec: unknown }` collapses
+ * back to plain `DataBinding` — the same signature used for a resolver
+ * dispatched generically (by the registry, a coordinator) without knowing
+ * any one binding kind's spec shape ahead of time.
+ */
+export type DataResolver<TSpec = unknown> = (
+  binding: DataBinding & { spec: TSpec },
   ctx: DataResolveContext,
 ) => Promise<Record<string, unknown>[]>
 
 /**
- * Optional enrichment over a plain `DataResolver` registration
- * (docs/dataflow-and-server-state-direction.md P0 item 1). `queryKey`
+ * Self-describing registration for a `DataBinding` `kind` — mirrors
+ * `KindManifest` (`apiVersion`+`kind` identify it, `specSchema` describes
+ * its `spec`). Replaces the former separate `DataResolver`+
+ * `DataSourceAdapter` split: every data source needs `resolve`;
+ * `specSchema`/`resultSchema`/`queryKey` are optional enrichment
+ * (docs/dataflow-and-server-state-direction.md P0 item 1) — `queryKey`
  * gives a `QueryCoordinator` a stable cache identity for a binding without
- * the coordinator having to understand adapter-specific request shapes.
- * Registering an adapter for a `source` does not replace or require also
- * registering a plain resolver in `dataResolvers` — coordinators fall back
- * to a default key derivation when no adapter is registered for a source.
+ * the coordinator having to understand source-specific request shapes,
+ * falling back to a default key derivation when omitted. Unlike
+ * `KindManifest<TSpec>`'s phantom `__spec` (erased by React's contextual
+ * typing before it can narrow anything — see `render`), `TSpec` here is
+ * live: it flows straight into `resolve`/`queryKey`'s `binding` parameter,
+ * so a resolver written against one specific manifest (not placed inline in
+ * a `ResourceKitPlugin.dataSourceManifests` array) reads `binding.spec`
+ * pre-narrowed, no manual cast needed.
  */
-export interface DataSourceAdapter {
-  source: string
+export interface DataSourceManifest<TSpec = unknown> {
+  apiVersion: string
+  kind: string
   description?: string
-  bindingSchema?: JsonSchema
+  specSchema?: JsonSchema
   /** Shape of one resolved row — lets a scoped schema/prompt statically check `rowsPath`/`valuePath` dot-paths instead of the AI guessing them blind (generation-quality.md hallucination surface (a)). */
   resultSchema?: JsonSchema
-  resolve: DataResolver
-  queryKey(binding: DataBinding, ctx: DataResolveContext): readonly unknown[]
+  resolve: DataResolver<TSpec>
+  queryKey?(binding: DataBinding & { spec: TSpec }, ctx: DataResolveContext): readonly unknown[]
 }
 
 // ─── Mutation bindings (write path) ──────────────────────────────────────────
 
-export type MutationBinding =
-  | {
-      target: 'rest'
-      url: string
-      method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-      headers?: Record<string, string>
-    }
-  | { target: 'datasource'; datasourceUid: string; mutation?: unknown }
-  | { target: string; [key: string]: unknown }
+export interface RestMutationSpec {
+  url: string
+  method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  headers?: Record<string, string>
+}
 
-export type MutationResolver = (
-  binding: MutationBinding,
+export interface DatasourceMutationSpec {
+  datasourceUid: string
+  mutation?: unknown
+}
+
+/** Envelope shape mirrors `DataBinding` — see its doc comment. */
+export type MutationBinding =
+  | { apiVersion: string; kind: 'rest'; spec: RestMutationSpec }
+  | { apiVersion: string; kind: 'datasource'; spec: DatasourceMutationSpec }
+  | { apiVersion: string; kind: string; spec: unknown }
+
+/** See `DataResolver<TSpec>` — same live-narrowing rationale, applied to `MutationBinding`. */
+export type MutationResolver<TSpec = unknown> = (
+  binding: MutationBinding & { spec: TSpec },
   payload: unknown,
   ctx: DataResolveContext,
 ) => Promise<unknown>
+
+/** Self-describing registration for a `MutationBinding` `kind` — mirrors `DataSourceManifest`. */
+export interface MutationSourceManifest<TSpec = unknown> {
+  apiVersion: string
+  kind: string
+  description?: string
+  specSchema?: JsonSchema
+  resolve: MutationResolver<TSpec>
+}
 
 /**
  * Effect applied after a successful mutation.
@@ -387,10 +418,16 @@ export interface ConnectionMcpPolicy {
   maxResponseBytes?: number
 }
 
-/** A registered connection instance, e.g. `crm-api`. `config` carries adapter-specific secrets/URLs and is never sent to MCP — see `ConnectionSummary`. */
+/**
+ * A registered connection instance, e.g. `crm-api` — envelope mirrors
+ * `Resource`/`KindManifest` (`apiVersion`+`kind` identify the registered
+ * `ConnectionManifest` this instance is of). `config` carries
+ * manifest-specific secrets/URLs and is never sent to MCP — see `ConnectionSummary`.
+ */
 export interface RegisteredConnection<TConfig = unknown> {
   uid: string
-  type: string
+  apiVersion: string
+  kind: string
   name: string
   description?: string
   config: TConfig
@@ -447,15 +484,19 @@ export interface DataPreview {
 }
 
 /**
- * A connection *type's* common request vocabulary and execution (rest,
- * datasourcekit, graphql, ...). `resolve` is the render-time path; MCP-facing
- * `test`/`inspect`/`validate`/`preview` are optional so adapters that don't
- * support introspection can omit them (see `ConnectionSummary.capabilities`).
+ * Self-describing registration for a connection *kind's* common request
+ * vocabulary and execution (rest, datasourcekit, graphql, ...) — mirrors
+ * `KindManifest`/`DataSourceManifest` (`apiVersion`+`kind` identify it,
+ * `requestSchema` describes the request vocabulary). `resolve` is the
+ * render-time path; MCP-facing `test`/`inspect`/`validate`/`preview` are
+ * optional so manifests that don't support introspection can omit them
+ * (see `ConnectionSummary.capabilities`).
  */
-export interface ConnectionAdapter<TConfig = unknown, TRequest = unknown> {
-  type: string
+export interface ConnectionManifest<TConfig = unknown, TRequest = unknown> {
+  apiVersion: string
+  kind: string
   requestSchema: JsonSchema
-  /** Shape of one resolved row, when known statically — see `DataSourceAdapter.resultSchema`. Adapters whose result shape depends on the request (most connections) omit this; `preview`'s per-call schema is the fallback. */
+  /** Shape of one resolved row, when known statically — see `DataSourceManifest.resultSchema`. Manifests whose result shape depends on the request (most connections) omit this; `preview`'s per-call schema is the fallback. */
   resultSchema?: JsonSchema
 
   test?(connection: RegisteredConnection<TConfig>, context: ConnectionContext): Promise<ConnectionTestResult>
@@ -476,12 +517,13 @@ export interface ConnectionAdapter<TConfig = unknown, TRequest = unknown> {
 /**
  * The MCP/AI-facing view of a registered connection — `config` (base URL, DSN,
  * credentials) is deliberately absent (test.md §5.3). `capabilities` is the
- * effective intersection of adapter capability ∩ connection `mcpPolicy` ∩
+ * effective intersection of manifest capability ∩ connection `mcpPolicy` ∩
  * scope capabilities (test.md §6), computed by `ScopedRegistry.listConnections()`.
  */
 export interface ConnectionSummary {
   uid: string
-  type: string
+  apiVersion: string
+  kind: string
   name: string
   description?: string
   requestSchema: JsonSchema
@@ -581,12 +623,28 @@ export interface ResourceKitPlugin<TRender = unknown> {
   name: string
   kinds?: KindManifest<unknown, TRender>[]
   patternExamples?: PatternExample[]
-  dataResolvers?: Record<string, DataResolver>
-  /** Optional queryKey/schema enrichment for a `dataResolvers` source, see `DataSourceAdapter`. */
-  dataSourceAdapters?: Record<string, DataSourceAdapter>
-  mutationResolvers?: Record<string, MutationResolver>
-  /** Connection *type* adapters (rest, datasourcekit, ...) — not registered connection instances, see `ResourceRegistry.registerConnection`. */
-  connectionAdapters?: Record<string, ConnectionAdapter>
+  /**
+   * Self-describing `DataBinding` kinds (was the separate `dataResolvers`/
+   * `dataSourceAdapters` records — merged since both were keyed by the same
+   * source name). `DataSourceManifest<any>`, not `<unknown>`: this array is
+   * deliberately heterogeneous (each manifest may be authored against its
+   * own concrete `TSpec` standalone, then dropped in here) — `any` opts out
+   * of variance checking for the array *position* while each manifest was
+   * already checked at its own declaration site. `resolve`'s `binding`
+   * parameter is contravariant, so this can't be `unknown` either — a
+   * `DataResolver<StaticBindingSpec>` genuinely isn't assignable where a
+   * `DataResolver<unknown>` (accepts any `DataBinding` kind) is expected,
+   * and that rejection is correct: nothing but the registry's own
+   * `apiVersion`+`kind` dispatch (invisible to the type system here)
+   * guarantees `resolve` is only ever called with a matching-kind binding.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  dataSourceManifests?: DataSourceManifest<any>[]
+  /** Self-describing `MutationBinding` kinds (was `mutationResolvers`) — same heterogeneous-array rationale as `dataSourceManifests`. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mutationSourceManifests?: MutationSourceManifest<any>[]
+  /** Self-describing connection kinds (rest, datasourcekit, ...) — not registered connection instances, see `ResourceRegistry.registerConnection`. */
+  connectionManifests?: ConnectionManifest[]
 }
 
 // ─── Scoped capabilities ──────────────────────────────────────────────────────
@@ -597,18 +655,18 @@ export interface ScopeOptions {
     include?: string[]
     exclude?: string[]
   }
-  /** Restricts which registered `dataResolvers`/`dataSourceAdapters` *types* (by `source`) this scope exposes — a `DataSourceAdapter` shares its resolver's allow-list since it's enrichment layered on the same `source`. Omit to leave every registered source visible (today's behavior). */
-  dataResolvers?: {
+  /** Restricts which registered `dataSourceManifests` *kinds* this scope exposes. Omit to leave every registered kind visible (today's behavior). */
+  dataSourceManifests?: {
     include?: string[]
     exclude?: string[]
   }
-  /** Restricts which registered `mutationResolvers` *types* (by `target`) this scope exposes. Omit to leave every registered target visible. */
-  mutationResolvers?: {
+  /** Restricts which registered `mutationSourceManifests` *kinds* this scope exposes. Omit to leave every registered kind visible. */
+  mutationSourceManifests?: {
     include?: string[]
     exclude?: string[]
   }
-  /** Restricts which registered connection *type* adapters (by `type`, e.g. `rest`/`datasourcekit`) this scope exposes — distinct from `connections.allow`, which restricts connection *instances* by `uid`. Omit to leave every registered type visible. */
-  connectionAdapters?: {
+  /** Restricts which registered `connectionManifests` *kinds* (e.g. `rest`/`datasourcekit`) this scope exposes — distinct from `connections.allow`, which restricts connection *instances* by `uid`. Omit to leave every registered kind visible. */
+  connectionManifests?: {
     include?: string[]
     exclude?: string[]
   }

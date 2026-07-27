@@ -1,4 +1,4 @@
-import type { JsonSchema, KindManifest, SlotRule, StageBatchPosition, StageBatchResult, StagePosition, StageResult } from './types'
+import type { DataSourceManifest, JsonSchema, KindManifest, MutationSourceManifest, SlotRule, StageBatchPosition, StageBatchResult, StagePosition, StageResult } from './types'
 import type { ScopedRegistry } from './registry'
 
 const DEFAULT_SLOT_KEY = '(default)'
@@ -41,114 +41,150 @@ function hasRequiredBindings(manifest: KindManifest): boolean {
   return Object.values(manifest.bindingPolicy?.inputs ?? {}).some((port) => port.required)
 }
 
-/** `enum`-constrains a string schema to `allow` when the scope sets one — otherwise leaves it open. Mirrors the `$variable`/`visibleVariableNames` pattern below. */
-function allowedStringSchema(allow: string[] | undefined): JsonSchema {
-  return allow ? { type: 'string', enum: allow } : { type: 'string' }
+// Built-in `spec` schemas for the 4 shipped `DataBinding` kinds. A registered
+// `DataSourceManifest` with its own `specSchema` always wins (see
+// `dataBindingSchemas` below) — these are only the fallback when a built-in
+// kind is registered without one, so third-party sources aren't required to
+// duplicate this file to get a real schema.
+const staticBindingSpecSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['rows'],
+  properties: {
+    rows: { type: 'array', items: { type: 'object' } },
+  },
 }
 
-function dataBindingSchemas(sources: string[], allowedConnections: string[] | undefined, allowedDatasources: string[] | undefined): JsonSchema[] {
-  return sources.map((source) => {
-    if (source === 'static') {
-      return {
-        type: 'object',
-        additionalProperties: false,
-        required: ['source', 'rows'],
-        properties: {
-          source: { const: 'static' },
-          rows: { type: 'array', items: { type: 'object' } },
-        },
-        description: 'Rows are fixed, inline data — cannot be filtered by a variable. For a RecordScope driven by a selection, use rest/datasource instead so the binding can be parameterized with `${variable}`.',
-      }
-    }
-    if (source === 'rest') {
-      return {
-        type: 'object',
-        additionalProperties: false,
-        required: ['source', 'url'],
-        properties: {
-          source: { const: 'rest' },
-          url: { type: 'string', description: 'May reference a page variable via `${variableName}`, e.g. "/api/users/${selectedId}".' },
-          method: { enum: ['GET', 'POST'] },
-          body: {},
-          headers: { type: 'object', additionalProperties: { type: 'string' } },
-          rowsPath: { type: 'string' },
-        },
-      }
-    }
-    if (source === 'connection') {
-      return {
-        type: 'object',
-        additionalProperties: false,
-        required: ['source', 'connection', 'request'],
-        properties: {
-          source: { const: 'connection' },
-          connection: allowedStringSchema(allowedConnections),
-          request: { description: "Shape is defined by the connection's adapter (ConnectionAdapter.requestSchema)." },
-          valuePath: { type: 'string' },
-        },
-        description: 'References a registered connection by UID instead of embedding a raw URL/DSN.',
-      }
-    }
-    if (source === 'datasource') {
-      return {
-        type: 'object',
-        additionalProperties: false,
-        required: ['source', 'datasourceUid'],
-        properties: {
-          source: { const: 'datasource' },
-          datasourceUid: allowedStringSchema(allowedDatasources),
-          datasourceType: { type: 'string' },
-          query: {},
-          options: { type: 'object' },
-          cacheTtlMs: { type: 'number' },
-          staleWhileRevalidate: { type: 'boolean' },
-          valuePath: { type: 'string' },
-        },
-      }
-    }
+const restBindingSpecSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['url'],
+  properties: {
+    url: { type: 'string', description: 'May reference a page variable via `${variableName}`, e.g. "/api/users/${selectedId}".' },
+    method: { enum: ['GET', 'POST'] },
+    body: {},
+    headers: { type: 'object', additionalProperties: { type: 'string' } },
+    rowsPath: { type: 'string' },
+  },
+}
+
+const connectionBindingSpecSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['connection', 'request'],
+  properties: {
+    connection: { type: 'string' },
+    request: { description: "Shape is defined by the connection's manifest (ConnectionManifest.requestSchema)." },
+  },
+}
+
+const datasourceBindingSpecSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['datasourceUid'],
+  properties: {
+    datasourceUid: { type: 'string' },
+    datasourceType: { type: 'string' },
+    query: {},
+    options: { type: 'object' },
+    cacheTtlMs: { type: 'number' },
+    staleWhileRevalidate: { type: 'boolean' },
+  },
+}
+
+const BUILTIN_DATA_BINDING_SPEC_SCHEMAS: Record<string, JsonSchema> = {
+  static: staticBindingSpecSchema,
+  rest: restBindingSpecSchema,
+  connection: connectionBindingSpecSchema,
+  datasource: datasourceBindingSpecSchema,
+}
+
+const BUILTIN_DATA_BINDING_DESCRIPTIONS: Record<string, string> = {
+  static: 'Rows are fixed, inline data — cannot be filtered by a variable. For a RecordScope driven by a selection, use rest/datasource instead so the binding can be parameterized with `${variable}`.',
+  connection: 'References a registered connection by UID instead of embedding a raw URL/DSN.',
+}
+
+const restMutationSpecSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['url'],
+  properties: {
+    url: { type: 'string', description: 'May reference a page variable via `${variableName}`.' },
+    method: { enum: ['POST', 'PUT', 'PATCH', 'DELETE'] },
+    headers: { type: 'object', additionalProperties: { type: 'string' } },
+  },
+}
+
+const datasourceMutationSpecSchema: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['datasourceUid'],
+  properties: {
+    datasourceUid: { type: 'string' },
+    mutation: {},
+  },
+}
+
+const BUILTIN_MUTATION_BINDING_SPEC_SCHEMAS: Record<string, JsonSchema> = {
+  rest: restMutationSpecSchema,
+  datasource: datasourceMutationSpecSchema,
+}
+
+function getObjectProperties(schema: JsonSchema): Record<string, unknown> | undefined {
+  return typeof schema.properties === 'object' && schema.properties !== null && !Array.isArray(schema.properties)
+    ? (schema.properties as Record<string, unknown>)
+    : undefined
+}
+
+/**
+ * Scope-driven narrowing for the two well-known spec fields that reference
+ * another allow-listed registry (a connection uid, a datasource uid) — the
+ * one remaining by-name special case now that binding schemas are otherwise
+ * manifest-driven. Mirrors the `$variable`/`visibleVariableNames` narrowing
+ * pattern used elsewhere in this file.
+ */
+function narrowKnownBindingEnums(specSchema: JsonSchema, allowedConnections: string[] | undefined, allowedDatasources: string[] | undefined): JsonSchema {
+  if (!allowedConnections && !allowedDatasources) return specSchema
+  const cloned = cloneSchema(specSchema)
+  const properties = getObjectProperties(cloned)
+  if (!properties) return cloned
+  if (allowedConnections && 'connection' in properties) properties.connection = { type: 'string', enum: allowedConnections }
+  if (allowedDatasources && 'datasourceUid' in properties) properties.datasourceUid = { type: 'string', enum: allowedDatasources }
+  return cloned
+}
+
+function dataBindingSchemas(manifests: DataSourceManifest[], allowedConnections: string[] | undefined, allowedDatasources: string[] | undefined): JsonSchema[] {
+  return manifests.map((manifest) => {
+    const baseSpecSchema = manifest.specSchema ?? BUILTIN_DATA_BINDING_SPEC_SCHEMAS[manifest.kind] ?? { type: 'object' }
+    const description = manifest.description ?? BUILTIN_DATA_BINDING_DESCRIPTIONS[manifest.kind]
     return {
       type: 'object',
-      required: ['source'],
+      additionalProperties: false,
+      required: ['apiVersion', 'kind', 'spec'],
       properties: {
-        source: { const: source },
+        apiVersion: { const: manifest.apiVersion },
+        kind: { const: manifest.kind },
+        spec: narrowKnownBindingEnums(baseSpecSchema, allowedConnections, allowedDatasources),
+        valuePath: { type: 'string' },
       },
+      ...(description ? { description } : {}),
     }
   })
 }
 
-function mutationBindingSchemas(targets: string[], allowedDatasources: string[] | undefined): JsonSchema[] {
-  return targets.map((target) => {
-    if (target === 'rest') {
-      return {
-        type: 'object',
-        additionalProperties: false,
-        required: ['target', 'url'],
-        properties: {
-          target: { const: 'rest' },
-          url: { type: 'string', description: 'May reference a page variable via `${variableName}`.' },
-          method: { enum: ['POST', 'PUT', 'PATCH', 'DELETE'] },
-          headers: { type: 'object', additionalProperties: { type: 'string' } },
-        },
-      }
-    }
-    if (target === 'datasource') {
-      return {
-        type: 'object',
-        additionalProperties: false,
-        required: ['target', 'datasourceUid'],
-        properties: {
-          target: { const: 'datasource' },
-          datasourceUid: allowedStringSchema(allowedDatasources),
-          mutation: {},
-        },
-      }
-    }
+function mutationBindingSchemas(manifests: MutationSourceManifest[], allowedDatasources: string[] | undefined): JsonSchema[] {
+  return manifests.map((manifest) => {
+    const baseSpecSchema = manifest.specSchema ?? BUILTIN_MUTATION_BINDING_SPEC_SCHEMAS[manifest.kind] ?? { type: 'object' }
     return {
       type: 'object',
-      required: ['target'],
+      additionalProperties: false,
+      required: ['apiVersion', 'kind', 'spec'],
       properties: {
-        target: { const: target },
+        apiVersion: { const: manifest.apiVersion },
+        kind: { const: manifest.kind },
+        spec: narrowKnownBindingEnums(baseSpecSchema, undefined, allowedDatasources),
       },
+      ...(manifest.description ? { description: manifest.description } : {}),
     }
   })
 }
@@ -378,7 +414,7 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
     ],
   }
 
-  const dataSchemas = dataBindingSchemas(scoped.listDataResolvers(), scoped.options.connections?.allow, scoped.options.datasources?.allow)
+  const dataSchemas = dataBindingSchemas(scoped.listDataSourceManifests(), scoped.options.connections?.allow, scoped.options.datasources?.allow)
   const hasDataBindingSchema = dataSchemas.length > 0
   if (hasDataBindingSchema) {
     defs.dataBinding = dataSchemas.length === 1 ? dataSchemas[0] : { oneOf: dataSchemas }
@@ -399,7 +435,7 @@ function addWellKnownDefs(defs: Record<string, unknown>, scoped: ScopedRegistry)
     }
   }
 
-  const mutationSchemas = mutationBindingSchemas(scoped.listMutationResolvers(), scoped.options.datasources?.allow)
+  const mutationSchemas = mutationBindingSchemas(scoped.listMutationSourceManifests(), scoped.options.datasources?.allow)
   const hasMutationBindingSchema = mutationSchemas.length > 0
   if (hasMutationBindingSchema) defs.mutationBinding = mutationSchemas.length === 1 ? mutationSchemas[0] : { oneOf: mutationSchemas }
 

@@ -3,6 +3,8 @@ import { createRegistry } from './registry'
 import { staticResolver } from '../dataflow/resolvers'
 import { validateResource } from './validation'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 const panel = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'Panel',
@@ -33,7 +35,7 @@ const text = {
 
 function registry() {
   const registry = createRegistry()
-  registry.use({ name: 'test', kinds: [panel, text], dataResolvers: { static: staticResolver } })
+  registry.use({ name: 'test', kinds: [panel, text], dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
   return registry
 }
 
@@ -64,7 +66,7 @@ describe('validateResource', () => {
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'Panel',
-        spec: { title: 'Customers', data: { source: 'static', rows: [{ id: '1' }] } },
+        spec: { title: 'Customers', data: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ id: '1' }] } } },
         slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'Hello' } }] }],
       },
       registry(),
@@ -127,7 +129,7 @@ describe('validateResource', () => {
         kind: 'Panel',
         spec: {
           title: 'Customers',
-          data: { source: 'datasource', datasourceUid: 'erp', query: { id: '${accountId}' } },
+          data: { apiVersion: API_VERSION, kind: 'datasource', spec: { datasourceUid: 'erp', query: { id: '${accountId}' } } },
         },
         events: { rowSelect: { kind: 'action', action: 'customers.delete' } },
         variables: [{ name: 'tenant', default: 'other' }],
@@ -139,7 +141,7 @@ describe('validateResource', () => {
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.message)).toEqual(
       expect.arrayContaining([
-        'data resolver datasource is not registered',
+        `no data source or mutation source manifest ${API_VERSION}/datasource is registered`,
         'datasource erp is not allowed in this scope',
         'action customers.delete is not allowed in this scope',
         'variable accountId is not allowed in this scope',
@@ -301,7 +303,7 @@ describe('validateResource', () => {
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'Panel',
-        spec: { title: 'Customers', data: { source: 'connection', connection: 'secret', request: { path: '/customers' } } },
+        spec: { title: 'Customers', data: { apiVersion: API_VERSION, kind: 'connection', spec: { connection: 'secret', request: { path: '/customers' } } } },
       },
       scoped,
     )
@@ -311,7 +313,7 @@ describe('validateResource', () => {
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'Panel',
-        spec: { title: 'Customers', data: { source: 'connection', connection: 'public', request: { path: '/customers' } } },
+        spec: { title: 'Customers', data: { apiVersion: API_VERSION, kind: 'connection', spec: { connection: 'public', request: { path: '/customers' } } } },
       },
       scoped,
     )
@@ -428,14 +430,14 @@ describe('validateResource', () => {
   it('accepts a $dataflow ref to a unit declared in a sibling subtree, not an ancestor', () => {
     const nestablePanel = { ...panel, slotPolicy: { defaultSlot: { min: 0, accepts: ['Panel'] } } }
     const nested = createRegistry()
-    nested.use({ name: 'test', kinds: [nestablePanel], dataResolvers: { static: staticResolver } })
+    nested.use({ name: 'test', kinds: [nestablePanel], dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     const result = validateResource(
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'Panel',
         spec: { title: 'x' },
-        dataflow: [{ name: 'rows', binding: { source: 'static', rows: [] } }],
+        dataflow: [{ name: 'rows', binding: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [] } } }],
         slots: [
           {
             items: [
@@ -455,7 +457,7 @@ describe('validateResource', () => {
         apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'Panel',
         spec: { title: 'x' },
-        dataflow: [{ name: 'detail', binding: { source: 'static', rows: [] }, dependOn: ['missing'] }],
+        dataflow: [{ name: 'detail', binding: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [] } }, dependOn: ['missing'] }],
       },
       registry(),
     )
@@ -470,8 +472,8 @@ describe('validateResource', () => {
         kind: 'Panel',
         spec: { title: 'x' },
         dataflow: [
-          { name: 'a', binding: { source: 'static', rows: [] }, dependOn: ['b'] },
-          { name: 'b', binding: { source: 'static', rows: [] }, dependOn: ['a'] },
+          { name: 'a', binding: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [] } }, dependOn: ['b'] },
+          { name: 'b', binding: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [] } }, dependOn: ['a'] },
         ],
       },
       registry(),
@@ -487,8 +489,8 @@ describe('validateResource', () => {
         kind: 'Panel',
         spec: { title: 'x' },
         dataflow: [
-          { name: 'rows', binding: { source: 'static', rows: [] } },
-          { name: 'rows', binding: { source: 'static', rows: [] } },
+          { name: 'rows', binding: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [] } } },
+          { name: 'rows', binding: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [] } } },
         ],
       },
       registry(),

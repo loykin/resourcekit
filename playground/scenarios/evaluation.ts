@@ -15,7 +15,7 @@ export interface ScenarioRubric {
   requiredKinds: string[]
   requiredVariables?: string[]
   requiredEvents?: string[]
-  requiredBindings?: Array<{ source: string; datasourceUid?: string }>
+  requiredBindings?: Array<{ kind: string; datasourceUid?: string }>
   requiredText?: string[]
   forbiddenKindPrefixes?: string[]
 }
@@ -72,15 +72,15 @@ export function evaluateScenarioResource<TSeed>(
       message: `expected resource tree to include event ${event}`,
     })),
     ...(scenario.rubric.requiredBindings ?? []).map((binding) => ({
-      name: binding.datasourceUid ? `binding:${binding.source}:${binding.datasourceUid}` : `binding:${binding.source}`,
+      name: binding.datasourceUid ? `binding:${binding.kind}:${binding.datasourceUid}` : `binding:${binding.kind}`,
       pass: collectBindings(candidate).some(
         (candidateBinding) =>
-          candidateBinding.source === binding.source &&
+          candidateBinding.kind === binding.kind &&
           (binding.datasourceUid === undefined || candidateBinding.datasourceUid === binding.datasourceUid),
       ),
       message: binding.datasourceUid
-        ? `expected resource tree to bind datasource ${binding.datasourceUid} through ${binding.source}`
-        : `expected resource tree to include ${binding.source} binding`,
+        ? `expected resource tree to bind datasource ${binding.datasourceUid} through ${binding.kind}`
+        : `expected resource tree to include ${binding.kind} binding`,
     })),
     ...(scenario.rubric.requiredText ?? []).map((text) => ({
       name: `text:${text}`,
@@ -137,17 +137,18 @@ function collectEventNames(resource: Resource, events: string[] = []): string[] 
   return [...new Set(events)]
 }
 
-function collectBindings(resource: Resource, bindings: Array<{ source: string; datasourceUid?: string }> = []): Array<{ source: string; datasourceUid?: string }> {
+function collectBindings(resource: Resource, bindings: Array<{ kind: string; datasourceUid?: string }> = []): Array<{ kind: string; datasourceUid?: string }> {
   const visit = (value: unknown) => {
     if (Array.isArray(value)) {
       value.forEach(visit)
       return
     }
     if (!isRecord(value)) return
-    if (typeof value.source === 'string') {
+    if (typeof value.apiVersion === 'string' && typeof value.kind === 'string' && 'spec' in value) {
+      const spec = value.spec
       bindings.push({
-        source: value.source,
-        datasourceUid: typeof value.datasourceUid === 'string' ? value.datasourceUid : undefined,
+        kind: value.kind,
+        datasourceUid: isRecord(spec) && typeof spec.datasourceUid === 'string' ? spec.datasourceUid : undefined,
       })
     }
     Object.values(value).forEach(visit)

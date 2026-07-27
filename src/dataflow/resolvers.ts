@@ -1,12 +1,12 @@
-import type { ConnectionAdapter, ConnectionBinding, DataResolver, RegisteredConnection, RestBinding, StaticBinding } from '../core/types'
+import type { ConnectionBindingSpec, ConnectionManifest, DataResolver, RegisteredConnection, RestBindingSpec, StaticBindingSpec } from '../core/types'
 
 /**
  * Built-in resolvers. Only `rest` and `static` live in core — the
  * `datasource` resolver ships as a datasourcekit adapter package, never here.
  */
 
-export const staticResolver: DataResolver = async (binding) => {
-  return (binding as StaticBinding).rows
+export const staticResolver: DataResolver<StaticBindingSpec> = async (binding) => {
+  return binding.spec.rows
 }
 
 function getPath(value: unknown, path: string): unknown {
@@ -34,16 +34,16 @@ export interface RestResolverOptions {
   fetchImpl?: typeof fetch
 }
 
-export function createRestResolver(options: RestResolverOptions = {}): DataResolver {
+export function createRestResolver(options: RestResolverOptions = {}): DataResolver<RestBindingSpec> {
   return async (binding, ctx) => {
-    const b = binding as RestBinding
+    const spec = binding.spec
     const dynamicHeaders = options.headers ? await options.headers() : undefined
-    const headers = dynamicHeaders || b.headers ? { ...dynamicHeaders, ...b.headers } : undefined
+    const headers = dynamicHeaders || spec.headers ? { ...dynamicHeaders, ...spec.headers } : undefined
     const fetchImpl = options.fetchImpl ?? fetch
-    const response = await fetchImpl(b.url, {
-      method: b.method ?? 'GET',
+    const response = await fetchImpl(spec.url, {
+      method: spec.method ?? 'GET',
       headers,
-      body: b.body === undefined ? undefined : JSON.stringify(b.body),
+      body: spec.body === undefined ? undefined : JSON.stringify(spec.body),
       signal: ctx.signal,
     })
 
@@ -52,7 +52,7 @@ export function createRestResolver(options: RestResolverOptions = {}): DataResol
     }
 
     const json: unknown = await response.json()
-    if (b.rowsPath) return asRows(getPath(json, b.rowsPath))
+    if (spec.rowsPath) return asRows(getPath(json, spec.rowsPath))
     if (Array.isArray(json)) return asRows(json)
     const rows = getPath(json, 'rows')
     if (rows !== undefined) return asRows(rows)
@@ -63,25 +63,25 @@ export function createRestResolver(options: RestResolverOptions = {}): DataResol
   }
 }
 
-export const restResolver: DataResolver = createRestResolver()
+export const restResolver: DataResolver<RestBindingSpec> = createRestResolver()
 
 /**
- * Bridges the `connection` DataBinding source to a registered
- * `ConnectionAdapter.resolve()` — the render path still goes through the
- * ordinary `registry.getDataResolver()` dispatch, it just looks the
- * connection/adapter up first (test.md §5.2 decision: ConnectionAdapter is
- * a separate contract, not a DataResolver replacement).
+ * Bridges the `connection` DataBinding kind to a registered
+ * `ConnectionManifest.resolve()` — the render path still goes through the
+ * ordinary `registry.getDataSourceManifest()` dispatch, it just looks the
+ * connection/manifest up first (test.md §5.2 decision: ConnectionManifest is
+ * a separate contract, not a DataSourceManifest replacement).
  */
 export function createConnectionDataResolver(registry: {
   getConnection(uid: string): Promise<RegisteredConnection | undefined>
-  getConnectionAdapter(type: string): ConnectionAdapter | undefined
-}): DataResolver {
+  getConnectionManifest(apiVersion: string, kind: string): ConnectionManifest | undefined
+}): DataResolver<ConnectionBindingSpec> {
   return async (binding, ctx) => {
-    const b = binding as ConnectionBinding
-    const connection = await registry.getConnection(b.connection)
-    if (!connection) throw new Error(`Connection resolver: connection ${b.connection} is not registered`)
-    const adapter = registry.getConnectionAdapter(connection.type)
-    if (!adapter) throw new Error(`Connection resolver: no adapter registered for connection type ${connection.type}`)
-    return adapter.resolve(connection, b.request, ctx)
+    const spec = binding.spec
+    const connection = await registry.getConnection(spec.connection)
+    if (!connection) throw new Error(`Connection resolver: connection ${spec.connection} is not registered`)
+    const manifest = registry.getConnectionManifest(connection.apiVersion, connection.kind)
+    if (!manifest) throw new Error(`Connection resolver: no manifest registered for connection kind ${connection.kind}`)
+    return manifest.resolve(connection, spec.request, ctx)
   }
 }

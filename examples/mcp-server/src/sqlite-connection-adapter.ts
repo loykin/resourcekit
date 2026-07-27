@@ -1,4 +1,4 @@
-import type { ConnectionAdapter, JsonSchema } from '@loykin/resourcekit'
+import type { ConnectionManifest, JsonSchema } from '@loykin/resourcekit'
 import type { DatabaseSync } from 'node:sqlite'
 
 /**
@@ -73,8 +73,9 @@ const requestSchema: JsonSchema = {
   },
 }
 
-export const sqliteConnectionAdapter: ConnectionAdapter<SqliteConnectionConfig, SqliteConnectionRequest> = {
-  type: 'sqlite',
+export const sqliteConnectionAdapter: ConnectionManifest<SqliteConnectionConfig, SqliteConnectionRequest> = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'sqlite',
   requestSchema,
 
   async test(connection) {

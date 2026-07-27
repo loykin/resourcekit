@@ -54,9 +54,9 @@
           "kind": "SelectableList",
           "spec": {
             "data": {
-              "source": "datasource",
-              "datasourceUid": "crm",
-              "query": { "status": "${status}" }
+              "apiVersion": "resourcekit.dev/v1alpha1",
+              "kind": "datasource",
+              "spec": { "datasourceUid": "crm", "query": { "status": "${status}" } }
             },
             "idField": "id",
             "selectedRef": "variables.customerId",
@@ -85,9 +85,9 @@
                   "kind": "DetailView",
                   "spec": {
                     "data": {
-                      "source": "datasource",
-                      "datasourceUid": "crm",
-                      "query": { "id": "${customerId}" }
+                      "apiVersion": "resourcekit.dev/v1alpha1",
+                      "kind": "datasource",
+                      "spec": { "datasourceUid": "crm", "query": { "id": "${customerId}" } }
                     },
                     "fields": [
                       { "field": "name", "label": "Name" },

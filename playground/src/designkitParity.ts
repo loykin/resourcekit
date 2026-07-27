@@ -142,7 +142,7 @@ const dataBodySplit: Resource = {
                   kind: 'SelectableList',
                   bindings: { selected: { $variable: 'userId' } },
                   spec: {
-                    data: { source: 'static', rows: userRows },
+                    data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: userRows } },
                     idField: 'id',
                     primary: { field: 'name' },
                     secondary: [{ field: 'email' }],
@@ -153,7 +153,7 @@ const dataBodySplit: Resource = {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'DetailView',
                   spec: {
-                    data: { source: 'memory', collection: 'users', id: '${userId}' },
+                    data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'users', id: '${userId}' } },
                     layout: 'cards',
                     titleField: 'name',
                     subtitleField: 'email',
@@ -229,7 +229,7 @@ const workbenchSqlEditor: Resource = {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'TableView',
           spec: {
-            data: { source: 'static', rows: userRows },
+            data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: userRows } },
             columns: {
               name: { label: 'Name', emphasis: 'strong' },
               email: { label: 'Email' },
@@ -257,7 +257,7 @@ const fieldKindsForm: Resource = {
           kind: 'ResourceForm',
           spec: {
             id: 'field-kinds-form',
-            submit: { mutation: { target: 'memory', collection: 'settings' } },
+            submit: { mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'settings' } } },
             successMessage: 'Saved in memory',
           },
           slots: [

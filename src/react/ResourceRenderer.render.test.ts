@@ -210,8 +210,8 @@ describe('ResourceRenderer mutation-to-dataflow-engine integration', () => {
     registry.use(createResourceViewPlugin())
     registry.use({
       name: 'e2e',
-      dataResolvers: { query },
-      mutationResolvers: { memory: async () => ({ id: 'saved' }) },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'query', resolve: query }],
+      mutationSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', resolve: async () => ({ id: 'saved' }) }],
       kinds: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -227,7 +227,7 @@ describe('ResourceRenderer mutation-to-dataflow-engine integration', () => {
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'ActionProbe',
-      dataflow: [{ name: 'rows', binding: { source: 'query' } }],
+      dataflow: [{ name: 'rows', binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'query', spec: {} } }],
       spec: {},
     }
 
@@ -244,7 +244,7 @@ describe('ResourceRenderer mutation-to-dataflow-engine integration', () => {
     await act(async () => {
       await context?.actions.submit(
         {
-          mutation: { target: 'memory' },
+          mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: {} },
           onSuccess: [
             { kind: 'invalidateData', dataflow: ['rows'] },
             { kind: 'refetchData', dataflow: ['rows'] },
@@ -270,7 +270,7 @@ describe('DataflowEngine guards against out-of-order fetch completion', () => {
     registry.use(createResourceViewPlugin())
     registry.use({
       name: 'race',
-      dataResolvers: { query },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'query', resolve: query }],
       kinds: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -287,7 +287,7 @@ describe('DataflowEngine guards against out-of-order fetch completion', () => {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'ActionProbe',
       variables: [{ name: 'sel', default: 'a' }],
-      dataflow: [{ name: 'rows', binding: { source: 'query', id: '${sel}' } }],
+      dataflow: [{ name: 'rows', binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'query', spec: { id: '${sel}' } } }],
       spec: {},
     }
     const runtimeStore = createMemoryRuntimeStore()

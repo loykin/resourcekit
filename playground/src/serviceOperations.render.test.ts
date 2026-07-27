@@ -52,7 +52,8 @@ beforeAll(async () => {
   app = await import('./App')
   app.registry.registerConnection({
     uid: 'service-operations',
-    type: 'rest',
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'rest',
     name: 'Service Operations API (E2E)',
     config: { baseUrl: `http://127.0.0.1:${port}` },
     policy: { methods: ['GET'], pathPrefixes: ['/incidents'] },

@@ -93,7 +93,7 @@ describe('buildDocumentSchema', () => {
           specSchema: { type: 'object', additionalProperties: false, properties: { data: { type: 'object' } } },
         },
       ],
-      dataResolvers: { connection: async () => [] },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'connection', resolve: async () => [] }],
     })
     const scoped = registry.scope({ connections: { allow: ['public'] } })
     const schema = buildDocumentSchema(scoped)
@@ -103,7 +103,7 @@ describe('buildDocumentSchema', () => {
     const resource = (connection: string) => ({
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Panel',
-      spec: { data: { source: 'connection', connection, request: { path: '/x' } } },
+      spec: { data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'connection', spec: { connection, request: { path: '/x' } } } },
     })
 
     expect(validate(resource('public'))).toBe(true)
@@ -128,7 +128,7 @@ describe('buildDocumentSchema', () => {
           recordScope: true,
         },
       ],
-      dataResolvers: { static: staticResolver },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', resolve: staticResolver }],
     })
     const schema = buildDocumentSchema(registry.scope({}))
     const ajv = new Ajv2020({ strict: false })
@@ -143,13 +143,13 @@ describe('buildDocumentSchema', () => {
     }
     expect(validate(panelWithVariablesAndEvents)).toBe(true)
     // Panel is not recordScope — `record` isn't in its schema at all.
-    expect(validate({ ...panelWithVariablesAndEvents, record: { source: 'static', rows: [] } })).toBe(false)
+    expect(validate({ ...panelWithVariablesAndEvents, record: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: [] } } })).toBe(false)
 
     const recordResource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Record',
       spec: {},
-      record: { source: 'static', rows: [] },
+      record: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: [] } },
     }
     expect(validate(recordResource)).toBe(true)
     // recordScope kind requires `record`.
@@ -167,7 +167,7 @@ describe('buildDocumentSchema', () => {
           specSchema: { type: 'object', additionalProperties: false, properties: {} },
         },
       ],
-      dataResolvers: { static: staticResolver },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', resolve: staticResolver }],
     })
     const schema = buildDocumentSchema(registry.scope({}))
     const ajv = new Ajv2020({ strict: false })
@@ -180,13 +180,13 @@ describe('buildDocumentSchema', () => {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Panel',
       spec: {},
-      dataflow: [{ name: 'rows', binding: { source: 'static', rows: [] } }],
+      dataflow: [{ name: 'rows', binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: [] } } }],
     }
     expect(validate(withDataflow)).toBe(true)
 
     // dataflow must be an array of { name, binding, policy?, dependOn? } units.
     expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, dataflow: 'not-an-array' })).toBe(false)
-    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, dataflow: [{ binding: { source: 'static', rows: [] } }] })).toBe(false)
+    expect(validate({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Panel', spec: {}, dataflow: [{ binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: [] } } }] })).toBe(false)
   })
 
   it('requires a min>0 slot and rejects a duplicate slot name in the generated schema, matching runtime validateResource', () => {
@@ -261,7 +261,10 @@ describe('buildDocumentSchema', () => {
           specSchema: { type: 'object' },
         },
       ],
-      dataResolvers: { static: staticResolver, rest: restResolver },
+      dataSourceManifests: [
+        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', resolve: staticResolver },
+        { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', resolve: restResolver },
+      ],
     })
 
     const schema = buildDocumentSchema(

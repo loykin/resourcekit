@@ -70,9 +70,9 @@ describe('scopedView', () => {
   it('threads options through to the filter', () => {
     const registry = createNamedRegistry<number>()
     registry.register('a', 1)
-    const options: ScopeOptions = { dataResolvers: { exclude: ['a'] } }
+    const options: ScopeOptions = { dataSourceManifests: { exclude: ['a'] } }
     const view = scopedView(registry, options, {
-      allowed: (key, _value, opts) => allowListFilter(key, opts.dataResolvers),
+      allowed: (key, _value, opts) => allowListFilter(key, opts.dataSourceManifests),
     })
 
     expect(view.get('a')).toBeUndefined()

@@ -8,6 +8,8 @@ import { staticResolver } from '../../dataflow/resolvers'
 import type { KindRenderFn } from '../../react'
 import { createGridKitPlugin } from './plugin'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   vi.stubGlobal(
@@ -32,7 +34,11 @@ describe('GridKitTable row actions with the real GridKit component', () => {
     const onEvent = vi.fn()
     const registry = createRegistry<KindRenderFn>()
     registry.use(createGridKitPlugin())
-    registry.use({ name: 'runtime', dataResolvers: { static: staticResolver }, mutationResolvers: { memory: mutation } })
+    registry.use({
+      name: 'runtime',
+      dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }],
+      mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }],
+    })
 
     render(
       createElement(ResourceRenderer, {
@@ -44,7 +50,7 @@ describe('GridKitTable row actions with the real GridKit component', () => {
           kind: 'GridKitTable',
           events: { rowSelect: { kind: 'emit', event: 'selected' } },
           spec: {
-            data: { source: 'static', rows: [{ id: '7', name: 'Ada', role: 'Editor' }] },
+            data: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ id: '7', name: 'Ada', role: 'Editor' }] } },
             columns: {
               name: { label: 'Name' },
               actions: {
@@ -55,7 +61,7 @@ describe('GridKitTable row actions with the real GridKit component', () => {
                     id: 'delete',
                     label: 'Delete',
                     submit: {
-                      mutation: { target: 'memory', id: '${payload.id}' },
+                      mutation: { apiVersion: API_VERSION, kind: 'memory', spec: { id: '${payload.id}' } },
                       confirm: { title: 'Delete ${payload.name}?' },
                       onSuccess: [{ kind: 'emit', event: 'deleted' }],
                     },
@@ -72,7 +78,11 @@ describe('GridKitTable row actions with the real GridKit component', () => {
     await waitFor(() => expect(onEvent).toHaveBeenCalledWith('deleted', { id: '7', name: 'Ada' }))
 
     expect(confirm).toHaveBeenCalledWith({ title: 'Delete Ada?' })
-    expect(mutation).toHaveBeenCalledWith({ target: 'memory', id: '7' }, { id: '7', name: 'Ada', role: 'Editor' }, { variables: {} })
+    expect(mutation).toHaveBeenCalledWith(
+      { apiVersion: API_VERSION, kind: 'memory', spec: { id: '7' } },
+      { id: '7', name: 'Ada', role: 'Editor' },
+      { variables: {} },
+    )
     expect(onEvent).not.toHaveBeenCalledWith('selected', expect.anything())
   })
 })

@@ -9,6 +9,8 @@ import { staticResolver } from '../../dataflow/resolvers'
 import type { KindRenderFn } from '../../react'
 import { createGridKitPlugin } from './plugin'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 vi.mock('@loykin/gridkit', () => ({
   DataGrid: ({ data, columns, onRowClick }: { data: Record<string, unknown>[]; columns: Array<Record<string, unknown>>; onRowClick?: (row: unknown) => void }) =>
     createElement(
@@ -44,7 +46,11 @@ describe('GridKitTable row actions', () => {
     const onEvent = vi.fn()
     const registry = createRegistry<KindRenderFn>()
     registry.use(createGridKitPlugin())
-    registry.use({ name: 'runtime', dataResolvers: { static: staticResolver }, mutationResolvers: { memory: mutation } })
+    registry.use({
+      name: 'runtime',
+      dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }],
+      mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: mutation }],
+    })
 
     render(
       createElement(ResourceRenderer, {
@@ -56,7 +62,7 @@ describe('GridKitTable row actions', () => {
           kind: 'GridKitTable',
           events: { rowSelect: { kind: 'emit', event: 'selected' } },
           spec: {
-            data: { source: 'static', rows: [{ id: '7', name: 'Ada' }] },
+            data: { apiVersion: API_VERSION, kind: 'static', spec: { rows: [{ id: '7', name: 'Ada' }] } },
             columns: {
               name: { label: 'Name' },
               actions: {
@@ -66,7 +72,7 @@ describe('GridKitTable row actions', () => {
                     id: 'delete',
                     label: 'Delete',
                     submit: {
-                      mutation: { target: 'memory', id: '${payload.id}' },
+                      mutation: { apiVersion: API_VERSION, kind: 'memory', spec: { id: '${payload.id}' } },
                       confirm: { title: 'Delete ${payload.name}?' },
                       onSuccess: [{ kind: 'emit', event: 'deleted' }],
                     },
@@ -83,7 +89,11 @@ describe('GridKitTable row actions', () => {
     await waitFor(() => expect(mutation).toHaveBeenCalled())
 
     expect(confirm).toHaveBeenCalledWith({ title: 'Delete Ada?' })
-    expect(mutation).toHaveBeenCalledWith({ target: 'memory', id: '7' }, { id: '7', name: 'Ada' }, { variables: {} })
+    expect(mutation).toHaveBeenCalledWith(
+      { apiVersion: API_VERSION, kind: 'memory', spec: { id: '7' } },
+      { id: '7', name: 'Ada' },
+      { variables: {} },
+    )
     expect(onEvent).toHaveBeenCalledWith('deleted', { ok: true })
     expect(onEvent).not.toHaveBeenCalledWith('selected', expect.anything())
   })
@@ -91,7 +101,7 @@ describe('GridKitTable row actions', () => {
   it('hides and disables actions from row-derived conditions', async () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createGridKitPlugin())
-    registry.use({ name: 'runtime', dataResolvers: { static: staticResolver } })
+    registry.use({ name: 'runtime', dataSourceManifests: [{ apiVersion: API_VERSION, kind: 'static', resolve: staticResolver }] })
 
     render(
       createElement(ResourceRenderer, {
@@ -101,11 +111,14 @@ describe('GridKitTable row actions', () => {
           kind: 'GridKitTable',
           spec: {
             data: {
-              source: 'static',
-              rows: [
-                { id: '1', name: 'Admin', role: 'Admin' },
-                { id: '2', name: 'Viewer', role: 'Viewer' },
-              ],
+              apiVersion: API_VERSION,
+              kind: 'static',
+              spec: {
+                rows: [
+                  { id: '1', name: 'Admin', role: 'Admin' },
+                  { id: '2', name: 'Viewer', role: 'Viewer' },
+                ],
+              },
             },
             columns: {
               name: { label: 'Name' },

@@ -148,9 +148,9 @@ function resolveThroughRuntime(
   const cached = runtime.dataCache.get(bindingKey)
   if (cached?.fingerprint === fingerprint) return cached.promise
   const resolvedBinding = resolved.value as DataBinding
-  const resolver = registry.getDataResolver(resolvedBinding.source)
-  if (!resolver) return Promise.reject(new Error(`data resolver ${resolvedBinding.source} is not registered`))
-  const promise = resolver(resolvedBinding, { variables: runtime.engine.snapshot() }).then((rows) => applyValuePath(rows, resolvedBinding))
+  const manifest = registry.getDataSourceManifest(resolvedBinding.apiVersion, resolvedBinding.kind)
+  if (!manifest) return Promise.reject(new Error(`data source manifest ${resolvedBinding.apiVersion}/${resolvedBinding.kind} is not registered`))
+  const promise = manifest.resolve(resolvedBinding, { variables: runtime.engine.snapshot() }).then((rows) => applyValuePath(rows, resolvedBinding))
   runtime.dataCache.set(bindingKey, { fingerprint, promise })
   return promise
 }
@@ -178,15 +178,15 @@ function applyValuePath(rows: Record<string, unknown>[], binding: DataBinding): 
   })
 }
 
-/** Looks up and invokes the plain `DataResolver` registered for a binding's source — the row-fetching step shared by both the direct and coordinator-routed resolve paths. */
+/** Looks up and invokes the `DataSourceManifest.resolve` registered for a binding's kind — the row-fetching step shared by both the direct and coordinator-routed resolve paths. */
 function callResolver(
   registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>,
   binding: DataBinding,
   ctx: { variables: Record<string, VariableValue>; signal?: AbortSignal },
 ): Promise<Record<string, unknown>[]> {
-  const resolver = registry.getDataResolver(binding.source)
-  if (!resolver) throw new Error(`data resolver ${binding.source} is not registered`)
-  return resolver(binding, ctx)
+  const manifest = registry.getDataSourceManifest(binding.apiVersion, binding.kind)
+  if (!manifest) throw new Error(`data source manifest ${binding.apiVersion}/${binding.kind} is not registered`)
+  return manifest.resolve(binding, ctx)
 }
 
 function eventPolicy(resource: Resource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
@@ -400,7 +400,7 @@ function renderKindNode(
           runSubmit(
             {
               scope: runtime.scope,
-              getMutationResolver: (target) => registry.getMutationResolver(target),
+              getMutationSourceManifest: (apiVersion, kind) => registry.getMutationSourceManifest(apiVersion, kind),
               variables: {
                 snapshot: () => runtime.engine.snapshot(),
                 set: runtime.engine.set,

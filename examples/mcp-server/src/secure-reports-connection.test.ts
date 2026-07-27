@@ -16,8 +16,8 @@ describe('server-owned connection environment', () => {
     const registry = createRegistry()
     registry.use({
       name: 'secure-reports-e2e',
-      dataResolvers: { connection: createConnectionDataResolver(registry) },
-      connectionAdapters: { rest: restConnectionAdapter },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'connection', resolve: createConnectionDataResolver(registry) }],
+      connectionManifests: [restConnectionAdapter],
     })
     registry.registerConnection(
       createSecureReportsConnection({
@@ -33,8 +33,8 @@ describe('server-owned connection environment', () => {
     expect(JSON.stringify(catalog)).not.toContain(DEMO_API_TOKEN)
     expect(catalog[0]).not.toHaveProperty('config')
 
-    const rows = await scoped.getDataResolver('connection')?.(
-      { source: 'connection', connection: 'secure-reports', request: { path: '/secure/reports' } },
+    const rows = await scoped.getDataSourceManifest('resourcekit.dev/v1alpha1', 'connection')?.resolve(
+      { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'connection', spec: { connection: 'secure-reports', request: { path: '/secure/reports' } } },
       { variables: {} },
     )
     expect(rows).toEqual([

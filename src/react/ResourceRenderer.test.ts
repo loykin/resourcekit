@@ -14,7 +14,7 @@ describe('ResourceRenderer', () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use({
       name: 'cache',
-      dataResolvers: { search: resolve },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'search', resolve }],
       kinds: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -27,7 +27,7 @@ describe('ResourceRenderer', () => {
         },
       ],
     })
-    const binding = { source: 'search', query: '${query}' }
+    const binding = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'search', spec: { query: '${query}' } }
     const resource: Resource = {
       apiVersion: 'resourcekit.dev/v1alpha1',
       kind: 'Probe',
@@ -139,11 +139,11 @@ describe('ResourceRenderer', () => {
 
   it('interpolates data bindings and invalidates only bindings touched by changed variables', async () => {
     let captured: RenderContext | undefined
-    const resolver: DataResolver = vi.fn(async (binding) => [{ url: (binding as { url: string }).url }])
+    const resolver: DataResolver = vi.fn(async (binding) => [{ url: (binding.spec as { url: string }).url }])
     const registry = createRegistry<KindRenderFn>()
     registry.use({
       name: 'test',
-      dataResolvers: { rest: resolver },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', resolve: resolver }],
       kinds: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -167,14 +167,14 @@ describe('ResourceRenderer', () => {
 
     renderToStaticMarkup(createElement(ResourceRenderer, { resource, registry }))
 
-    await expect(captured?.data.resolve({ source: 'rest', url: '/api/customers/${customerId}' })).resolves.toEqual([
+    await expect(captured?.data.resolve({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', spec: { url: '/api/customers/${customerId}' } })).resolves.toEqual([
       { url: '/api/customers/c1' },
     ])
-    await captured?.data.resolve({ source: 'rest', url: '/api/customers/${customerId}' })
+    await captured?.data.resolve({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', spec: { url: '/api/customers/${customerId}' } })
     expect(resolver).toHaveBeenCalledTimes(1)
 
     captured?.events.emit('select', { row: { id: 'c2' } })
-    await expect(captured?.data.resolve({ source: 'rest', url: '/api/customers/${customerId}' })).resolves.toEqual([
+    await expect(captured?.data.resolve({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', spec: { url: '/api/customers/${customerId}' } })).resolves.toEqual([
       { url: '/api/customers/c2' },
     ])
     expect(resolver).toHaveBeenCalledTimes(2)
@@ -186,7 +186,7 @@ describe('ResourceRenderer', () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use({
       name: 'test',
-      dataResolvers: { static: resolver },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', resolve: resolver }],
       kinds: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -202,7 +202,9 @@ describe('ResourceRenderer', () => {
 
     renderToStaticMarkup(createElement(ResourceRenderer, { resource: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Probe', spec: {} }, registry }))
 
-    await expect(captured?.data.resolve({ source: 'static', rows: [], valuePath: 'payload.customer' })).resolves.toEqual([
+    await expect(
+      captured?.data.resolve({ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'static', spec: { rows: [] }, valuePath: 'payload.customer' }),
+    ).resolves.toEqual([
       { id: 'c1', name: 'Ada' },
     ])
   })
@@ -210,13 +212,13 @@ describe('ResourceRenderer', () => {
   it('resolves an inline data binding parameterized by a page variable', async () => {
     let captured: RenderContext | undefined
     const resolver: DataResolver = vi.fn(async (binding) => {
-      const request = (binding as { request: { cluster: string } }).request
+      const request = (binding.spec as { request: { cluster: string } }).request
       return [{ cluster: request.cluster, cpu: 72 }]
     })
     const registry = createRegistry<KindRenderFn>()
     registry.use({
       name: 'test',
-      dataResolvers: { metrics: resolver },
+      dataSourceManifests: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'metrics', resolve: resolver }],
       kinds: [
         {
           apiVersion: 'resourcekit.dev/v1alpha1',
@@ -239,7 +241,7 @@ describe('ResourceRenderer', () => {
 
     renderToStaticMarkup(createElement(ResourceRenderer, { resource, registry }))
 
-    const binding = { source: 'metrics', request: { cluster: '${selectedCluster}' } }
+    const binding = { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'metrics', spec: { request: { cluster: '${selectedCluster}' } } }
     await expect(captured?.data.resolve(binding)).resolves.toEqual([{ cluster: 'cluster-a', cpu: 72 }])
     captured?.variables.set('selectedCluster', 'cluster-b')
     await expect(captured?.data.resolve(binding)).resolves.toEqual([{ cluster: 'cluster-b', cpu: 72 }])

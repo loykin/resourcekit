@@ -16,7 +16,8 @@ export function createSecureReportsConnection(
 
   return {
     uid: 'secure-reports',
-    type: 'rest',
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'rest',
     name: 'Secure Reports API',
     description: 'Auth-gated reports connection configured from server-owned environment values.',
     config: { baseUrl, headers: { authorization: `Bearer ${token}` } },

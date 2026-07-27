@@ -1,12 +1,11 @@
 import type {
   JsonSchema,
-  ConnectionAdapter,
+  ConnectionManifest,
   ConnectionProvider,
   ConnectionSummary,
-  DataResolver,
-  DataSourceAdapter,
+  DataSourceManifest,
   KindManifest,
-  MutationResolver,
+  MutationSourceManifest,
   PatternExample,
   RegisteredConnection,
   ResourceKitPlugin,
@@ -28,16 +27,13 @@ export interface ResourceRegistry<TRender = unknown> {
   listKinds(): KindManifest<unknown, TRender>[]
   /** Registered multi-kind pattern examples, unfiltered — see `ScopedRegistry.selectExamples` for the scope-validated view. */
   listPatternExamples(): PatternExample[]
-  getDataResolver(source: string): DataResolver | undefined
-  listDataResolvers(): string[]
-  /** Optional queryKey/schema enrichment registered alongside a `dataResolvers` source. */
-  getDataSourceAdapter(source: string): DataSourceAdapter | undefined
-  listDataSourceAdapters(): DataSourceAdapter[]
-  getMutationResolver(target: string): MutationResolver | undefined
-  listMutationResolvers(): string[]
-  /** Connection *type* adapters (rest, datasourcekit, ...), registered via `use()`. */
-  getConnectionAdapter(type: string): ConnectionAdapter | undefined
-  listConnectionAdapters(): ConnectionAdapter[]
+  getDataSourceManifest(apiVersion: string, kind: string): DataSourceManifest | undefined
+  listDataSourceManifests(): DataSourceManifest[]
+  getMutationSourceManifest(apiVersion: string, kind: string): MutationSourceManifest | undefined
+  listMutationSourceManifests(): MutationSourceManifest[]
+  /** Connection kinds (rest, datasourcekit, ...), registered via `use()`. */
+  getConnectionManifest(apiVersion: string, kind: string): ConnectionManifest | undefined
+  listConnectionManifests(): ConnectionManifest[]
   /** Registers/updates one connection instance in place — no snapshot rebuild needed for hosts managing connections dynamically (test.md §5.2). */
   registerConnection(connection: RegisteredConnection): void
   unregisterConnection(uid: string): void
@@ -162,28 +158,29 @@ const CONNECTION_READ_CAPABILITIES = ['test', 'inspect', 'preview'] as const
 
 function toConnectionSummary(
   connection: RegisteredConnection,
-  adapter: ConnectionAdapter | undefined,
+  manifest: ConnectionManifest | undefined,
   options: ScopeOptions,
 ): ConnectionSummary | undefined {
-  if (!adapter) return undefined
+  if (!manifest) return undefined
   const scopeCapabilities = options.connections?.capabilities
 
   const capabilities = { test: false, inspect: false, preview: false, mutate: false }
   for (const name of CONNECTION_READ_CAPABILITIES) {
-    const adapterHas = typeof adapter[name] === 'function'
+    const manifestHas = typeof manifest[name] === 'function'
     const mcpAllowed = connection.mcpPolicy?.[name] ?? true
     const scopeAllowed = scopeCapabilities?.[name] ?? true
-    capabilities[name] = adapterHas && mcpAllowed && scopeAllowed
+    capabilities[name] = manifestHas && mcpAllowed && scopeAllowed
   }
   capabilities.mutate = (connection.mcpPolicy?.mutate ?? false) && (scopeCapabilities?.mutate ?? false)
 
   return {
     uid: connection.uid,
-    type: connection.type,
+    apiVersion: connection.apiVersion,
+    kind: connection.kind,
     name: connection.name,
     description: connection.description,
-    requestSchema: adapter.requestSchema,
-    ...(adapter.resultSchema ? { resultSchema: adapter.resultSchema } : {}),
+    requestSchema: manifest.requestSchema,
+    ...(manifest.resultSchema ? { resultSchema: manifest.resultSchema } : {}),
     capabilities,
   }
 }
@@ -191,10 +188,9 @@ function toConnectionSummary(
 export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
   const kinds = createNamedRegistry<KindManifest<unknown, TRender>>()
   const patternExamples = createNamedRegistry<PatternExample>()
-  const dataResolvers = createNamedRegistry<DataResolver>()
-  const dataSourceAdapters = createNamedRegistry<DataSourceAdapter>()
-  const mutationResolvers = createNamedRegistry<MutationResolver>()
-  const connectionAdapters = createNamedRegistry<ConnectionAdapter>()
+  const dataSourceManifests = createNamedRegistry<DataSourceManifest>()
+  const mutationSourceManifests = createNamedRegistry<MutationSourceManifest>()
+  const connectionManifests = createNamedRegistry<ConnectionManifest>()
   const connections = createNamedRegistry<RegisteredConnection>()
   let connectionProvider: ConnectionProvider | undefined
   const listeners = new Set<() => void>()
@@ -232,31 +228,26 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
       for (const example of plugin.patternExamples ?? []) {
         patternExamples.register(example.name, example)
       }
-      for (const [source, resolver] of Object.entries(plugin.dataResolvers ?? {})) {
-        dataResolvers.register(source, resolver)
+      for (const manifest of plugin.dataSourceManifests ?? []) {
+        dataSourceManifests.register(kindKey(manifest.apiVersion, manifest.kind), manifest)
       }
-      for (const [source, adapter] of Object.entries(plugin.dataSourceAdapters ?? {})) {
-        dataSourceAdapters.register(source, adapter)
+      for (const manifest of plugin.mutationSourceManifests ?? []) {
+        mutationSourceManifests.register(kindKey(manifest.apiVersion, manifest.kind), manifest)
       }
-      for (const [target, resolver] of Object.entries(plugin.mutationResolvers ?? {})) {
-        mutationResolvers.register(target, resolver)
-      }
-      for (const [type, adapter] of Object.entries(plugin.connectionAdapters ?? {})) {
-        connectionAdapters.register(type, adapter)
+      for (const manifest of plugin.connectionManifests ?? []) {
+        connectionManifests.register(kindKey(manifest.apiVersion, manifest.kind), manifest)
       }
       notify()
     },
     getKind: (apiVersion, kind) => kinds.get(kindKey(apiVersion, kind)),
     listKinds: () => kinds.list(),
     listPatternExamples: () => patternExamples.list(),
-    getDataResolver: (source) => dataResolvers.get(source),
-    listDataResolvers: () => dataResolvers.keys(),
-    getDataSourceAdapter: (source) => dataSourceAdapters.get(source),
-    listDataSourceAdapters: () => dataSourceAdapters.list(),
-    getMutationResolver: (target) => mutationResolvers.get(target),
-    listMutationResolvers: () => mutationResolvers.keys(),
-    getConnectionAdapter: (type) => connectionAdapters.get(type),
-    listConnectionAdapters: () => connectionAdapters.list(),
+    getDataSourceManifest: (apiVersion, kind) => dataSourceManifests.get(kindKey(apiVersion, kind)),
+    listDataSourceManifests: () => dataSourceManifests.list(),
+    getMutationSourceManifest: (apiVersion, kind) => mutationSourceManifests.get(kindKey(apiVersion, kind)),
+    listMutationSourceManifests: () => mutationSourceManifests.list(),
+    getConnectionManifest: (apiVersion, kind) => connectionManifests.get(kindKey(apiVersion, kind)),
+    listConnectionManifests: () => connectionManifests.list(),
     registerConnection(connection) {
       connections.register(connection.uid, connection)
       notify()
@@ -276,17 +267,14 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
         allowed: (_key, manifest) => kindAllowed(manifest, options),
         transform: applySlotScope,
       })
-      const dataResolversView = scopedView(dataResolvers, options, {
-        allowed: (key) => allowListFilter(key, options.dataResolvers),
+      const dataSourceManifestsView = scopedView(dataSourceManifests, options, {
+        allowed: (_key, manifest) => allowListFilter(manifest.kind, options.dataSourceManifests),
       })
-      const dataSourceAdaptersView = scopedView(dataSourceAdapters, options, {
-        allowed: (key) => allowListFilter(key, options.dataResolvers),
+      const mutationSourceManifestsView = scopedView(mutationSourceManifests, options, {
+        allowed: (_key, manifest) => allowListFilter(manifest.kind, options.mutationSourceManifests),
       })
-      const mutationResolversView = scopedView(mutationResolvers, options, {
-        allowed: (key) => allowListFilter(key, options.mutationResolvers),
-      })
-      const connectionAdaptersView = scopedView(connectionAdapters, options, {
-        allowed: (key) => allowListFilter(key, options.connectionAdapters),
+      const connectionManifestsView = scopedView(connectionManifests, options, {
+        allowed: (_key, manifest) => allowListFilter(manifest.kind, options.connectionManifests),
       })
 
       const scoped: ScopedRegistry<TRender> = {
@@ -310,14 +298,12 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
           const filteredPatternExamples = entries.patternExamples.filter((example) => validateResource(example.resource, scoped).valid)
           return { kindExamples, patternExamples: filteredPatternExamples }
         },
-        getDataResolver: dataResolversView.get,
-        listDataResolvers: dataResolversView.keys,
-        getDataSourceAdapter: dataSourceAdaptersView.get,
-        listDataSourceAdapters: dataSourceAdaptersView.list,
-        getMutationResolver: mutationResolversView.get,
-        listMutationResolvers: mutationResolversView.keys,
-        getConnectionAdapter: connectionAdaptersView.get,
-        listConnectionAdapters: connectionAdaptersView.list,
+        getDataSourceManifest: (apiVersion, kind) => dataSourceManifestsView.get(kindKey(apiVersion, kind)),
+        listDataSourceManifests: dataSourceManifestsView.list,
+        getMutationSourceManifest: (apiVersion, kind) => mutationSourceManifestsView.get(kindKey(apiVersion, kind)),
+        listMutationSourceManifests: mutationSourceManifestsView.list,
+        getConnectionManifest: (apiVersion, kind) => connectionManifestsView.get(kindKey(apiVersion, kind)),
+        listConnectionManifests: connectionManifestsView.list,
         async getConnection(uid) {
           if (!connectionAllowed(uid, options)) return undefined
           return resolveConnection(uid)
@@ -326,7 +312,7 @@ export function createRegistry<TRender = unknown>(): ResourceRegistry<TRender> {
           const all = await resolveAllConnections()
           return all
             .filter((connection) => connectionAllowed(connection.uid, options))
-            .map((connection) => toConnectionSummary(connection, connectionAdapters.get(connection.type), options))
+            .map((connection) => toConnectionSummary(connection, connectionManifests.get(kindKey(connection.apiVersion, connection.kind)), options))
             .filter((summary): summary is ConnectionSummary => summary !== undefined)
         },
         subscribe(listener) {

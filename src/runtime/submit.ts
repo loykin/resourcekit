@@ -1,6 +1,6 @@
 import { interpolate } from './variables'
 import { coerceVariableValue, getValueAtPath } from '../core/path'
-import type { ConfirmSpec, MutationBinding, MutationResolver, SubmitSpec, VariableValue } from '../core/types'
+import type { ConfirmSpec, MutationBinding, MutationSourceManifest, SubmitSpec, VariableValue } from '../core/types'
 import { runtimeKeys } from './store'
 import type { RuntimeStore } from './store'
 
@@ -9,7 +9,7 @@ export type SubmitResult = unknown | typeof SUBMIT_CANCELLED
 
 export interface SubmitRuntime {
   scope: string
-  getMutationResolver(target: string): MutationResolver | undefined
+  getMutationSourceManifest(apiVersion: string, kind: string): MutationSourceManifest | undefined
   variables: {
     snapshot(): Record<string, VariableValue>
     set(name: string, value: VariableValue): void
@@ -46,9 +46,9 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
   }
 
   const binding = mutation.value as MutationBinding
-  const resolver = runtime.getMutationResolver(binding.target)
-  if (!resolver) {
-    throw new Error(`mutation resolver ${binding.target} is not registered`)
+  const manifest = runtime.getMutationSourceManifest(binding.apiVersion, binding.kind)
+  if (!manifest) {
+    throw new Error(`mutation source manifest ${binding.apiVersion}/${binding.kind} is not registered`)
   }
 
   if (submit.confirm && !runtime.confirm) {
@@ -68,7 +68,7 @@ export async function runSubmit(runtime: SubmitRuntime, submit: SubmitSpec, payl
   }
 
   try {
-    const result = await resolver(binding, payload, { variables: snapshot })
+    const result = await manifest.resolve(binding, payload, { variables: snapshot })
 
     for (const effect of submit.onSuccess ?? []) {
       if (effect.kind === 'setVariable') {

@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMemoryRuntimeStore, runtimeKeys } from '../runtime/store'
 import { createVariableEngine } from '../runtime/variables'
 import { createDataflowEngine } from './engine'
+import type { DataBinding } from '../core/types'
+
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
+function binding(kind: string, spec: unknown = {}): DataBinding {
+  return { apiVersion: API_VERSION, kind, spec } as DataBinding
+}
 
 function setup() {
   const store = createMemoryRuntimeStore()
@@ -15,7 +22,7 @@ describe('createDataflowEngine', () => {
     const resolve = vi.fn(async () => [{ id: 1 }])
     const engine = createDataflowEngine({ store, scope: 'test', variables, resolve })
 
-    engine.declare([{ name: 'rows', binding: { source: 'query' } }])
+    engine.declare([{ name: 'rows', binding: binding('query') }])
     await Promise.resolve()
     await Promise.resolve()
 
@@ -27,15 +34,15 @@ describe('createDataflowEngine', () => {
   it('gates a dependent unit until its dependOn target is ready, firing exactly once', async () => {
     const { store, variables } = setup()
     let resolveList: (value: Record<string, unknown>[]) => void = () => {}
-    const resolve = vi.fn((binding: { source: string }) => {
-      if (binding.source === 'list') return new Promise<Record<string, unknown>[]>((resolve) => { resolveList = resolve })
+    const resolve = vi.fn((b: DataBinding) => {
+      if (b.kind === 'list') return new Promise<Record<string, unknown>[]>((resolve) => { resolveList = resolve })
       return Promise.resolve([{ id: 'detail' }])
     })
     const engine = createDataflowEngine({ store, scope: 'test', variables, resolve })
 
     engine.declare([
-      { name: 'list', binding: { source: 'list' } },
-      { name: 'detail', binding: { source: 'detail' }, dependOn: ['list'] },
+      { name: 'list', binding: binding('list') },
+      { name: 'detail', binding: binding('detail'), dependOn: ['list'] },
     ])
     await Promise.resolve()
 
@@ -57,16 +64,16 @@ describe('createDataflowEngine', () => {
   it('gates through a dependOn chain of depth 2', async () => {
     const { store, variables } = setup()
     const order: string[] = []
-    const resolve = vi.fn(async (binding: { source: string }) => {
-      order.push(binding.source)
-      return [{ id: binding.source }]
+    const resolve = vi.fn(async (b: DataBinding) => {
+      order.push(b.kind)
+      return [{ id: b.kind }]
     })
     const engine = createDataflowEngine({ store, scope: 'test', variables, resolve })
 
     engine.declare([
-      { name: 'c', binding: { source: 'c' }, dependOn: ['b'] },
-      { name: 'b', binding: { source: 'b' }, dependOn: ['a'] },
-      { name: 'a', binding: { source: 'a' } },
+      { name: 'c', binding: binding('c'), dependOn: ['b'] },
+      { name: 'b', binding: binding('b'), dependOn: ['a'] },
+      { name: 'a', binding: binding('a') },
     ])
 
     await Promise.resolve()
@@ -86,7 +93,7 @@ describe('createDataflowEngine', () => {
     const resolve = vi.fn().mockResolvedValueOnce([{ id: 1 }]).mockResolvedValueOnce([{ id: 2 }])
     const engine = createDataflowEngine({ store, scope: 'test', variables, resolve })
 
-    engine.declare([{ name: 'rows', binding: { source: 'query' } }])
+    engine.declare([{ name: 'rows', binding: binding('query') }])
     await Promise.resolve()
     await Promise.resolve()
     expect(resolve).toHaveBeenCalledTimes(1)
@@ -102,7 +109,7 @@ describe('createDataflowEngine', () => {
     const resolve = vi.fn(async () => [{ id: 1 }])
     const engine = createDataflowEngine({ store, scope: 'test', variables, resolve })
 
-    engine.declare([{ name: 'rows', binding: { source: 'query' } }])
+    engine.declare([{ name: 'rows', binding: binding('query') }])
     await Promise.resolve()
     await Promise.resolve()
     expect(resolve).toHaveBeenCalledTimes(1)
@@ -120,7 +127,7 @@ describe('createDataflowEngine', () => {
     const resolve = vi.fn(() => new Promise<Record<string, unknown>[]>((resolve) => deferred.push(resolve)))
     const engine = createDataflowEngine({ store, scope: 'test', variables, resolve })
 
-    engine.declare([{ name: 'rows', binding: { source: 'query', id: '${sel}' } }])
+    engine.declare([{ name: 'rows', binding: binding('query', { id: '${sel}' }) }])
     await Promise.resolve()
     expect(resolve).toHaveBeenCalledTimes(1)
 

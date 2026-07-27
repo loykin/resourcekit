@@ -98,10 +98,10 @@ Public package entries:
   (`./adapters/*`) — per-kit adapter entries so consumers install only the
   kit peers they use.
 - `src/adapters/datasourcekit/index.ts` (`./adapters/datasourcekit`) —
-  `ConnectionAdapter` bridging a registered connection to `@loykin/datasourcekit`.
+  `ConnectionManifest` bridging a registered connection to `@loykin/datasourcekit`.
 - `src/dataflow/` — the consolidated home for everything dataflow-related:
   `engine.ts` (`DataflowEngine`), `ref.ts` (`DataflowRef` scanning),
-  `resolvers.ts`/`connectionAdapters.ts` (always-bundled REST/DSN resolvers,
+  `resolvers.ts`/`connectionManifests.ts` (always-bundled REST/DSN resolvers,
   no extra dependency), `coordinator.ts` (the generic `QueryCoordinator`
   contract + direct implementation), and
   `coordinators/tanstack-query/index.ts` (`./dataflow/tanstack-query`) —
@@ -121,8 +121,19 @@ MCP server example.
 - Core must remain React-free. If a core feature seems to need React types,
   the design is wrong — stop and reconsider.
 - The `datasource` resolver ships as a datasourcekit adapter package, never
-  in core. Core knows only the `DataBinding` envelope and its `source`
-  discriminator.
+  in core. Core knows only the `DataBinding` envelope and its
+  `apiVersion`/`kind` discriminator.
+- Every adapter-registered concept — kinds, data sources, mutation sources,
+  connection types — shares one envelope: `{apiVersion, kind, ...}`,
+  registered as an array of self-describing manifests and looked up by
+  `(apiVersion, kind)`, never a bare string key or a flat
+  `Record<string, T>`. `DataBinding`/`MutationBinding` mirror this exactly
+  (`{apiVersion, kind, spec}`, matching `Resource`'s own envelope) —
+  `DataSourceManifest`/`MutationSourceManifest`/`ConnectionManifest` are the
+  registration-side counterpart to `KindManifest`. If a new adapter-registered
+  concept comes up, give it this same shape; don't reintroduce a
+  bare-string-keyed `Record<string, T>` registration or a flat
+  `{ <discriminator>: string, ...fields }` wire shape.
 - Kind adapters map resource specs onto existing kit public props. Existing
   kit APIs (designkit, gridkit, chartkit, basekit) must not change.
 - The variable engine stays flat: one page scope, `string | string[]`

@@ -40,6 +40,7 @@ import {
   validateResource,
 } from '@loykin/resourcekit'
 import type {
+  DataBinding,
   DataResolver,
   JsonSchema,
   Resource,
@@ -108,14 +109,15 @@ function jsonDataUrl(value: unknown): string {
 }
 
 const playgroundDatasourceResolver: DataResolver = async (binding) => {
-  if (binding.source !== 'datasource') return []
-  const query = typeof binding.query === 'object' && binding.query !== null ? (binding.query as Record<string, unknown>) : {}
-  if (binding.datasourceUid === 'crm') {
+  if (binding.kind !== 'datasource') return []
+  const spec = (binding as Extract<DataBinding, { kind: 'datasource' }>).spec
+  const query = typeof spec.query === 'object' && spec.query !== null ? (spec.query as Record<string, unknown>) : {}
+  if (spec.datasourceUid === 'crm') {
     const status = typeof query.status === 'string' ? query.status : undefined
     const id = typeof query.id === 'string' ? query.id : undefined
     return customerRows.filter((row) => (!status || row.status === status) && (!id || row.id === id))
   }
-  if (binding.datasourceUid === 'metrics') {
+  if (spec.datasourceUid === 'metrics') {
     const service = typeof query.service === 'string' ? query.service : undefined
     return metricsRows.filter((row) => !service || row.service === service)
   }
@@ -138,20 +140,20 @@ const liveClockResolver: DataResolver = async () => {
 }
 
 const memoryDataResolver: DataResolver = async (rawBinding) => {
-  const binding = rawBinding as Record<string, unknown>
-  if (binding.collection !== 'users') return []
-  const id = typeof binding.id === 'string' ? binding.id : undefined
+  const spec = (rawBinding as DataBinding).spec as Record<string, unknown>
+  if (spec.collection !== 'users') return []
+  const id = typeof spec.id === 'string' ? spec.id : undefined
   const rows = memoryUsers.map((row) => ({ ...row }))
   return id ? rows.filter((row) => row.id === id) : rows
 }
 
 const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => {
-  const binding = rawBinding as Record<string, unknown>
-  if (binding.collection === 'settings') return { ...(typeof payload === 'object' && payload !== null ? payload : {}), version: String(Date.now()) }
-  if (binding.collection !== 'users') throw new Error(`unknown collection: ${String(binding.collection)}`)
+  const spec = (rawBinding as MutationBinding).spec as Record<string, unknown>
+  if (spec.collection === 'settings') return { ...(typeof payload === 'object' && payload !== null ? payload : {}), version: String(Date.now()) }
+  if (spec.collection !== 'users') throw new Error(`unknown collection: ${String(spec.collection)}`)
   const values = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
-  const id = typeof binding.id === 'string' ? binding.id : undefined
-  if (binding.operation === 'delete' && id) {
+  const id = typeof spec.id === 'string' ? spec.id : undefined
+  if (spec.operation === 'delete' && id) {
     const index = memoryUsers.findIndex((item) => item.id === id)
     if (index < 0) throw new Error(`user ${id} not found`)
     if (memoryUsers[index].role === 'Admin') throw new Error('Admin members cannot be deleted')
@@ -176,10 +178,10 @@ const memoryMutationResolver: MutationResolver = async (rawBinding, payload) => 
 // mutation-bound *write* (FormView) against the same backend actually
 // round-trip together.
 const restMutationResolver: MutationResolver = async (rawBinding, payload) => {
-  const binding = rawBinding as Extract<MutationBinding, { target: 'rest' }>
-  const response = await fetch(binding.url, {
-    method: binding.method ?? 'PATCH',
-    headers: { 'content-type': 'application/json', ...binding.headers },
+  const spec = (rawBinding as Extract<MutationBinding, { kind: 'rest' }>).spec
+  const response = await fetch(spec.url, {
+    method: spec.method ?? 'PATCH',
+    headers: { 'content-type': 'application/json', ...spec.headers },
     body: JSON.stringify(payload),
   })
   if (!response.ok) throw new Error(`REST mutation failed: ${response.status} ${response.statusText}`)
@@ -187,8 +189,8 @@ const restMutationResolver: MutationResolver = async (rawBinding, payload) => {
 }
 
 const operationsMutationResolver: MutationResolver = async (rawBinding, payload) => {
-  const binding = rawBinding as Record<string, unknown>
-  const connectionUid = typeof binding.connection === 'string' ? binding.connection : 'service-operations'
+  const spec = (rawBinding as MutationBinding).spec as Record<string, unknown>
+  const connectionUid = typeof spec.connection === 'string' ? spec.connection : 'service-operations'
   const connection = await registry.getConnection(connectionUid)
   if (!connection || typeof connection.config !== 'object' || connection.config === null || !('baseUrl' in connection.config)) {
     throw new Error(`operations connection ${connectionUid} is not registered`)
@@ -262,8 +264,9 @@ const customerWorkspace: Resource = {
           bindings: { selected: { $variable: 'customerId' } },
           spec: {
             data: {
-              source: 'static',
-              rows: customerRows,
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'static',
+              spec: { rows: customerRows },
             },
             idField: 'id',
             primary: { field: 'name' },
@@ -286,9 +289,9 @@ const customerWorkspace: Resource = {
           kind: 'RecordScope',
           spec: {},
           record: {
-            source: 'datasource',
-            datasourceUid: 'crm',
-            query: { id: '${customerId}' },
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'datasource',
+            spec: { datasourceUid: 'crm', query: { id: '${customerId}' } },
           },
           slots: [
             {
@@ -394,14 +397,17 @@ const trendingReposPage: Resource = {
           spec: {
             title: 'Top 5 Trending Repositories',
             data: {
-              source: 'static',
-              rows: [
-                { name: 'torvalds/linux', language: 'C', stars: 178000 },
-                { name: 'facebook/react', language: 'JavaScript', stars: 231000 },
-                { name: 'microsoft/vscode', language: 'TypeScript', stars: 168000 },
-                { name: 'vercel/next.js', language: 'JavaScript', stars: 128000 },
-                { name: 'ollama/ollama', language: 'Go', stars: 100000 },
-              ],
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'static',
+              spec: {
+                rows: [
+                  { name: 'torvalds/linux', language: 'C', stars: 178000 },
+                  { name: 'facebook/react', language: 'JavaScript', stars: 231000 },
+                  { name: 'microsoft/vscode', language: 'TypeScript', stars: 168000 },
+                  { name: 'vercel/next.js', language: 'JavaScript', stars: 128000 },
+                  { name: 'ollama/ollama', language: 'Go', stars: 100000 },
+                ],
+              },
             },
             columns: {
               name: { label: 'Repository', type: 'text' },
@@ -660,12 +666,15 @@ const workbenchTemplate: Resource = {
             title: 'Tasks',
             enableSorting: true,
             data: {
-              source: 'static',
-              rows: [
-                { id: 'T-101', owner: 'Ada', priority: 'P1', state: 'open' },
-                { id: 'T-102', owner: 'Grace', priority: 'P2', state: 'blocked' },
-                { id: 'T-103', owner: 'Katherine', priority: 'P1', state: 'open' },
-              ],
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'static',
+              spec: {
+                rows: [
+                  { id: 'T-101', owner: 'Ada', priority: 'P1', state: 'open' },
+                  { id: 'T-102', owner: 'Grace', priority: 'P2', state: 'blocked' },
+                  { id: 'T-103', owner: 'Katherine', priority: 'P1', state: 'open' },
+                ],
+              },
             },
           },
         },
@@ -798,8 +807,9 @@ const fromRowBinding: Resource = {
           spec: {
             title: 'Incidents',
             data: {
-              source: 'static',
-              rows: incidentRows,
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'static',
+              spec: { rows: incidentRows },
             },
           },
           events: {
@@ -840,7 +850,7 @@ const restDataTable: Resource = {
   apiVersion: 'resourcekit.dev/v1alpha1',
   kind: 'DataBody',
   metadata: { name: 'rest-data-table' },
-  spec: { title: 'Users', description: 'Rows resolved through source: "rest" and rowsPath.' },
+  spec: { title: 'Users', description: 'Rows resolved through kind: "rest" and rowsPath.' },
   slots: [
     {
       name: 'actions',
@@ -883,9 +893,9 @@ const restDataTable: Resource = {
               joined: { label: 'Joined', type: 'date', flex: 1, tone: 'muted' },
             },
             data: {
-              source: 'rest',
-              url: jsonDataUrl({ data: { items: userRows } }),
-              rowsPath: 'data.items',
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'rest',
+              spec: { url: jsonDataUrl({ data: { items: userRows } }), rowsPath: 'data.items' },
             },
           },
         },
@@ -900,7 +910,7 @@ const datasourceDataTable: Resource = {
   metadata: { name: 'datasource-data-table' },
   spec: {
     title: 'CRM Customers',
-    description: 'Rows resolved through source: "datasource" as a datasourcekit adapter would register it.',
+    description: 'Rows resolved through kind: "datasource" as a datasourcekit adapter would register it.',
   },
   variables: [
     { name: 'customerId', type: 'string', default: '1' },
@@ -971,12 +981,15 @@ const datasourceDataTable: Resource = {
               revenue: { label: 'Revenue', type: 'number', align: 'right', flex: 1 },
             },
             data: {
-              source: 'datasource',
-              datasourceUid: 'crm',
-              datasourceType: 'demo-crm',
-              query: {
-                table: 'customers',
-                status: '${status}',
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'datasource',
+              spec: {
+                datasourceUid: 'crm',
+                datasourceType: 'demo-crm',
+                query: {
+                  table: 'customers',
+                  status: '${status}',
+                },
               },
             },
           },
@@ -1028,7 +1041,7 @@ const userManagement: Resource = {
             searchableColumns: ['name', 'email', 'role', 'status'],
             tableHeight: 480,
             pagination: { pageSize: 10 },
-            data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
+            data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'users', v: '${usersVersion}' } },
             columns: {
               id: { label: 'ID', flex: 0.4, tone: 'muted' },
               name: { label: 'Name', flex: 1.2, emphasis: 'strong' },
@@ -1053,7 +1066,11 @@ const userManagement: Resource = {
                     disabledWhen: { field: 'role', equals: 'Admin' },
                     submit: {
                       action: 'users.delete',
-                      mutation: { target: 'memory', collection: 'users', operation: 'delete', id: '${payload.id}' },
+                      mutation: {
+                        apiVersion: 'resourcekit.dev/v1alpha1',
+                        kind: 'memory',
+                        spec: { collection: 'users', operation: 'delete', id: '${payload.id}' },
+                      },
                       confirm: {
                         title: 'Delete ${payload.name}?',
                         description: 'This removes ${payload.email} from the in-memory team list.',
@@ -1083,7 +1100,7 @@ const userManagement: Resource = {
                   spec: {
                     submit: {
                       action: 'users.create',
-                      mutation: { target: 'memory', collection: 'users' },
+                      mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'users' } },
                       onSuccess: [
                         { kind: 'setVariable', variable: 'usersVersion', from: 'version' },
                         { kind: 'setVariable', variable: 'createOpen' },
@@ -1193,7 +1210,7 @@ const userEditor: Resource = {
           kind: 'SelectableList',
           bindings: { selected: { $variable: 'userId' } },
           spec: {
-            data: { source: 'memory', collection: 'users', v: '${usersVersion}' },
+            data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'users', v: '${usersVersion}' } },
             idField: 'id',
             primary: { field: 'name' },
             secondary: [
@@ -1222,7 +1239,11 @@ const userEditor: Resource = {
                   apiVersion: 'resourcekit.dev/v1alpha1',
                   kind: 'RecordScope',
                   spec: {},
-                  record: { source: 'memory', collection: 'users', id: '${userId}', v: '${usersVersion}' },
+                  record: {
+                    apiVersion: 'resourcekit.dev/v1alpha1',
+                    kind: 'memory',
+                    spec: { collection: 'users', id: '${userId}', v: '${usersVersion}' },
+                  },
                   slots: [
                     {
                       items: [
@@ -1232,7 +1253,7 @@ const userEditor: Resource = {
                           spec: {
                             submit: {
                               action: 'users.update',
-                              mutation: { target: 'memory', collection: 'users', id: '${userId}' },
+                              mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'users', id: '${userId}' } },
                               onSuccess: [{ kind: 'setVariable', variable: 'usersVersion', from: 'version' }],
                             },
                             submitLabel: 'Save changes',
@@ -1368,7 +1389,7 @@ const demoUsersConnectionPage: Resource = {
           kind: 'SelectableList',
           bindings: { selected: { $variable: 'userId' } },
           spec: {
-            data: { source: 'connection', connection: 'demo-users', request: { path: '/users' } },
+            data: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'connection', spec: { connection: 'demo-users', request: { path: '/users' } } },
             idField: 'id',
             primary: { field: 'name' },
             secondary: [{ field: 'role', label: 'Role' }],
@@ -1384,7 +1405,11 @@ const demoUsersConnectionPage: Resource = {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DetailView',
           spec: {
-            data: { source: 'connection', connection: 'demo-users', request: { path: '/users/${userId}' } },
+            data: {
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'connection',
+              spec: { connection: 'demo-users', request: { path: '/users/${userId}' } },
+            },
             fields: [
               { field: 'name', label: 'Name' },
               { field: 'email', label: 'Email' },
@@ -1405,9 +1430,12 @@ const coinMarketCapTop10: Resource = {
   metadata: { name: 'coin-market-cap-top10' },
   spec: {
     data: {
-      source: 'connection',
-      connection: 'coingecko',
-      request: { path: '/coins/markets', query: { vs_currency: 'usd', order: 'market_cap_desc', per_page: '10', page: '1' } },
+      apiVersion: 'resourcekit.dev/v1alpha1',
+      kind: 'connection',
+      spec: {
+        connection: 'coingecko',
+        request: { path: '/coins/markets', query: { vs_currency: 'usd', order: 'market_cap_desc', per_page: '10', page: '1' } },
+      },
     },
     idField: 'id',
     primary: { field: 'name' },
@@ -1419,7 +1447,7 @@ const coinMarketCapTop10: Resource = {
 }
 
 // Connection-bound read (DetailView) next to a mutation-bound write
-// (FormView, target: 'rest' PATCH) against the *same* demo-users backend —
+// (FormView, kind: 'rest' PATCH) against the *same* demo-users backend —
 // proves a write actually persists and the connection-bound read reflects
 // it (after a refetch; writes don't auto-invalidate reads with no shared
 // variable, see connectionWriteReadPage's own note below).
@@ -1435,7 +1463,11 @@ const connectionWriteReadPage: Resource = {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DetailView',
           spec: {
-            data: { source: 'connection', connection: 'demo-users', request: { path: '/users/2' } },
+            data: {
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'connection',
+              spec: { connection: 'demo-users', request: { path: '/users/2' } },
+            },
             fields: [
               { field: 'name', label: 'Name' },
               { field: 'role', label: 'Role (read via connection)', display: 'badge' },
@@ -1448,7 +1480,13 @@ const connectionWriteReadPage: Resource = {
           spec: {
             submitLabel: 'Save role',
             successMessage: 'Saved — reload the page to see the connection-bound read pick it up',
-            submit: { mutation: { target: 'rest', url: `${window.location.origin}/api/demo-users/users/2`, method: 'PATCH' } },
+            submit: {
+              mutation: {
+                apiVersion: 'resourcekit.dev/v1alpha1',
+                kind: 'rest',
+                spec: { url: `${window.location.origin}/api/demo-users/users/2`, method: 'PATCH' },
+              },
+            },
             sections: [{ id: 'role', fields: [{ name: 'role', label: 'New role for Bob Martinez', required: true }] }],
           },
         },
@@ -1469,9 +1507,9 @@ const dynamicDatasourceKitResource: Resource = {
     {
       name: 'hostCpu',
       binding: {
-        source: 'connection',
-        connection: 'demo-metrics-dynamic',
-        request: { metric: 'cpuPercent', region: '${region}' },
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'connection',
+        spec: { connection: 'demo-metrics-dynamic', request: { metric: 'cpuPercent', region: '${region}' } },
       },
     },
   ],
@@ -1570,9 +1608,9 @@ const dynamicDatasourceKitResource: Resource = {
                   kind: 'DetailView',
                   spec: {
                     data: {
-                      source: 'connection',
-                      connection: 'demo-metrics-dynamic',
-                      request: { metric: 'memoryPercent', host: '${selectedHost}' },
+                      apiVersion: 'resourcekit.dev/v1alpha1',
+                      kind: 'connection',
+                      spec: { connection: 'demo-metrics-dynamic', request: { metric: 'memoryPercent', host: '${selectedHost}' } },
                     },
                     fields: [
                       { field: 'host', label: 'Host', emphasis: 'strong' },
@@ -1596,7 +1634,7 @@ const dynamicDatasourceKitResource: Resource = {
                         ],
                       },
                     ],
-                    submit: { mutation: { target: 'memory', collection: 'settings' } },
+                    submit: { mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'memory', spec: { collection: 'settings' } } },
                     submitLabel: 'Save policy',
                     successMessage: 'Alert policy saved in memory',
                   },
@@ -1640,7 +1678,7 @@ const tanStackPollingDemoPage: Resource = {
   dataflow: [
     {
       name: 'liveTick',
-      binding: { source: 'liveClock' },
+      binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'liveClock', spec: {} },
       policy: { refresh: { kind: 'interval', ms: 2000 } },
     },
   ],
@@ -1676,9 +1714,9 @@ export const serviceOperationsPage: Resource = {
     {
       name: 'incidents',
       binding: {
-        source: 'connection',
-        connection: 'service-operations',
-        request: { path: '/incidents', query: { status: '${incidentStatus}' } },
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'connection',
+        spec: { connection: 'service-operations', request: { path: '/incidents', query: { status: '${incidentStatus}' } } },
       },
       policy: { refresh: { kind: 'interval', ms: 30_000 }, staleForMs: 10_000, retainPreviousData: true, retry: { maxAttempts: 2 } },
     },
@@ -1687,9 +1725,9 @@ export const serviceOperationsPage: Resource = {
       // value, so no dependOn is needed at all.
       name: 'incidentDetail',
       binding: {
-        source: 'connection',
-        connection: 'service-operations',
-        request: { path: '/incidents', query: { id: '${selectedIncident}' } },
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'connection',
+        spec: { connection: 'service-operations', request: { path: '/incidents', query: { id: '${selectedIncident}' } } },
       },
     },
   ],
@@ -1828,7 +1866,11 @@ export const serviceOperationsPage: Resource = {
                         },
                       ],
                       submit: {
-                        mutation: { target: 'operations', connection: 'service-operations' },
+                        mutation: {
+                          apiVersion: 'resourcekit.dev/v1alpha1',
+                          kind: 'operations',
+                          spec: { connection: 'service-operations' },
+                        },
                         onSuccess: [{ kind: 'refetchData', dataflow: ['incidents', 'incidentDetail'] }],
                       },
                       submitLabel: 'Save handoff',
@@ -1892,7 +1934,11 @@ const githubOrgReposPage: Resource = {
           kind: 'SelectableList',
           bindings: { selected: { $variable: 'repoFullName' } },
           spec: {
-            data: { source: 'connection', connection: 'github', request: { path: '/orgs/vercel/repos', query: { per_page: '10', sort: 'updated' } } },
+            data: {
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'connection',
+              spec: { connection: 'github', request: { path: '/orgs/vercel/repos', query: { per_page: '10', sort: 'updated' } } },
+            },
             idField: 'full_name',
             primary: { field: 'name' },
             secondary: [
@@ -1911,7 +1957,11 @@ const githubOrgReposPage: Resource = {
           apiVersion: 'resourcekit.dev/v1alpha1',
           kind: 'DetailView',
           spec: {
-            data: { source: 'connection', connection: 'github', request: { path: '/repos/${repoFullName}' } },
+            data: {
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'connection',
+              spec: { connection: 'github', request: { path: '/repos/${repoFullName}' } },
+            },
             fields: [
               { field: 'description', label: 'Description' },
               { field: 'stargazers_count', label: 'Stars' },
@@ -2041,14 +2091,14 @@ export const examples: readonly PlaygroundExample[] = [
   {
     id: 'rest-data-table',
     name: 'REST data table',
-    description: 'Grid rows resolved through source: "rest" and rowsPath.',
+    description: 'Grid rows resolved through kind: "rest" and rowsPath.',
     category: 'runtime',
     resource: restDataTable,
   },
   {
     id: 'datasource-data-table',
     name: 'Datasource data table',
-    description: 'Grid rows resolved through source: "datasource" as a datasourcekit adapter would register it.',
+    description: 'Grid rows resolved through kind: "datasource" as a datasourcekit adapter would register it.',
     category: 'runtime',
     resource: datasourceDataTable,
   },
@@ -2070,18 +2120,23 @@ export const examples: readonly PlaygroundExample[] = [
 
 export const registry = createRegistry<KindRenderFn>()
 const playgroundDatasourceManager = createPlaygroundDatasourceManager()
+const PLAYGROUND_API_VERSION = 'resourcekit.dev/v1alpha1'
 registry.use({
   name: 'playground-resolvers',
-  dataResolvers: {
-    datasource: playgroundDatasourceResolver,
-    rest: restResolver,
-    static: staticResolver,
-    memory: memoryDataResolver,
-    connection: createConnectionDataResolver(registry),
-    liveClock: liveClockResolver,
-  },
-  mutationResolvers: { memory: memoryMutationResolver, rest: restMutationResolver, operations: operationsMutationResolver },
-  connectionAdapters: { rest: restConnectionAdapter, datasourcekit: createDatasourceKitConnectionAdapter(playgroundDatasourceManager) },
+  dataSourceManifests: [
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'datasource', resolve: playgroundDatasourceResolver },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'rest', resolve: restResolver },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'static', resolve: staticResolver },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'memory', resolve: memoryDataResolver },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'connection', resolve: createConnectionDataResolver(registry) },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'liveClock', resolve: liveClockResolver },
+  ],
+  mutationSourceManifests: [
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'memory', resolve: memoryMutationResolver },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'rest', resolve: restMutationResolver },
+    { apiVersion: PLAYGROUND_API_VERSION, kind: 'operations', resolve: operationsMutationResolver },
+  ],
+  connectionManifests: [restConnectionAdapter, createDatasourceKitConnectionAdapter(playgroundDatasourceManager)],
 })
 registry.use(createPlaygroundResourceAdapters())
 registry.setConnectionProvider(createPlaygroundConnectionProvider())
@@ -2100,7 +2155,8 @@ const tanStackCoordinator = createTanStackQueryCoordinator(new QueryClient())
 // since it's the exact same ConnectionAdapter contract either way.
 registry.registerConnection({
   uid: 'demo-users',
-  type: 'rest',
+  apiVersion: PLAYGROUND_API_VERSION,
+  kind: 'rest',
   name: 'Demo Users API',
   description: 'In-memory demo REST API — GET /users, GET /users/:id, PATCH /users/:id.',
   config: { baseUrl: `${window.location.origin}/api/demo-users` },
@@ -2110,7 +2166,8 @@ registry.registerConnection({
 
 registry.registerConnection({
   uid: 'service-operations',
-  type: 'rest',
+  apiVersion: PLAYGROUND_API_VERSION,
+  kind: 'rest',
   name: 'Service Operations API',
   description: 'Same-origin backend for live incident queries and handoff writes.',
   config: { baseUrl: `${window.location.origin}/api/service-operations` },
@@ -2123,7 +2180,8 @@ registry.registerConnection({
 // CORS-enabled for GET.
 registry.registerConnection({
   uid: 'coingecko',
-  type: 'rest',
+  apiVersion: PLAYGROUND_API_VERSION,
+  kind: 'rest',
   name: 'CoinGecko Markets API',
   description: 'Public crypto market data — GET /coins/markets.',
   config: { baseUrl: 'https://api.coingecko.com/api/v3' },
@@ -2138,7 +2196,8 @@ registry.registerConnection({
 // hand-written, then copied here to render with the same live data.
 registry.registerConnection({
   uid: 'github',
-  type: 'rest',
+  apiVersion: PLAYGROUND_API_VERSION,
+  kind: 'rest',
   name: 'GitHub API',
   description: 'Public GitHub REST API (read-only here) — GET /orgs/:org/repos, GET /repos/:owner/:repo.',
   config: { baseUrl: 'https://api.github.com', headers: { accept: 'application/vnd.github+json' } },

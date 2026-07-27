@@ -40,31 +40,38 @@ const demoDb = startDemoDb()
 const demoDatasourceKit = startDemoDatasourceKit()
 
 const restMutationResolver: MutationResolver = async (binding, payload) => {
-  const b = binding as Extract<MutationBinding, { target: 'rest' }>
-  const response = await fetch(b.url, {
-    method: b.method ?? 'PATCH',
-    headers: { 'content-type': 'application/json', ...b.headers },
+  const b = binding as Extract<MutationBinding, { kind: 'rest' }>
+  const response = await fetch(b.spec.url, {
+    method: b.spec.method ?? 'PATCH',
+    headers: { 'content-type': 'application/json', ...b.spec.headers },
     body: JSON.stringify(payload),
   })
   if (!response.ok) throw new Error(`REST mutation failed: ${response.status} ${response.statusText}`)
   return response.json()
 }
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 const registry = createRegistry()
 registry.use({
   name: 'mcp-server-example-resolvers',
-  dataResolvers: { static: staticResolver, rest: restResolver, connection: createConnectionDataResolver(registry) },
-  mutationResolvers: { rest: restMutationResolver },
-  connectionAdapters: { rest: restConnectionAdapter, sqlite: sqliteConnectionAdapter, datasourcekit: createDatasourceKitConnectionAdapter(demoDatasourceKit) },
+  dataSourceManifests: [
+    { apiVersion: API_VERSION, kind: 'static', resolve: staticResolver },
+    { apiVersion: API_VERSION, kind: 'rest', resolve: restResolver },
+    { apiVersion: API_VERSION, kind: 'connection', resolve: createConnectionDataResolver(registry) },
+  ],
+  mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'rest', resolve: restMutationResolver }],
+  connectionManifests: [restConnectionAdapter, sqliteConnectionAdapter, createDatasourceKitConnectionAdapter(demoDatasourceKit)],
 })
 registry.use(createFirstPartyResourceAdapters())
 
 // Registered connections — resource documents reference them by uid
-// ({ source: 'connection', connection: 'demo-users', request }), never a raw
-// URL/DSN, and MCP only ever sees the redacted ConnectionSummary (test.md §5).
+// ({ apiVersion, kind: 'connection', spec: { connection: 'demo-users', request } }),
+// never a raw URL/DSN, and MCP only ever sees the redacted ConnectionSummary (test.md §5).
 registry.registerConnection({
   uid: 'demo-users',
-  type: 'rest',
+  apiVersion: API_VERSION,
+  kind: 'rest',
   name: 'Demo Users API',
   description: 'In-memory demo REST API for this session — GET /users, GET /users/:id, PATCH /users/:id.',
   config: { baseUrl: demoApi.baseUrl },
@@ -72,11 +79,12 @@ registry.registerConnection({
   mcpPolicy: { test: true, preview: true, mutate: false, maxRows: 20 },
 })
 // A second connection on a completely different adapter type (SQLite, not
-// REST) — proves ConnectionAdapter is genuinely pluggable, see
+// REST) — proves ConnectionManifest is genuinely pluggable, see
 // sqlite-connection-adapter.ts.
 registry.registerConnection({
   uid: 'demo-orders',
-  type: 'sqlite',
+  apiVersion: API_VERSION,
+  kind: 'sqlite',
   name: 'Demo Orders DB',
   description: 'In-memory demo SQLite database for this session — table "orders" (id, customer, amount, status).',
   config: { db: demoDb.db, tables: demoDb.tables },
@@ -85,8 +93,8 @@ registry.registerConnection({
 // A connection whose backend requires a secret — proves a connection can
 // carry a credential that MCP never sees (test.md §5.3). The token lives
 // only in `config.headers` here, server-side; list_connections/get_connection
-// only ever expose the ConnectionSummary shape (uid/type/name/requestSchema/
-// capabilities), never `config`.
+// only ever expose the ConnectionSummary shape (uid/apiVersion/kind/name/
+// requestSchema/capabilities), never `config`.
 registry.registerConnection(
   createSecureReportsConnection(process.env, {
     RESOURCEKIT_SECURE_REPORTS_URL: demoApi.baseUrl,
@@ -97,7 +105,8 @@ registry.registerConnection(
 // through this server's own tools, not just our demo backends.
 registry.registerConnection({
   uid: 'github',
-  type: 'rest',
+  apiVersion: API_VERSION,
+  kind: 'rest',
   name: 'GitHub API',
   description: 'Public GitHub REST API (read-only here) — GET /orgs/:org/repos, GET /repos/:owner/:repo.',
   config: { baseUrl: 'https://api.github.com', headers: { accept: 'application/vnd.github+json' } },
@@ -113,7 +122,8 @@ registry.registerConnection({
 // preview/resolve go through DatasourceManager.instances.query.
 registry.registerConnection({
   uid: 'demo-metrics',
-  type: 'datasourcekit',
+  apiVersion: API_VERSION,
+  kind: 'datasourcekit',
   name: 'Demo Metrics (DatasourceKit)',
   description: 'In-memory demo metrics via a DatasourceKit-backed connection — fields host, region, cpuPercent, memoryPercent, request shape { metric: "cpuPercent" | "memoryPercent", region? }.',
   config: { datasourceUid: DATASOURCE_UID, datasourceType: DATASOURCE_TYPE },
@@ -129,7 +139,8 @@ const connectionStore = createConnectionStore()
 registry.setConnectionProvider(connectionStore.provider)
 connectionStore.add({
   uid: 'demo-users-dynamic',
-  type: 'rest',
+  apiVersion: API_VERSION,
+  kind: 'rest',
   name: 'Demo Users API (provider-backed)',
   description: 'Same backend as demo-users, but sourced from a ConnectionProvider — proves connections can be discovered dynamically instead of only registered at server boot.',
   config: { baseUrl: demoApi.baseUrl },
@@ -172,12 +183,12 @@ Variable interpolation: a page variable declared in some ancestor's spec.variabl
 
 Data source constraint: a "static" data binding is fixed, inline rows baked into the document — it cannot be filtered by a variable, because there's no filtering step at all, it just returns those exact rows every time. If you're building a selection-driven detail view (e.g. DetailView whose content should follow whichever row is selected in a sibling list), its data binding needs a source that can actually be parameterized per-request.
 
-Connections (test.md §5-7): rather than hardcoding a URL/DSN into a data binding, call list_connections to see what's registered. This example registers connections on three different adapter types — proving the contract isn't REST-specific:
-  "demo-users" (type "rest")   -> GET /users, GET /users/:id, PATCH /users/:id. Each user has: id, name, email, role.
-  "demo-orders" (type "sqlite") -> table "orders" (id, customer, amount, status), via a request shape { table, where?, limit? }. inspect_connection on this one lists tables (no path) or a table's columns (path: "orders").
-  "demo-metrics" (type "datasourcekit", backed by the real @loykin/datasourcekit package) -> fields host, region, cpuPercent, memoryPercent, via a request shape { metric: "cpuPercent" | "memoryPercent", region? }. inspect_connection lists namespaces (no path) or a namespace's fields (path: "metrics").
-Before binding to any of them, call test_connection to confirm it's reachable, validate_connection_request to check a candidate request against its policy, and preview_connection to see a capped, real sample of what it returns — never the full result set. Once you're confident, use it in a resource document as a data binding, e.g.: { "source": "connection", "connection": "demo-orders", "request": { "table": "orders", "where": { "status": "paid" } } } — never embed the connection's real base URL/DSN, which MCP never sees.
-Use "demo-users" for a SelectableList/DetailView (id can be a \${variable}) or a FormView's submit.mutation (target: "rest"); use "demo-orders" or "demo-metrics" for a TableView/ChartView needing simple table+filter data.`,
+Connections (test.md §5-7): rather than hardcoding a URL/DSN into a data binding, call list_connections to see what's registered. This example registers connections on three different manifest kinds — proving the contract isn't REST-specific:
+  "demo-users" (kind "rest")   -> GET /users, GET /users/:id, PATCH /users/:id. Each user has: id, name, email, role.
+  "demo-orders" (kind "sqlite") -> table "orders" (id, customer, amount, status), via a request shape { table, where?, limit? }. inspect_connection on this one lists tables (no path) or a table's columns (path: "orders").
+  "demo-metrics" (kind "datasourcekit", backed by the real @loykin/datasourcekit package) -> fields host, region, cpuPercent, memoryPercent, via a request shape { metric: "cpuPercent" | "memoryPercent", region? }. inspect_connection lists namespaces (no path) or a namespace's fields (path: "metrics").
+Before binding to any of them, call test_connection to confirm it's reachable, validate_connection_request to check a candidate request against its policy, and preview_connection to see a capped, real sample of what it returns — never the full result set. Once you're confident, use it in a resource document as a data binding, e.g.: { "apiVersion": "resourcekit.dev/v1alpha1", "kind": "connection", "spec": { "connection": "demo-orders", "request": { "table": "orders", "where": { "status": "paid" } } } } — never embed the connection's real base URL/DSN, which MCP never sees.
+Use "demo-users" for a SelectableList/DetailView (id can be a \${variable}) or a FormView's submit.mutation (kind "rest"); use "demo-orders" or "demo-metrics" for a TableView/ChartView needing simple table+filter data.`,
   },
 )
 
@@ -236,7 +247,7 @@ async function connectionSummary(uid: string) {
 /** Resolves the render-time connection + adapter for a uid this scope has already allowed (i.e. `connectionSummary(uid)` returned something). */
 async function connectionAndAdapter(uid: string) {
   const connection = await scope.getConnection(uid)
-  const adapter = connection ? scope.getConnectionAdapter(connection.type) : undefined
+  const adapter = connection ? scope.getConnectionManifest(connection.apiVersion, connection.kind) : undefined
   return connection && adapter ? { connection, adapter } : undefined
 }
 

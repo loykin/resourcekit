@@ -5,12 +5,17 @@ import { createFirstPartyResourceAdapters } from '../../src/adapters'
 import { buildGenerationPayload, evaluateScenarioResource } from './evaluation'
 import { scenarioDefinitions } from './index'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 function registry() {
   const registry = createRegistry<KindRenderFn>()
   registry.use({
     name: 'scenario-test-resolvers',
-    dataResolvers: { static: staticResolver, datasource: async () => [] },
-    mutationResolvers: { memory: async (_binding, payload) => payload },
+    dataSourceManifests: [
+      { apiVersion: API_VERSION, kind: 'static', resolve: staticResolver },
+      { apiVersion: API_VERSION, kind: 'datasource', resolve: async () => [] },
+    ],
+    mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'memory', resolve: async (_binding, payload) => payload }],
   })
   registry.use(createFirstPartyResourceAdapters())
   return registry

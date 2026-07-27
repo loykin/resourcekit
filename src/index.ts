@@ -26,16 +26,19 @@ export type {
   VariableDeclaration,
   VariableValue,
   DataBinding,
-  DatasourceBinding,
-  RestBinding,
-  StaticBinding,
-  ConnectionBinding,
+  DatasourceBindingSpec,
+  RestBindingSpec,
+  StaticBindingSpec,
+  ConnectionBindingSpec,
   TimeRange,
   DataResolveContext,
   DataResolver,
-  DataSourceAdapter,
+  DataSourceManifest,
   MutationBinding,
+  RestMutationSpec,
+  DatasourceMutationSpec,
   MutationResolver,
+  MutationSourceManifest,
   ConfirmSpec,
   SubmitSpec,
   SubmitEffect,
@@ -54,7 +57,7 @@ export type {
   ConnectionInspection,
   RequestValidationResult,
   DataPreview,
-  ConnectionAdapter,
+  ConnectionManifest,
   ConnectionSummary,
   KindManifest,
   ResourceKitPlugin,
@@ -97,8 +100,8 @@ export type {
 } from './runtime/store'
 export { restResolver, staticResolver, createConnectionDataResolver, createRestResolver } from './dataflow/resolvers'
 export type { RestResolverOptions } from './dataflow/resolvers'
-export { restConnectionAdapter, createRestConnectionAdapter } from './dataflow/connectionAdapters'
-export type { RestConnectionConfig, RestConnectionRequest, RestConnectionAdapterOptions } from './dataflow/connectionAdapters'
+export { restConnectionAdapter, createRestConnectionAdapter } from './dataflow/connectionManifests'
+export type { RestConnectionConfig, RestConnectionRequest, RestConnectionAdapterOptions } from './dataflow/connectionManifests'
 
 export { getValueAtPath, setValueAtPath, coerceVariableValue } from './core/path'
 export { runSubmit, SUBMIT_CANCELLED } from './runtime/submit'

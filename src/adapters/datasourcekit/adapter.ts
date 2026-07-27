@@ -1,6 +1,8 @@
 import { tableFrameToRows } from '@loykin/datasourcekit'
 import type { DatasourceContext, DatasourceFrame, DatasourceManager } from '@loykin/datasourcekit'
-import type { ConnectionAdapter, ConnectionContext, DataResolveContext, JsonSchema } from '../../core/types'
+import type { ConnectionManifest, ConnectionContext, DataResolveContext, JsonSchema } from '../../core/types'
+
+const API_VERSION = 'resourcekit.dev/v1alpha1'
 
 /**
  * DatasourceKit is a frontend contract layer, not a datasource type itself —
@@ -59,7 +61,7 @@ function toDatasourceContext(context: ConnectionContext | DataResolveContext): D
 let requestCounter = 0
 
 /**
- * Bridges `ConnectionAdapter` to a `DatasourceManager.instances` API
+ * Bridges `ConnectionManifest` to a `DatasourceManager.instances` API
  * (test.md §8.2): `test` -> `healthCheck`, `inspect` -> `listNamespaces` /
  * `listFields`, `validate` -> `validateQuery`, `preview`/`resolve` ->
  * `query`. Query shape (`TRequest`) is plugin-specific — DatasourceKit
@@ -71,9 +73,10 @@ let requestCounter = 0
  * contract is a single flat rows array (test.md §12: richer multi-frame
  * shapes are a later additive extension, not v1).
  */
-export function createDatasourceKitConnectionAdapter(manager: DatasourceManager): ConnectionAdapter<DatasourceKitConnectionConfig, unknown> {
+export function createDatasourceKitConnectionAdapter(manager: DatasourceManager): ConnectionManifest<DatasourceKitConnectionConfig, unknown> {
   return {
-    type: 'datasourcekit',
+    apiVersion: API_VERSION,
+    kind: 'datasourcekit',
     requestSchema: { type: 'object' },
 
     async test(connection, context) {

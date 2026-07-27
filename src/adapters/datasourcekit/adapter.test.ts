@@ -7,7 +7,8 @@ import { createDatasourceKitConnectionAdapter, type DatasourceKitConnectionConfi
 function testConnection(overrides: Partial<RegisteredConnection<DatasourceKitConnectionConfig>> = {}): RegisteredConnection<DatasourceKitConnectionConfig> {
   return {
     uid: 'metrics-main',
-    type: 'datasourcekit',
+    apiVersion: 'resourcekit.dev/v1alpha1',
+    kind: 'datasourcekit',
     name: 'Metrics',
     config: { datasourceUid: 'metrics-main', datasourceType: 'demo-metrics' },
     ...overrides,

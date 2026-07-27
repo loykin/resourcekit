@@ -474,40 +474,44 @@ function validateDatasourceAndActions(resource: Resource, registry: ResourceRegi
     }
     if (!isRecord(current)) return
 
-    if (typeof current.source === 'string') {
-      if (!registry.getDataResolver(current.source)) {
+    // A `DataBinding`/`MutationBinding` envelope (`{apiVersion, kind, spec}`)
+    // is structurally indistinguishable from the other at this point — both
+    // dispatch through a registered manifest by the same key, so a node is
+    // valid here if *either* registry recognizes it. `spec.connection`/
+    // `spec.datasourceUid` (moved off the envelope in the kind-shape
+    // reshape) carry the scope allow-list checks that used to sit directly
+    // on the binding.
+    if (typeof current.apiVersion === 'string' && typeof current.kind === 'string' && 'spec' in current) {
+      const isDataSource = Boolean(registry.getDataSourceManifest(current.apiVersion, current.kind))
+      const isMutationSource = Boolean(registry.getMutationSourceManifest(current.apiVersion, current.kind))
+      if (!isDataSource && !isMutationSource) {
+        const registeredKinds = [...registry.listDataSourceManifests(), ...registry.listMutationSourceManifests()].map((manifest) => manifest.kind)
         addIssue(
           issues,
-          `${currentPath}/source`,
-          `data resolver ${current.source} is not registered`,
-          `register a resolver for "${current.source}", or use one of: ${registry.listDataResolvers().join(', ') || '(none registered)'}`,
+          `${currentPath}/kind`,
+          `no data source or mutation source manifest ${current.apiVersion}/${current.kind} is registered`,
+          `register a manifest for "${current.kind}", or use one of: ${registeredKinds.join(', ') || '(none registered)'}`,
         )
       }
-      if (
-        current.source === 'datasource' &&
-        options?.datasources?.allow &&
-        typeof current.datasourceUid === 'string' &&
-        !options.datasources.allow.includes(current.datasourceUid)
-      ) {
-        addIssue(
-          issues,
-          `${currentPath}/datasourceUid`,
-          `datasource ${current.datasourceUid} is not allowed in this scope`,
-          `use one of the scope's allowed datasources: ${options.datasources.allow.join(', ') || '(none allowed)'}`,
-        )
-      }
-      if (
-        current.source === 'connection' &&
-        options?.connections?.allow &&
-        typeof current.connection === 'string' &&
-        !options.connections.allow.includes(current.connection)
-      ) {
-        addIssue(
-          issues,
-          `${currentPath}/connection`,
-          `connection ${current.connection} is not allowed in this scope`,
-          `use one of the scope's allowed connections: ${options.connections.allow.join(', ') || '(none allowed)'}`,
-        )
+
+      const spec = current.spec
+      if (isRecord(spec)) {
+        if (current.kind === 'datasource' && options?.datasources?.allow && typeof spec.datasourceUid === 'string' && !options.datasources.allow.includes(spec.datasourceUid)) {
+          addIssue(
+            issues,
+            `${currentPath}/spec/datasourceUid`,
+            `datasource ${spec.datasourceUid} is not allowed in this scope`,
+            `use one of the scope's allowed datasources: ${options.datasources.allow.join(', ') || '(none allowed)'}`,
+          )
+        }
+        if (current.kind === 'connection' && options?.connections?.allow && typeof spec.connection === 'string' && !options.connections.allow.includes(spec.connection)) {
+          addIssue(
+            issues,
+            `${currentPath}/spec/connection`,
+            `connection ${spec.connection} is not allowed in this scope`,
+            `use one of the scope's allowed connections: ${options.connections.allow.join(', ') || '(none allowed)'}`,
+          )
+        }
       }
     }
 

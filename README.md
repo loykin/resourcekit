@@ -54,7 +54,7 @@ registration:
 | `@loykin/resourcekit/adapters/gridkit` | gridkit kinds |
 | `@loykin/resourcekit/adapters/chartkit` | chartkit kinds |
 | `@loykin/resourcekit/adapters/basekit` | basekit kinds |
-| `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionAdapter` bridging registered connections to `@loykin/datasourcekit` |
+| `@loykin/resourcekit/adapters/datasourcekit` | `ConnectionManifest` bridging registered connections to `@loykin/datasourcekit` |
 | `@loykin/resourcekit/adapters` | All first-party kind adapters plus resource views; use when all required kit peers are installed. Connection adapters (e.g. `datasourcekit`) are not included — import them from their own subpath. |
 | `@loykin/resourcekit/dataflow/tanstack-query` | `QueryCoordinator` backed by `@tanstack/query-core` (optional peer) for real polling/caching/dedup |
 
@@ -272,27 +272,34 @@ own:
 
 ## Registry and adapters
 
-The registry is a runtime plugin host. Plugins can contribute kind manifests,
-data resolvers, mutation resolvers, and connection adapters — `registry.use()`
-takes one `ResourceKitPlugin` object:
+The registry is a runtime plugin host. Every adapter-registered concept —
+kinds, data sources, mutation sources, connection types — shares the same
+self-describing envelope: `{apiVersion, kind, ...}`, registered as an array
+and looked up by `(apiVersion, kind)`. Plugins can contribute kind manifests,
+data source manifests, mutation source manifests, and connection manifests —
+`registry.use()` takes one `ResourceKitPlugin` object:
 
 | Field | Purpose |
 | --- | --- |
 | `name` | Plugin identifier, for diagnostics only |
 | `kinds` | `KindManifest[]` this plugin registers |
 | `patternExamples` | Multi-kind pattern examples surfaced to `selectExamples()` for AI generation guidance |
-| `dataResolvers` | `source` → `DataResolver` map dispatched by `spec.data`/a dataflow unit's `binding` |
-| `dataSourceAdapters` | Optional `queryKey`/schema enrichment for a `dataResolvers` source — without one, a `QueryCoordinator` falls back to `[nodeId, JSON.stringify(binding)]` as the cache key |
-| `mutationResolvers` | `target` → `MutationResolver` map dispatched by `submit.mutation` |
-| `connectionAdapters` | Connection *type* adapters (`rest`, `datasourcekit`, ...) — not connection instances, see [Registered connections](#registered-connections) |
+| `dataSourceManifests` | `DataSourceManifest[]` — self-describing `{apiVersion, kind, resolve, specSchema?, resultSchema?, queryKey?}`, dispatched by a `DataBinding`'s own `{apiVersion, kind}` (from `spec.data`/a dataflow unit's `binding`). `queryKey` gives a `QueryCoordinator` a stable cache identity; without one, it falls back to `[nodeId, JSON.stringify(binding)]` |
+| `mutationSourceManifests` | `MutationSourceManifest[]` — `{apiVersion, kind, resolve, specSchema?}`, dispatched by a `MutationBinding`'s own `{apiVersion, kind}` (from `submit.mutation`) |
+| `connectionManifests` | `ConnectionManifest[]` — connection *kind* manifests (`rest`, `datasourcekit`, ...), not connection instances, see [Registered connections](#registered-connections) |
 
 ```ts
 registry.use(createDesignKitPlugin())
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 registry.use({
   name: 'application-runtime',
-  dataResolvers: { static: staticResolver, rest: restResolver },
-  mutationResolvers: { rest: myRestMutationResolver },
+  dataSourceManifests: [
+    { apiVersion: API_VERSION, kind: 'static', resolve: staticResolver },
+    { apiVersion: API_VERSION, kind: 'rest', resolve: restResolver },
+  ],
+  mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'rest', resolve: myRestMutationResolver }],
 })
 ```
 
@@ -332,12 +339,12 @@ ceiling in one place; nothing an AI/MCP client can reach lives outside it:
 | `spec.pick` / `spec.omit` / `spec.lock` | Per-kind spec field allowlist, denylist, and fixed values |
 | `slots.include` / `slots.exclude` | Per-kind allowed slot names |
 | `variables.allow` / `variables.lock` | Allowed page variables and fixed values |
-| `dataResolvers.include` / `dataResolvers.exclude` | Allowed/denied registered resolver **types** (by `source`, e.g. `"rest"`/`"datasource"`) — a `dataSourceAdapters` entry shares its resolver's allow-list since it's enrichment layered on the same `source` |
-| `datasources.allow` | Allowed **values** for `datasourceUid` inside a `source: "datasource"` binding — distinct from `dataResolvers.include`, which restricts whether the `datasource` source type is visible at all |
+| `dataSourceManifests.include` / `dataSourceManifests.exclude` | Allowed/denied registered data source manifest **kinds** (e.g. `"rest"`/`"datasource"`) |
+| `datasources.allow` | Allowed **values** for `spec.datasourceUid` inside a `kind: "datasource"` binding — distinct from `dataSourceManifests.include`, which restricts whether the `datasource` kind is visible at all |
 | `actions.allow` | Allowed named actions — both `submit.action` and `EventPolicy.kind: "action"` |
-| `mutationResolvers.include` / `mutationResolvers.exclude` | Allowed/denied registered mutation resolver **types** (by `target`) |
+| `mutationSourceManifests.include` / `mutationSourceManifests.exclude` | Allowed/denied registered mutation source manifest **kinds** |
 | `connections.allow` / `connections.capabilities` | Allowed connection UIDs and the MCP capability ceiling (`test`/`inspect`/`preview`/`mutate`) applied to all of them |
-| `connectionAdapters.include` / `connectionAdapters.exclude` | Allowed/denied registered connection **type** adapters (by `type`, e.g. `"rest"`/`"datasourcekit"`) — distinct from `connections.allow`, which restricts connection *instances* by `uid` |
+| `connectionManifests.include` / `connectionManifests.exclude` | Allowed/denied registered connection manifest **kinds** (e.g. `"rest"`/`"datasourcekit"`) — distinct from `connections.allow`, which restricts connection *instances* by `uid` |
 | `maxDepth` | Maximum slot nesting depth |
 | `rootLevels` | Allowed [levels](docs/kind-level-taxonomy.md) for the document root |
 | `queryPolicy` | Host ceiling (`allowPolling`, `minIntervalMs`, `maxIntervalMs`, `maxRetries`) that clamps an AI-authored dataflow unit's `QueryPolicy` before it reaches a `QueryCoordinator` — see [Named dataflow units](#named-dataflow-units-sharing-a-fetch-across-sibling-kinds) |
@@ -390,8 +397,13 @@ Never give an AI/MCP client a schema built from the unrestricted registry.
 
 ## Resolver bindings
 
-A kind that owns a `spec.data` field asks the runtime to dispatch its binding
-by the `source` discriminator.
+A `DataBinding` mirrors a `Resource` node's own envelope: `apiVersion`+`kind`
+identify the registered `DataSourceManifest` that resolves it, and `spec` is
+that manifest's own vocabulary. A kind that owns a `spec.data` field asks the
+runtime to dispatch the binding by that `{apiVersion, kind}` pair. `valuePath`
+sits on the binding's envelope (a sibling of `spec`), not inside `spec` — it's
+a runtime-owned, uniformly-applied dot-path, same tier as `Resource.variables`/
+`events`.
 
 resourcekit ships `static` and `rest` resolvers:
 
@@ -401,31 +413,39 @@ import {
   staticResolver,
 } from '@loykin/resourcekit'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 registry.use({
   name: 'core-data-resolvers',
-  dataResolvers: {
-    static: staticResolver,
-    rest: restResolver,
-  },
+  dataSourceManifests: [
+    { apiVersion: API_VERSION, kind: 'static', resolve: staticResolver },
+    { apiVersion: API_VERSION, kind: 'rest', resolve: restResolver },
+  ],
 })
 ```
 
 ```json
 {
-  "source": "static",
-  "rows": [
-    { "id": "1", "name": "Ada" },
-    { "id": "2", "name": "Grace" }
-  ]
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "static",
+  "spec": {
+    "rows": [
+      { "id": "1", "name": "Ada" },
+      { "id": "2", "name": "Grace" }
+    ]
+  }
 }
 ```
 
 ```json
 {
-  "source": "rest",
-  "url": "https://api.example.com/customers/${customerId}",
-  "method": "GET",
-  "rowsPath": "data.items"
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "rest",
+  "spec": {
+    "url": "https://api.example.com/customers/${customerId}",
+    "method": "GET",
+    "rowsPath": "data.items"
+  }
 }
 ```
 
@@ -441,19 +461,23 @@ reimplementing path traversal.
 
 `createRestResolver({ headers, fetchImpl })` builds a custom REST resolver
 instead of using the default `restResolver`. `headers` is called before every
-request and merged under the binding's own static `headers` (the binding
-wins on conflict) — use it to attach auth that would go stale if baked into
-the document, e.g. a JWT refreshed out-of-band. `fetchImpl` swaps the
-underlying `fetch` (custom transport, tests).
+request and merged under the binding's own static `spec.headers` (the
+binding wins on conflict) — use it to attach auth that would go stale if
+baked into the document, e.g. a JWT refreshed out-of-band. `fetchImpl` swaps
+the underlying `fetch` (custom transport, tests).
 
 ```ts
 import { createRestResolver } from '@loykin/resourcekit'
 
 registry.use({
   name: 'core-data-resolvers',
-  dataResolvers: {
-    rest: createRestResolver({ headers: () => ({ authorization: `Bearer ${getCurrentToken()}` }) }),
-  },
+  dataSourceManifests: [
+    {
+      apiVersion: API_VERSION,
+      kind: 'rest',
+      resolve: createRestResolver({ headers: () => ({ authorization: `Bearer ${getCurrentToken()}` }) }),
+    },
+  ],
 })
 ```
 
@@ -608,9 +632,9 @@ its own `spec.data`:
     {
       "name": "hostCpu",
       "binding": {
-        "source": "connection",
-        "connection": "metrics",
-        "request": { "operation": "metrics", "cluster": "us-east" }
+        "apiVersion": "resourcekit.dev/v1alpha1",
+        "kind": "connection",
+        "spec": { "connection": "metrics", "request": { "operation": "metrics", "cluster": "us-east" } }
       }
     }
   ],
@@ -657,7 +681,11 @@ value.
 ```json
 {
   "submit": {
-    "mutation": { "target": "operations", "connection": "service-operations" },
+    "mutation": {
+      "apiVersion": "resourcekit.dev/v1alpha1",
+      "kind": "operations",
+      "spec": { "connection": "service-operations" }
+    },
     "onSuccess": [{ "kind": "refetchData", "dataflow": ["incidents", "incidentDetail"] }]
   }
 }
@@ -726,9 +754,12 @@ and success effects.
 {
   "action": "customer.delete",
   "mutation": {
-    "target": "rest",
-    "url": "https://api.example.com/customers/${payload.id}",
-    "method": "DELETE"
+    "apiVersion": "resourcekit.dev/v1alpha1",
+    "kind": "rest",
+    "spec": {
+      "url": "https://api.example.com/customers/${payload.id}",
+      "method": "DELETE"
+    }
   },
   "confirm": {
     "title": "Delete ${payload.name}?",
@@ -817,13 +848,13 @@ const resource: Resource = {
     },
     submit: {
       action: 'process.update',
-      mutation: { target: 'process-api' },
+      mutation: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'process-api', spec: {} },
     },
   },
 }
 ```
 
-The example assumes the host registered a `process-api` mutation resolver.
+The example assumes the host registered a `process-api` mutation source manifest.
 The mutation receives only the envelope's `value`, not `identity`.
 `markCleanOnSuccess` adopts the submitted payload as the new clean baseline;
 it does not clear the form.
@@ -857,7 +888,7 @@ through the table's normal envelope `events` policy map.
   "apiVersion": "resourcekit.dev/v1alpha1",
   "kind": "GridKitTable",
   "spec": {
-    "data": { "source": "rest", "url": "/api/users" },
+    "data": { "apiVersion": "resourcekit.dev/v1alpha1", "kind": "rest", "spec": { "url": "/api/users" } },
     "columns": {
       "name": { "label": "Name" },
       "actions": {
@@ -872,9 +903,9 @@ through the table's normal envelope `events` policy map.
             "submit": {
               "action": "users.delete",
               "mutation": {
-                "target": "rest",
-                "url": "/api/users/${payload.id}",
-                "method": "DELETE"
+                "apiVersion": "resourcekit.dev/v1alpha1",
+                "kind": "rest",
+                "spec": { "url": "/api/users/${payload.id}", "method": "DELETE" }
               },
               "confirm": { "title": "Delete ${payload.name}?" }
             }
@@ -909,17 +940,20 @@ import {
   restConnectionAdapter,
 } from '@loykin/resourcekit'
 
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 registry.use({
   name: 'connections',
-  connectionAdapters: { rest: restConnectionAdapter },
-  dataResolvers: {
-    connection: createConnectionDataResolver(registry),
-  },
+  connectionManifests: [restConnectionAdapter],
+  dataSourceManifests: [
+    { apiVersion: API_VERSION, kind: 'connection', resolve: createConnectionDataResolver(registry) },
+  ],
 })
 
 registry.registerConnection({
   uid: 'crm-api',
-  type: 'rest',
+  apiVersion: API_VERSION,
+  kind: 'rest',
   name: 'CRM API',
   config: {
     baseUrl: 'https://api.example.com',
@@ -955,10 +989,11 @@ Documents use only the UID and adapter-specific request:
 
 ```json
 {
-  "source": "connection",
-  "connection": "crm-api",
-  "request": {
-    "path": "/customers/${customerId}"
+  "apiVersion": "resourcekit.dev/v1alpha1",
+  "kind": "connection",
+  "spec": {
+    "connection": "crm-api",
+    "request": { "path": "/customers/${customerId}" }
   }
 }
 ```
@@ -995,12 +1030,13 @@ import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapte
 
 registry.use({
   name: 'datasourcekit-connections',
-  connectionAdapters: { datasourcekit: createDatasourceKitConnectionAdapter(manager) },
+  connectionManifests: [createDatasourceKitConnectionAdapter(manager)],
 })
 
 registry.registerConnection({
   uid: 'metrics-main',
-  type: 'datasourcekit',
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'datasourcekit',
   name: 'Metrics',
   config: { datasourceUid: 'metrics-main', datasourceType: 'postgres' },
 })
@@ -1016,22 +1052,27 @@ not just what each one does in isolation.
 ### 1. Registry: plugins, resolvers, connections
 
 ```ts
+const API_VERSION = 'resourcekit.dev/v1alpha1'
+
 const registry = createRegistry<KindRenderFn>()
 registry.use(createDesignKitPlugin())
 registry.use(createGridKitPlugin())
 registry.use({
   name: 'connections',
-  connectionAdapters: { rest: restConnectionAdapter },
-  dataResolvers: { connection: createConnectionDataResolver(registry) },
+  connectionManifests: [restConnectionAdapter],
+  dataSourceManifests: [
+    { apiVersion: API_VERSION, kind: 'connection', resolve: createConnectionDataResolver(registry) },
+  ],
 })
 registry.use({
   name: 'app-mutations',
-  mutationResolvers: { rest: myRestMutationResolver },
+  mutationSourceManifests: [{ apiVersion: API_VERSION, kind: 'rest', resolve: myRestMutationResolver }],
 })
 
 registry.registerConnection({
   uid: 'crm-api',
-  type: 'rest',
+  apiVersion: API_VERSION,
+  kind: 'rest',
   name: 'CRM API',
   config: { baseUrl: 'https://api.example.com' },
   policy: { methods: ['GET', 'DELETE'], pathPrefixes: ['/customers'] },
@@ -1074,9 +1115,9 @@ needs to target it by name with `refetchData`:
     {
       "name": "customers",
       "binding": {
-        "source": "connection",
-        "connection": "crm-api",
-        "request": { "path": "/customers" }
+        "apiVersion": "resourcekit.dev/v1alpha1",
+        "kind": "connection",
+        "spec": { "connection": "crm-api", "request": { "path": "/customers" } }
       },
       "policy": { "refresh": { "kind": "interval", "ms": 5000 } }
     }
@@ -1110,9 +1151,9 @@ needs to target it by name with `refetchData`:
                     "submit": {
                       "action": "customer.delete",
                       "mutation": {
-                        "target": "rest",
-                        "url": "/customers/${payload.id}",
-                        "method": "DELETE"
+                        "apiVersion": "resourcekit.dev/v1alpha1",
+                        "kind": "rest",
+                        "spec": { "url": "/customers/${payload.id}", "method": "DELETE" }
                       },
                       "confirm": { "title": "Delete ${payload.name}?" },
                       "onSuccess": [
@@ -1154,9 +1195,9 @@ isolation, resolving one customer directly by ID instead of through the
   "apiVersion": "resourcekit.dev/v1alpha1",
   "kind": "RecordScope",
   "record": {
-    "source": "connection",
-    "connection": "crm-api",
-    "request": { "path": "/customers/${customerId}" }
+    "apiVersion": "resourcekit.dev/v1alpha1",
+    "kind": "connection",
+    "spec": { "connection": "crm-api", "request": { "path": "/customers/${customerId}" } }
   },
   "spec": {},
   "slots": [

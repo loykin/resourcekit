@@ -1,9 +1,11 @@
 import { getValueAtPath } from '../core/path'
-import type { ConnectionAdapter, ConnectionMcpPolicy, ConnectionPolicy, JsonSchema, RegisteredConnection } from '../core/types'
+import type { ConnectionManifest, ConnectionMcpPolicy, ConnectionPolicy, JsonSchema, RegisteredConnection } from '../core/types'
+
+const API_VERSION = 'resourcekit.dev/v1alpha1'
 
 /**
- * Built-in connection adapters. Only `rest` lives in core — like the plain
- * `restResolver` in resolvers.ts, the `datasourcekit` connection adapter
+ * Built-in connection manifests. Only `rest` lives in core — like the plain
+ * `restResolver` in resolvers.ts, the `datasourcekit` connection manifest
  * ships as a datasourcekit adapter package, never here.
  */
 
@@ -135,7 +137,7 @@ async function readJsonWithLimit(response: Response, maxBytes: number | undefine
  * is meant for server-owned, non-rotating secrets (test.md §5.1) — this hook
  * is the escape hatch for hosts whose auth rotates per end-user session
  * instead (a refreshed JWT, e.g.), so they can still use `restConnectionAdapter`
- * directly rather than writing a custom `ConnectionAdapter` (provisr-poc-findings.md #7).
+ * directly rather than writing a custom `ConnectionManifest` (provisr-poc-findings.md #7).
  */
 export interface RestConnectionAdapterOptions {
   headers?: () => Record<string, string> | Promise<Record<string, string>>
@@ -207,7 +209,7 @@ const restRequestSchema: JsonSchema = {
 
 export function createRestConnectionAdapter(
   options: RestConnectionAdapterOptions = {},
-): ConnectionAdapter<RestConnectionConfig, RestConnectionRequest> {
+): ConnectionManifest<RestConnectionConfig, RestConnectionRequest> {
   // Resolved per-call rather than captured once — `options.fetchImpl` may
   // itself be undefined (falling back to the ambient `fetch`), and reading
   // `fetch` here eagerly would freeze in whatever `globalThis.fetch` was at
@@ -223,7 +225,8 @@ export function createRestConnectionAdapter(
   }
 
   return {
-    type: 'rest',
+    apiVersion: API_VERSION,
+    kind: 'rest',
     requestSchema: restRequestSchema,
 
     async test(connection, context) {
@@ -279,4 +282,4 @@ export function createRestConnectionAdapter(
   }
 }
 
-export const restConnectionAdapter: ConnectionAdapter<RestConnectionConfig, RestConnectionRequest> = createRestConnectionAdapter()
+export const restConnectionAdapter: ConnectionManifest<RestConnectionConfig, RestConnectionRequest> = createRestConnectionAdapter()

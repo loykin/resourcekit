@@ -46,8 +46,9 @@
                   "kind": "TableView",
                   "spec": {
                     "data": {
-                      "source": "datasource",
-                      "datasourceUid": "metrics"
+                      "apiVersion": "resourcekit.dev/v1alpha1",
+                      "kind": "datasource",
+                      "spec": { "datasourceUid": "metrics" }
                     },
                     "columns": {
                       "service": { "label": "Service", "emphasis": "strong" },
