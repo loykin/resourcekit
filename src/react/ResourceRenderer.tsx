@@ -201,6 +201,17 @@ function callResolver(
   return manifest.resolve(binding, ctx)
 }
 
+function callSubscribe(
+  registry: ResourceRegistry<KindRenderFn> | ScopedRegistry<KindRenderFn>,
+  binding: DataBinding,
+  onData: (rows: Record<string, unknown>[]) => void,
+  ctx: { variables: Record<string, VariableValue> },
+): (() => void) | undefined {
+  const manifest = registry.getDataSourceManifest(binding.apiVersion, binding.kind)
+  if (!manifest?.subscribe) return undefined
+  return manifest.subscribe(binding, onData, ctx)
+}
+
 function eventPolicy(resource: Resource, manifestPolicy: EventPolicy | undefined, event: string): EventPolicy | undefined {
   if (manifestPolicy) return manifestPolicy
   return resource.events?.[event]
@@ -383,7 +394,10 @@ function renderKindNode(
         emit: (event: string, payload?: unknown) => {
           const policy = eventPolicy(resource, manifest.behaviorPolicy?.events?.[event], event)
           if (policy?.kind === 'setVariable') {
-            runtime.engine.set(policy.variable, coerceVariableValue(getValueAtPath(payload, policy.from)))
+            const resolved = policy.from !== undefined
+              ? coerceVariableValue(getValueAtPath(payload, policy.from))
+              : policy.value !== undefined ? policy.value : coerceVariableValue(getValueAtPath(payload, undefined))
+            runtime.engine.set(policy.variable, resolved)
           }
           if (policy?.kind === 'action') {
             if (allowedActions && !allowedActions.includes(policy.action)) {
@@ -568,6 +582,7 @@ export function ResourceRenderer(props: ResourceRendererProps): ReactNode {
       scope: runtimeScope,
       variables: engine,
       resolve: async (b, ctx) => applyValuePath(await callResolver(props.registry, b, ctx), b),
+      subscribe: (b, onData, ctx) => callSubscribe(props.registry, b, (rows) => onData(applyValuePath(rows, b)), ctx),
       coordinatorResolve,
       scopePolicy: 'options' in props.registry ? props.registry.options.queryPolicy : undefined,
     })

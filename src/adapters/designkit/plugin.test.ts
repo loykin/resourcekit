@@ -433,20 +433,31 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
               items: [
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
-                  kind: 'DataBodyGroup',
+                  kind: 'DataBody',
                   spec: {},
                   slots: [
                     {
                       items: [
                         {
                           apiVersion: 'resourcekit.dev/v1alpha1',
-                          kind: 'Checkbox',
-                          spec: { name: 'roles', label: 'Admin', value: 'admin', fieldRef: 'roles' },
-                        },
-                        {
-                          apiVersion: 'resourcekit.dev/v1alpha1',
-                          kind: 'Checkbox',
-                          spec: { name: 'roles', label: 'Editor', value: 'editor', fieldRef: 'roles' },
+                          kind: 'DataBodyGroup',
+                          spec: {},
+                          slots: [
+                            {
+                              items: [
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'Checkbox',
+                                  spec: { name: 'roles', label: 'Admin', value: 'admin', fieldRef: 'roles' },
+                                },
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'Checkbox',
+                                  spec: { name: 'roles', label: 'Editor', value: 'editor', fieldRef: 'roles' },
+                                },
+                              ],
+                            },
+                          ],
                         },
                       ],
                     },
@@ -483,23 +494,34 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
               items: [
                 {
                   apiVersion: 'resourcekit.dev/v1alpha1',
-                  kind: 'ResourceForm',
-                  spec: { submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } } },
+                  kind: 'DataBody',
+                  spec: {},
                   slots: [
                     {
                       items: [
                         {
                           apiVersion: 'resourcekit.dev/v1alpha1',
-                          kind: 'Select',
-                          spec: {
-                            name: 'concurrencyPolicy',
-                            fieldRef: 'concurrencyPolicy',
-                            options: [
-                              { label: 'Allow', value: 'Allow' },
-                              { label: 'Forbid', value: 'Forbid' },
-                              { label: 'Replace', value: 'Replace' },
-                            ],
-                          },
+                          kind: 'ResourceForm',
+                          spec: { submit: { mutation: { apiVersion: API_VERSION, kind: 'memory', spec: {} } } },
+                          slots: [
+                            {
+                              items: [
+                                {
+                                  apiVersion: 'resourcekit.dev/v1alpha1',
+                                  kind: 'Select',
+                                  spec: {
+                                    name: 'concurrencyPolicy',
+                                    fieldRef: 'concurrencyPolicy',
+                                    options: [
+                                      { label: 'Allow', value: 'Allow' },
+                                      { label: 'Forbid', value: 'Forbid' },
+                                      { label: 'Replace', value: 'Replace' },
+                                    ],
+                                  },
+                                },
+                              ],
+                            },
+                          ],
                         },
                       ],
                     },
@@ -512,10 +534,15 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
       }),
     )
 
-    const select = (await screen.findByLabelText('concurrencyPolicy')) as HTMLSelectElement
-    expect(select.value).toBe('Allow')
+    const select = await screen.findByRole('combobox', { name: 'concurrencyPolicy' })
+    expect(select.textContent).toContain('Allow')
 
-    fireEvent.change(select, { target: { value: 'Forbid' } })
+    fireEvent.click(select)
+    const option = await screen.findByRole('option', { name: 'Forbid' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
+    await waitFor(() => expect(select.textContent).toContain('Forbid'))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(mutation).toHaveBeenCalled())
@@ -524,6 +551,94 @@ describe('DesignKit Textarea/Checkbox/Select kinds', () => {
 })
 
 describe('DesignKit adapter parity', () => {
+  it('exposes the DesignKit implementation-guide page vocabulary', () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+
+    const dataBody = registry.getKind('resourcekit.dev/v1alpha1', 'DataBody')
+    const resource = registry.getKind('resourcekit.dev/v1alpha1', 'DataBodyResource')
+    const browse = registry.getKind('resourcekit.dev/v1alpha1', 'Browse')
+    const detail = registry.getKind('resourcekit.dev/v1alpha1', 'DetailBody')
+    const wizard = registry.getKind('resourcekit.dev/v1alpha1', 'FormWizard')
+    const breadcrumb = registry.getKind('resourcekit.dev/v1alpha1', 'PageBreadcrumb')
+
+    expect(dataBody?.slotPolicy?.defaultSlot?.accepts).toContain('DataBodyResource')
+    expect(resource?.slotPolicy?.slots?.toolbarLeft).toBeDefined()
+    expect(resource?.slotPolicy?.slots?.toolbarRight?.accepts).toEqual(['ActionButton'])
+    expect(browse?.slotPolicy?.slots?.sidebar?.min).toBe(1)
+    expect(detail?.level).toEqual(['template'])
+    expect(wizard?.bindingPolicy?.inputs.activeStep?.writable).toBe(true)
+    expect((breadcrumb?.specSchema.properties as Record<string, unknown> | undefined)?.items).toBeDefined()
+  })
+
+  it('renders a linked breadcrumb and resource-scoped toolbar inside DataBody', async () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createDesignKitPlugin())
+
+    render(
+      createElement(ResourceRenderer, {
+        registry,
+        resource: {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'DataBody',
+          spec: { title: 'Members' },
+          slots: [
+            {
+              name: 'topBar',
+              items: [
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'PageTopBar',
+                  spec: {},
+                  slots: [
+                    {
+                      name: 'left',
+                      items: [
+                        {
+                          apiVersion: 'resourcekit.dev/v1alpha1',
+                          kind: 'PageBreadcrumb',
+                          spec: { items: ['Resources', { label: 'Members', href: '/members' }, 'Add member'] },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              items: [
+                {
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'DataBodyResource',
+                  spec: { refreshing: true },
+                  slots: [
+                    {
+                      name: 'toolbarRight',
+                      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'ActionButton', spec: { label: 'Add member' } }],
+                    },
+                    {
+                      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: 'Member rows' } }],
+                    },
+                    {
+                      name: 'footer',
+                      items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Text', spec: { text: '20 members' } }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    )
+
+    expect((await screen.findByRole('link', { name: 'Members' })).getAttribute('href')).toBe('/members')
+    expect(screen.getByRole('button', { name: 'Add member' })).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toContain('Refreshing')
+    expect(screen.getByText('Member rows')).toBeTruthy()
+    expect(screen.getByText('20 members')).toBeTruthy()
+  })
+
   it('exposes public status, section, and flexible workbench placement contracts', () => {
     const registry = createRegistry<KindRenderFn>()
     registry.use(createDesignKitPlugin())

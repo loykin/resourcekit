@@ -60,8 +60,9 @@ import { createPlaygroundConnectionProvider, createPlaygroundDatasourceManager }
 import { createPlaygroundResourceAdapters } from './resourceAdapters'
 import { scenarioExamples } from './scenarios'
 import { designkitParityExamples } from './designkitParity'
+import { designkitGuideExamples } from './designkitGuides'
 
-export type PlaygroundExampleCategory = 'scenario' | 'mcp-generated' | 'runtime' | 'fragment' | 'designkit-parity'
+export type PlaygroundExampleCategory = 'scenario' | 'mcp-generated' | 'runtime' | 'fragment' | 'designkit-parity' | 'designkit-guide'
 
 export interface PlaygroundExample {
   id: string
@@ -1985,9 +1986,123 @@ const githubOrgReposPage: Resource = {
   ],
 }
 
+const usersListPage: Resource = {
+  apiVersion: 'resourcekit.dev/v1alpha1',
+  kind: 'DataBody',
+  metadata: { name: 'users-list-page' },
+  spec: { title: 'Users' },
+  variables: [{ name: 'registerOpen', type: 'string', default: '' }],
+  dataflow: [{
+    name: 'users',
+    binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', spec: { url: '/api/demo-users/users', method: 'GET' } },
+  }],
+  mutations: [{
+    name: 'createUser',
+    binding: { apiVersion: 'resourcekit.dev/v1alpha1', kind: 'rest', spec: { url: '/api/demo-users/users', method: 'POST' } },
+  }],
+  slots: [
+    {
+      name: 'topBar',
+      items: [{
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'PageTopBar',
+        spec: { left: 'Users' },
+        slots: [{
+          name: 'right',
+          items: [{
+            apiVersion: 'resourcekit.dev/v1alpha1',
+            kind: 'ActionButton',
+            spec: { label: 'Register New User', value: 'true' },
+            events: { click: { kind: 'setVariable', variable: 'registerOpen', from: 'value' } },
+          }],
+        }],
+      }],
+    },
+    {
+      items: [
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'TableView',
+          spec: {
+            data: { $dataflow: 'users' },
+            columns: {
+              name:  { label: 'Name', emphasis: 'strong' },
+              email: { label: 'Email' },
+              role:  { label: 'Role', display: 'badge' },
+            },
+            globalSearch: true,
+            searchPlaceholder: 'Search users...',
+            pagination: { pageSize: 20 },
+          },
+        },
+        {
+          apiVersion: 'resourcekit.dev/v1alpha1',
+          kind: 'Sheet',
+          spec: { title: 'Register New User', side: 'right' },
+          bindings: { open: { $variable: 'registerOpen' } },
+          slots: [{
+            items: [{
+              apiVersion: 'resourcekit.dev/v1alpha1',
+              kind: 'ResourceForm',
+              spec: {
+                submitLabel: 'Register',
+                successMessage: 'User registered.',
+                submit: {
+                  mutation: { $mutation: 'createUser' },
+                  onSuccess: [
+                    { kind: 'setVariable', variable: 'registerOpen', value: '' },
+                    { kind: 'refetchData', dataflow: ['users'] },
+                  ],
+                },
+              },
+              slots: [{
+                items: [{
+                  apiVersion: 'resourcekit.dev/v1alpha1',
+                  kind: 'DataBodySection',
+                  spec: { id: 'info', label: 'User Info' },
+                  slots: [{
+                    items: [
+                      {
+                        apiVersion: 'resourcekit.dev/v1alpha1',
+                        kind: 'DataBodyRow',
+                        spec: { label: 'Name', required: true },
+                        slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'InputControl', spec: { name: 'name', type: 'text', placeholder: 'Jane Doe', required: true } }] }],
+                      },
+                      {
+                        apiVersion: 'resourcekit.dev/v1alpha1',
+                        kind: 'DataBodyRow',
+                        spec: { label: 'Email', required: true },
+                        slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'InputControl', spec: { name: 'email', type: 'email', placeholder: 'jane@example.com', required: true } }] }],
+                      },
+                      {
+                        apiVersion: 'resourcekit.dev/v1alpha1',
+                        kind: 'DataBodyRow',
+                        spec: { label: 'Role' },
+                        slots: [{ items: [{ apiVersion: 'resourcekit.dev/v1alpha1', kind: 'Select', spec: { name: 'role', placeholder: 'Select role...', options: [{ label: 'Admin', value: 'Admin' }, { label: 'Engineer', value: 'Engineer' }, { label: 'Designer', value: 'Designer' }, { label: 'Viewer', value: 'Viewer' }] } }] }],
+                      },
+                    ],
+                  }],
+                }],
+              }],
+            }],
+          }],
+        },
+      ],
+    },
+  ],
+}
+
 export const examples: readonly PlaygroundExample[] = [
   ...scenarioExamples,
+  ...designkitGuideExamples,
   ...designkitParityExamples,
+  {
+    id: 'users-list-register',
+    name: 'Users list + register',
+    description: 'AI-generated: DataBody with TableView (dataflow), Sheet (variable-controlled), ResourceForm → POST mutation with refetch.',
+    category: 'runtime',
+    resource: usersListPage,
+  },
   {
     id: 'service-operations-command-center',
     name: 'Service operations command center',
@@ -2953,11 +3068,13 @@ const categoryLabels: Record<PlaygroundExampleCategory, string> = {
   'mcp-generated': 'MCP generated',
   runtime: 'Runtime demo',
   fragment: 'Component fragment',
+  'designkit-guide': 'DesignKit guide',
   'designkit-parity': 'DesignKit parity',
 }
 
 function compositionTitle(category: PlaygroundExampleCategory): string {
   if (category === 'scenario' || category === 'mcp-generated') return 'How AI built this'
+  if (category === 'designkit-guide') return 'How this guide contract is composed'
   if (category === 'designkit-parity') return 'How this parity sample is composed'
   return category === 'fragment' ? 'How this fragment is composed' : 'How this demo is composed'
 }
@@ -3617,6 +3734,24 @@ export function App() {
     }
   }
 
+  const handleDocumentAction = ({ action }: { action: string }) => {
+    const destinationByAction: Record<string, string> = {
+      'members.create': 'guide-form-workflow',
+      'members.cancelCreate': 'guide-managed-table',
+      'publishing.openArticle': 'guide-publishing-article',
+      'commerce.openProduct': 'guide-commerce-product',
+    }
+    const destination = destinationByAction[action]
+    if (destination) {
+      selectExampleById(destination)
+      return
+    }
+    if (action === 'publishing.shareArticle' || action === 'commerce.addToCart') {
+      setToast(action === 'publishing.shareArticle' ? 'Article share action received by host' : 'Product added by host action')
+      window.setTimeout(() => setToast(undefined), 3500)
+    }
+  }
+
   const resourceJson = useMemo(() => prettyJson(resource), [resource])
   const selectedExample = useMemo(() => exampleById(selectedExampleId), [selectedExampleId])
   const activeExample = useMemo<PlaygroundExample>(() => ({ ...selectedExample, resource }), [resource, selectedExample])
@@ -3652,6 +3787,7 @@ export function App() {
       <ResourceRenderer
         confirmDialog={async ({ title, description }) => window.confirm(description ? `${title}\n\n${description}` : title)}
         registry={composition.scope}
+        onAction={handleDocumentAction}
         onEvent={handleDocumentEvent}
         renderError={(error) => <div className="fallback">{error instanceof Error ? error.message : 'Render error'}</div>}
         renderLoading={() => <div className="fallback">Loading kind...</div>}

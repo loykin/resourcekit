@@ -27,6 +27,8 @@ import { createFirstPartyResourceAdapters, publicKindNames } from '@loykin/resou
 import { createDatasourceKitConnectionAdapter } from '@loykin/resourcekit/adapters/datasourcekit'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import * as z from 'zod/v4'
 import { createConnectionStore } from './connection-store.js'
 import { DEMO_API_TOKEN, startDemoApi } from './demo-api.js'
@@ -51,6 +53,23 @@ const restMutationResolver: MutationResolver = async (binding, payload) => {
 }
 
 const API_VERSION = 'resourcekit.dev/v1alpha1'
+const require = createRequire(import.meta.url)
+type DesignKitGuideManifest = {
+  schemaVersion: number
+  description: string
+  guides: Array<{
+    id: string
+    title: string
+    summary: string
+    useWhen: string[]
+    templates: string[]
+    contract: string
+  }>
+}
+
+const designKitGuideManifest = JSON.parse(
+  await readFile(require.resolve('@loykin/designkit/guides/manifest.json'), 'utf8'),
+) as DesignKitGuideManifest
 
 const registry = createRegistry()
 registry.use({
@@ -165,13 +184,14 @@ const server = new McpServer(
     instructions: `Build a resourcekit resource document, one position at a time, then validate it.
 
 Workflow:
-1. Call list_root_templates with no arguments to see which kinds can be the document root.
-2. Pick one. Its candidate entry is envelope-only (apiVersion/kind, no spec) — call get_kind_spec_schema with that {apiVersion, kind} to get its actual spec fields, then build its envelope: { apiVersion, kind, spec, slots: [] }.
-3. Call next_stage_batch with that node's { apiVersion, kind } to resolve every one of its slots at once.
+1. If the request is an administrative CRUD, form, publishing, or commerce workflow, call list_designkit_guides and then get_designkit_guide before choosing templates. Treat the guide's routes, query boundaries, loading behavior, action placement, and template selection as normative; express them with ResourceKit kinds and bindings rather than copying its React source.
+2. Call list_root_templates with no arguments to see which kinds can be the document root.
+3. Pick one. Its candidate entry is envelope-only (apiVersion/kind, no spec) — call get_kind_spec_schema with that {apiVersion, kind} to get its actual spec fields, then build its envelope: { apiVersion, kind, spec, slots: [] }.
+4. Call next_stage_batch with that node's { apiVersion, kind } to resolve every one of its slots at once.
    - "fixed" entries have exactly one valid kind — insert them directly, no choice needed.
    - "schema" covers every slot with a real choice. Each candidate kind listed there is envelope-only too — call get_kind_spec_schema on whichever one you pick before filling its spec. Each open slot becomes a key in the slots array (name omitted for the default slot); a repeatable slot's property is an array — add one item per entry you want, respecting minItems/maxItems. Omitting an optional key means declining that slot.
-4. For every node you just added, repeat step 3 (and step 2's get_kind_spec_schema call) on it — recurse until nothing has an open slot left anywhere in the tree.
-5. Call validate_document with the finished document to confirm it's structurally valid before presenting it.
+5. For every node you just added, repeat step 4 (and step 3's get_kind_spec_schema call) on it — recurse until nothing has an open slot left anywhere in the tree.
+6. Call validate_document with the finished document to confirm it's structurally valid before presenting it.
 
 The "slots" array shape (this is never shown as an example in any schema, only described in prose — read this carefully): each entry is { name?: string, items: Resource[] }. Omit "name" for a kind's default slot; use the slot's name for a named slot. Example — a node with one child in its default slot and one in a "actions" slot:
   "slots": [
@@ -189,6 +209,42 @@ Connections (test.md §5-7): rather than hardcoding a URL/DSN into a data bindin
   "demo-metrics" (kind "datasourcekit", backed by the real @loykin/datasourcekit package) -> fields host, region, cpuPercent, memoryPercent, via a request shape { metric: "cpuPercent" | "memoryPercent", region? }. inspect_connection lists namespaces (no path) or a namespace's fields (path: "metrics").
 Before binding to any of them, call test_connection to confirm it's reachable, validate_connection_request to check a candidate request against its policy, and preview_connection to see a capped, real sample of what it returns — never the full result set. Once you're confident, use it in a resource document as a data binding, e.g.: { "apiVersion": "resourcekit.dev/v1alpha1", "kind": "connection", "spec": { "connection": "demo-orders", "request": { "table": "orders", "where": { "status": "paid" } } } } — never embed the connection's real base URL/DSN, which MCP never sees.
 Use "demo-users" for a SelectableList/DetailView (id can be a \${variable}) or a FormView's submit.mutation (kind "rest"); use "demo-orders" or "demo-metrics" for a TableView/ChartView needing simple table+filter data.`,
+  },
+)
+
+server.registerTool(
+  'list_designkit_guides',
+  {
+    title: 'List DesignKit workflow guides',
+    description:
+      'Lists the installed, versioned DesignKit implementation guides. Use these to choose an application workflow from responsibilities, not from a template name alone.',
+    inputSchema: {},
+  },
+  async () => ({ content: [{ type: 'text', text: JSON.stringify(designKitGuideManifest, null, 2) }] }),
+)
+
+server.registerTool(
+  'get_designkit_guide',
+  {
+    title: 'Get a complete DesignKit workflow contract',
+    description:
+      'Returns the canonical installed guide for routes, query boundaries, loading behavior, action placement, and page-template selection. Translate the contract into scoped ResourceKit kinds and validate the resulting document.',
+    inputSchema: {
+      id: z.string().describe('A guide id returned by list_designkit_guides, such as "managed-table".'),
+    },
+  },
+  async ({ id }) => {
+    const guide = designKitGuideManifest.guides.find((candidate) => candidate.id === id)
+    if (!guide) return { content: [{ type: 'text', text: `Unknown DesignKit guide: ${id}` }] }
+    const contract = await readFile(require.resolve(`@loykin/designkit/guides/${guide.contract}`), 'utf8')
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `ResourceKit translation rule: preserve this guide's workflow semantics, but build only with kinds and fields returned by this server's scoped schema tools.\n\n${contract}`,
+        },
+      ],
+    }
   },
 )
 

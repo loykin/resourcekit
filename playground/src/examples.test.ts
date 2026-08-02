@@ -32,10 +32,11 @@ function kindsIn(resource: Resource): string[] {
 
 describe('playground example catalog', () => {
   it('classifies every demo without exposing internal legacy kind names', () => {
-    expect(app.examples).toHaveLength(25)
+    expect(app.examples).toHaveLength(32)
     expect(app.examples.filter((example) => example.category === 'scenario')).toHaveLength(3)
     expect(app.examples.filter((example) => example.category === 'mcp-generated')).toHaveLength(3)
     expect(app.examples.filter((example) => example.category === 'designkit-parity')).toHaveLength(4)
+    expect(app.examples.filter((example) => example.category === 'designkit-guide')).toHaveLength(6)
     expect(app.examples.filter((example) => example.category === 'fragment').map((example) => example.id)).toEqual([
       'coin-market-cap-top10',
       'metrics-chart',
@@ -50,6 +51,7 @@ describe('playground example catalog', () => {
   })
 
   it('uses one scope for root selection, every slot choice, and final validation', () => {
+    expect(app.registry.getKind('resourcekit.dev/v1alpha1', 'DataBodyResource')).toBeDefined()
     for (const example of app.examples) {
       const inspection = app.inspectPlaygroundExample(example)
       expect(inspection.root.ok, `${example.id}: root ${inspection.rootResource.kind}`).toBe(true)

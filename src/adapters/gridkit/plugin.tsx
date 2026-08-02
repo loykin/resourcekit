@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
-import { DataGrid, DataGridPaginationCompact, GlobalSearch, inferTablePayload } from '@loykin/gridkit'
+import { DataGrid, DataGridCard, DataGridPaginationBar, GlobalSearch, inferTablePayload } from '@loykin/gridkit'
 import { getValueAtPath } from '../../core/path'
 import type { ActionSpec, DataBinding, ResourceKitPlugin } from '../../core/types'
 import type { KindRenderFn, RenderContext } from '../../react'
+import { useBindingValue } from '../internal/bindings'
 import { withKindAliases } from '../internal/shared'
 import { submitSpecSchema } from '../internal/submitSchema'
 
@@ -31,8 +32,29 @@ interface GridTableSpec {
   searchPlaceholder?: string
   searchableColumns?: string[]
   tableHeight?: number | string
-  pagination?: { pageSize?: number }
+  initialSorting?: Array<{ id: string; desc?: boolean }>
+  manualSorting?: boolean
+  pagination?: {
+    pageSize?: number
+    pageIndex?: number
+    pageCount?: number
+    totalCount?: number
+    pageSizes?: number[]
+  }
   inferOptions?: { hints?: Record<string, Partial<ColumnHint>> }
+}
+
+interface CardCollectionSpec {
+  data: DataBinding
+  idField?: string
+  titleField: string
+  subtitleField?: string
+  descriptionField?: string
+  imageField?: string
+  statusField?: string
+  minCardWidth?: number
+  minColumns?: number
+  tableHeight?: number | string
 }
 
 type CellCtx = { getValue: () => unknown; row: { original: Record<string, unknown> } }
@@ -131,6 +153,9 @@ function RowActionsCell({ items, row, ctx }: { items: ActionSpec[]; row: Record<
 function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderContext }) {
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
   const [error, setError] = useState<unknown>(null)
+  const boundPageIndex = useBindingValue(ctx, 'pageIndex', spec.pagination?.pageIndex)
+  const boundPageCount = useBindingValue(ctx, 'pageCount', spec.pagination?.pageCount)
+  const boundTotalCount = useBindingValue(ctx, 'totalCount', spec.pagination?.totalCount)
 
   const bindingKey = JSON.stringify(spec.data)
   const refNames = useMemo(
@@ -157,7 +182,6 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
   }, [bindingKey, refFingerprint, ctx.data.revision])
 
   const columns = useMemo(() => {
-    if (!rows) return []
     const explicitColumns = Object.entries(spec.columns ?? {})
 
     // `columns` given: it's an allowlist, not decoration — only these show, in
@@ -180,7 +204,7 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
     }
 
     // No `columns`: auto-infer every top-level field from the row shape.
-    const payload = inferTablePayload(rows, {
+    const payload = inferTablePayload(rows ?? [], {
       title: spec.title,
       hints: Object.fromEntries(
         Object.entries(spec.inferOptions?.hints ?? {}).map(([key, hint]) => [
@@ -206,27 +230,134 @@ function ResourceDataGrid({ spec, ctx }: { spec: GridTableSpec; ctx: RenderConte
     })
   }, [ctx, rows, spec.columns, spec.inferOptions, spec.title])
 
-  if (error) return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load rows'}</div>
-  if (!rows) return <div className="resourcekit-state">Loading rows...</div>
+  const pageIndex = Number(boundPageIndex ?? 0)
+  const pageCount = boundPageCount == null ? undefined : Number(boundPageCount)
+  const totalCount = boundTotalCount == null ? undefined : Number(boundTotalCount)
+  const pagination = spec.pagination
+    ? {
+        pageSize: spec.pagination.pageSize,
+        pageIndex: Number.isFinite(pageIndex) ? pageIndex : 0,
+        pageCount: pageCount !== undefined && Number.isFinite(pageCount) ? pageCount : undefined,
+        onPageChange: (nextPageIndex: number, pageSize: number) => {
+          if (ctx.bindings.has('pageIndex')) void ctx.bindings.write('pageIndex', nextPageIndex)
+          ctx.events.emit('pageChange', { pageIndex: nextPageIndex, pageSize })
+        },
+      }
+    : undefined
+
+  if (error && !rows) return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load rows'}</div>
 
   return (
-    <DataGrid
-      data={rows}
-      columns={columns}
-      enableSorting={spec.enableSorting}
-      enableColumnFilters={spec.enableColumnFilters}
-      filterDisplay={spec.filterDisplay}
-      headerLeft={
-        spec.globalSearch
-          ? (table: unknown) => <GlobalSearch table={table as never} placeholder={spec.searchPlaceholder ?? 'Search...'} />
-          : undefined
-      }
-      headerRight={spec.pagination ? (table: unknown) => <DataGridPaginationCompact table={table as never} /> : undefined}
-      onRowClick={(row: unknown) => ctx.events.emit('rowSelect', { row: originalRow(row) })}
-      pagination={spec.pagination}
-      searchableColumns={spec.searchableColumns}
-      tableHeight={spec.tableHeight}
-    />
+    <>
+      {error && rows && <div className="resourcekit-state">Unable to refresh; showing the most recent rows.</div>}
+      <DataGrid
+        data={rows ?? []}
+        columns={columns}
+        isLoading={!rows}
+        enableSorting={spec.enableSorting}
+        initialSorting={spec.initialSorting?.map(({ id, desc }) => ({ id, desc: desc ?? false }))}
+        manualSorting={spec.manualSorting}
+        onSortingChange={(sorting) => {
+          if (ctx.bindings.has('sorting')) void ctx.bindings.write('sorting', sorting)
+          ctx.events.emit('sortingChange', { sorting })
+        }}
+        enableColumnFilters={spec.enableColumnFilters}
+        filterDisplay={spec.filterDisplay}
+        headerLeft={
+          spec.globalSearch
+            ? (table: unknown) => <GlobalSearch table={table as never} placeholder={spec.searchPlaceholder ?? 'Search...'} />
+            : undefined
+        }
+        onRowClick={(row: unknown) => ctx.events.emit('rowSelect', { row: originalRow(row) })}
+        pagination={pagination}
+        footer={spec.pagination
+          ? (table: unknown) => (
+              <DataGridPaginationBar
+                table={table as never}
+                totalCount={Number.isFinite(totalCount) ? totalCount : undefined}
+                pageSizes={spec.pagination?.pageSizes}
+              />
+            )
+          : undefined}
+        classNames={spec.pagination ? { footer: 'pt-3' } : undefined}
+        searchableColumns={spec.searchableColumns}
+        tableHeight={spec.tableHeight}
+      />
+    </>
+  )
+}
+
+function ResourceCardCollection({ spec, ctx }: { spec: CardCollectionSpec; ctx: RenderContext }) {
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const bindingKey = JSON.stringify(spec.data)
+  const refNames = useMemo(
+    () => [...bindingKey.matchAll(/\$\{([^}]+)}/g)].map((match) => match[1]),
+    [bindingKey],
+  )
+  const refFingerprint = refNames.map((name) => JSON.stringify(ctx.variables.get(name) ?? null)).join('|')
+
+  useEffect(() => {
+    let cancelled = false
+    setError(null)
+    ctx.data.resolve(spec.data)
+      .then((next) => {
+        if (!cancelled) setRows(next)
+      })
+      .catch((nextError: unknown) => {
+        if (!cancelled) setError(nextError)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bindingKey, refFingerprint, ctx.data.revision])
+
+  const columns = useMemo(() => [
+    { id: spec.titleField, accessorFn: (row: Record<string, unknown>) => getValueAtPath(row, spec.titleField), header: spec.titleField },
+  ], [spec.titleField])
+
+  if (error && !rows) return <div className="resourcekit-state">{error instanceof Error ? error.message : 'Unable to load cards'}</div>
+
+  return (
+    <>
+      {error && rows && <div className="resourcekit-state">Unable to refresh; showing the most recent cards.</div>}
+      <DataGridCard
+        data={rows ?? []}
+        columns={columns}
+        isLoading={!rows}
+        getRowId={(row) => String(getValueAtPath(row, spec.idField ?? 'id') ?? getValueAtPath(row, spec.titleField))}
+        minCardWidth={spec.minCardWidth}
+        minColumns={spec.minColumns}
+        containerHeight={spec.tableHeight}
+        onRowClick={(row) => ctx.events.emit('rowSelect', { row: originalRow(row) })}
+        renderCard={(row) => {
+          const record = row.original as Record<string, unknown>
+          const image = spec.imageField ? getValueAtPath(record, spec.imageField) : undefined
+          const title = getValueAtPath(record, spec.titleField)
+          const subtitle = spec.subtitleField ? getValueAtPath(record, spec.subtitleField) : undefined
+          const description = spec.descriptionField ? getValueAtPath(record, spec.descriptionField) : undefined
+          const status = spec.statusField ? getValueAtPath(record, spec.statusField) : undefined
+          return (
+            <article className="h-full overflow-hidden rounded-[var(--radius)] border border-border bg-card">
+              {typeof image === 'string' && image && (
+                <img src={image} alt="" className="aspect-[4/3] w-full object-cover" />
+              )}
+              <div className="space-y-2 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold">{title == null ? null : String(title)}</h3>
+                    {subtitle != null && <p className="mt-0.5 text-xs text-muted-foreground">{String(subtitle)}</p>}
+                  </div>
+                  {status != null && <span className="shrink-0 rounded-md border border-border px-2 py-0.5 text-xs">{String(status)}</span>}
+                </div>
+                {description != null && <p className="line-clamp-3 text-sm text-muted-foreground">{String(description)}</p>}
+              </div>
+            </article>
+          )
+        }}
+      />
+    </>
   )
 }
 
@@ -304,21 +435,80 @@ export function createGridKitPlugin(): ResourceKitPlugin<KindRenderFn> {
                 },
               },
               enableSorting: { type: 'boolean' },
+              initialSorting: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['id'],
+                  properties: { id: { type: 'string' }, desc: { type: 'boolean' } },
+                },
+              },
+              manualSorting: { type: 'boolean' },
               enableColumnFilters: { type: 'boolean' },
               filterDisplay: { type: 'string' },
               globalSearch: { type: 'boolean' },
               searchPlaceholder: { type: 'string' },
               searchableColumns: { type: 'array', items: { type: 'string' } },
               tableHeight: {},
-              pagination: { type: 'object' },
+              pagination: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  pageSize: { type: 'integer', minimum: 1 },
+                  pageIndex: { type: 'integer', minimum: 0 },
+                  pageCount: { type: 'integer', minimum: 1 },
+                  totalCount: { type: 'integer', minimum: 0 },
+                  pageSizes: { type: 'array', items: { type: 'integer', minimum: 1 } },
+                },
+              },
               inferOptions: { type: 'object' },
-              events: { type: 'object' },
             },
           },
-          render: (resource, ctx) => <ResourceDataGrid spec={resource.spec as GridTableSpec} ctx={ctx} />,
+          bindingPolicy: {
+            inputs: {
+              pageIndex: { description: 'Controlled zero-based page index.', schema: { type: 'integer' }, writable: true },
+              pageCount: { description: 'Total number of server pages.', schema: { type: 'integer' } },
+              totalCount: { description: 'Total server row count.', schema: { type: 'integer' } },
+              sorting: {
+                description: 'Writable server sorting state mirrored from GridKit.',
+                schema: { type: 'array' },
+                writable: true,
+              },
+            },
         },
+        render: (resource, ctx) => <ResourceDataGrid spec={resource.spec as GridTableSpec} ctx={ctx} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'GridKitCards',
+        level: ['leaf'],
+        description:
+          'A declarative card collection for publishing feeds and commerce catalogs. Field names map records into a constrained card layout; rowSelect carries the full selected row so the host can navigate to a stable detail route.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['data', 'titleField'],
+          properties: {
+            data: { type: 'object' },
+            idField: { type: 'string' },
+            titleField: { type: 'string' },
+            subtitleField: { type: 'string' },
+            descriptionField: { type: 'string' },
+            imageField: { type: 'string' },
+            statusField: { type: 'string' },
+            minCardWidth: { type: 'number', minimum: 120 },
+            minColumns: { type: 'integer', minimum: 1 },
+            tableHeight: {},
+          },
+        },
+        render: (resource, ctx) => <ResourceCardCollection spec={resource.spec as CardCollectionSpec} ctx={ctx} />,
+      },
       ],
     },
-    [['GridKitTable', 'TableView']],
+    [
+      ['GridKitTable', 'TableView'],
+      ['GridKitCards', 'CardCollection'],
+    ],
   )
 }

@@ -28,14 +28,17 @@ importers:
         specifier: ^0.0.3
         version: 0.0.3
       '@loykin/designkit':
-        specifier: 0.0.1-dev.7
-        version: 0.0.1-dev.7(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
+        specifier: 0.0.4
+        version: 0.0.4(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
       '@loykin/filter-input':
         specifier: 0.0.1-dev.0
         version: 0.0.1-dev.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@loykin/gridkit':
         specifier: ^0.2.0
         version: 0.2.0(@tanstack/react-table@8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@tanstack/react-virtual@3.14.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
+      '@loykin/side-panel':
+        specifier: 0.0.1-dev.0
+        version: 0.0.1-dev.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
       '@rjsf/core':
         specifier: ^6.7.1
         version: 6.7.1(@rjsf/utils@6.7.1(react@19.2.7))(react@19.2.7)
@@ -103,8 +106,8 @@ importers:
         specifier: ^0.0.3
         version: 0.0.3
       '@loykin/designkit':
-        specifier: 0.0.1-dev.7
-        version: 0.0.1-dev.7(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
+        specifier: 0.0.4
+        version: 0.0.4(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
       '@loykin/filter-input':
         specifier: 0.0.1-dev.0
         version: 0.0.1-dev.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -152,8 +155,8 @@ importers:
         specifier: ^0.0.3
         version: 0.0.3
       '@loykin/designkit':
-        specifier: 0.0.1-dev.7
-        version: 0.0.1-dev.7(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
+        specifier: 0.0.4
+        version: 0.0.4(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))
       '@loykin/filter-input':
         specifier: 0.0.1-dev.0
         version: 0.0.1-dev.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -869,8 +872,9 @@ packages:
   '@loykin/datasourcekit@0.0.3':
     resolution: {integrity: sha512-t/b3fn/xfT0kI1kWgs1eYi7GjAvo3Q9ts9QX5yoNnGDsUaqD5Be7ojes+wx//IKUpoYxxWDfxpvBw1qO2Zoguw==}
 
-  '@loykin/designkit@0.0.1-dev.7':
-    resolution: {integrity: sha512-mjB3UM/ZJoGN7VLaD7uzSneIQSMSy9C38q6xDKNGLiOvt6bRYc84zCrgWyZbBQaL1G1s7WpuEKLZVHeegUgAkA==}
+  '@loykin/designkit@0.0.4':
+    resolution: {integrity: sha512-HMxE0zozhqpOMEDxqcWIjEqXC+SLSc8ikT1/yY/vEWBNOIYUE4KlgtJJ4OXkyeuWKo4V71PHfokADwol6yC43g==}
+    hasBin: true
     peerDependencies:
       react: ^19.0.0
       react-dom: ^19.0.0
@@ -887,6 +891,12 @@ packages:
     peerDependencies:
       '@tanstack/react-table': ^8.21.3
       '@tanstack/react-virtual': ^3.13.24
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+
+  '@loykin/side-panel@0.0.1-dev.0':
+    resolution: {integrity: sha512-Le58FEjStSYC08Q6rkIPRV1j1BxSS/iOHJqe917nYFJzvSXD9VESyfVFVNHoOoYN95xkaSiEgVdgoTXQ/BENFQ==}
+    peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
@@ -2414,6 +2424,12 @@ packages:
     resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
     engines: {node: '>= 0.10'}
 
+  re-resizable@6.11.2:
+    resolution: {integrity: sha512-2xI2P3OHs5qw7K0Ud1aLILK6MQxW50TcO+DetD9eIV58j84TqYeHoZcL9H4GXFXXIh7afhH8mv5iUCXII7OW7A==}
+    peerDependencies:
+      react: ^16.13.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.13.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   react-dom@19.2.7:
     resolution: {integrity: sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ==}
     peerDependencies:
@@ -3464,7 +3480,7 @@ snapshots:
 
   '@loykin/datasourcekit@0.0.3': {}
 
-  '@loykin/designkit@0.0.1-dev.7(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))':
+  '@loykin/designkit@0.0.4(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(tailwindcss@4.3.2)(use-sync-external-store@1.6.0(react@19.2.7))':
     dependencies:
       '@base-ui/react': 1.6.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       class-variance-authority: 0.7.1
@@ -3502,6 +3518,18 @@ snapshots:
       '@tanstack/react-virtual': 3.14.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       clsx: 2.1.1
       lucide-react: 1.23.0(react@19.2.7)
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      zustand: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
+    transitivePeerDependencies:
+      - '@types/react'
+      - immer
+      - use-sync-external-store
+
+  '@loykin/side-panel@0.0.1-dev.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))':
+    dependencies:
+      clsx: 2.1.1
+      re-resizable: 6.11.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
       zustand: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
@@ -4932,6 +4960,11 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       unpipe: 1.0.0
+
+  re-resizable@6.11.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
 
   react-dom@19.2.7(react@19.2.7):
     dependencies:

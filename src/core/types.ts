@@ -163,7 +163,8 @@ export type EventPolicy =
   | { kind: 'internal' }
   | { kind: 'emit'; event: string }
   | { kind: 'action'; action: string }
-  | { kind: 'setVariable'; variable: string; from?: string }
+  /** `from` reads a dot-path from the event payload. `value` sets a literal — use one or the other, not both. */
+  | { kind: 'setVariable'; variable: string; from?: string; value?: string | string[] }
 
 // ─── Variables ────────────────────────────────────────────────────────────────
 
@@ -280,6 +281,13 @@ export interface DataSourceManifest<TSpec = unknown> {
   resultSchema?: JsonSchema
   resolve: DataResolver<TSpec>
   queryKey?(binding: DataBinding & { spec: TSpec }, ctx: DataResolveContext): readonly unknown[]
+  /**
+   * Push/streaming alternative to `resolve` — called instead of `resolve` when present.
+   * `onData` is invoked whenever new rows arrive; the returned teardown is called on
+   * unit disposal or when the binding changes. If defined on the manifest, the engine
+   * uses this path and never calls `resolve` for that unit.
+   */
+  subscribe?(binding: DataBinding & { spec: TSpec }, onData: (rows: Record<string, unknown>[]) => void, ctx: DataResolveContext): () => void
 }
 
 // ─── Mutation bindings (write path) ──────────────────────────────────────────

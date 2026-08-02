@@ -16,6 +16,13 @@ It uses the exact same registry as the playground (same kind adapters, same
 scope shape: `rootLevels: ['template']`), so whatever a client produces here
 reflects the real schema, not a hand-rolled toy one.
 
+For administrative CRUD, forms, publishing, and commerce, the server also
+reads the versioned workflow contracts shipped by the installed
+`@loykin/designkit`. A reasoning client selects and reads one of those guides
+before traversing ResourceKit's scoped schema, preserving the guide's route,
+query, loading, action-placement, and template decisions without copying its
+React implementation.
+
 `events`, `submit.mutation`, and `variables` fields — which a kind's own
 `specSchema` can't type on its own, since they depend on runtime types
 (`EventPolicy`, `MutationBinding`, `VariableDeclaration`) and, for mutations,
@@ -72,6 +79,10 @@ redacted.
 
 ## Tools
 
+- `list_designkit_guides` — list the workflow contracts shipped by the
+  installed DesignKit version.
+- `get_designkit_guide({ id })` — read a complete canonical workflow contract
+  before translating it into ResourceKit resources.
 - `list_root_templates` — get the candidate kinds for the document root
   (envelope-only, no spec).
 - `next_stage_batch({ apiVersion, kind })` — resolve every slot of a node

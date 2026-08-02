@@ -39,6 +39,53 @@ vi.mock('@loykin/gridkit', () => ({
 
 afterEach(cleanup)
 
+describe('GridKit guide contracts', () => {
+  it('exposes controlled server pagination and sorting on TableView', () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createGridKitPlugin())
+
+    const table = registry.getKind(API_VERSION, 'TableView')
+    const schema = table?.specSchema as {
+      properties?: Record<string, { properties?: Record<string, unknown> }>
+    }
+
+    expect(schema.properties?.pagination?.properties).toMatchObject({
+      pageSize: expect.any(Object),
+      pageIndex: expect.any(Object),
+      pageCount: expect.any(Object),
+      totalCount: expect.any(Object),
+      pageSizes: expect.any(Object),
+    })
+    expect(table?.bindingPolicy?.inputs).toMatchObject({
+      pageIndex: { writable: true },
+      pageCount: expect.any(Object),
+      totalCount: expect.any(Object),
+      sorting: { writable: true },
+    })
+  })
+
+  it('exposes the constrained CardCollection vocabulary used by publishing and commerce guides', () => {
+    const registry = createRegistry<KindRenderFn>()
+    registry.use(createGridKitPlugin())
+
+    const cards = registry.getKind(API_VERSION, 'CardCollection')
+    const schema = cards?.specSchema as {
+      required?: string[]
+      properties?: Record<string, unknown>
+    }
+
+    expect(schema.required).toEqual(['data', 'titleField'])
+    expect(schema.properties).toMatchObject({
+      idField: expect.any(Object),
+      titleField: expect.any(Object),
+      subtitleField: expect.any(Object),
+      descriptionField: expect.any(Object),
+      imageField: expect.any(Object),
+      statusField: expect.any(Object),
+    })
+  })
+})
+
 describe('GridKitTable row actions', () => {
   it('submits the complete SubmitSpec with row payload and stops row-click propagation', async () => {
     const mutation = vi.fn(async () => ({ ok: true }))

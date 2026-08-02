@@ -35,16 +35,19 @@ export interface CreateDataflowEngineOptions {
   variables: VariableEngine
   /** The actual row-fetching call for the no-coordinator path — this engine only adds dependOn-gating/dedup/status-tracking around it. */
   resolve: (binding: DataBinding, ctx: DataResolveContext) => Promise<Record<string, unknown>[]>
+  /** Push/streaming path — called instead of `resolve` when the manifest supports it. Returns `undefined` if the binding's manifest has no `subscribe`. */
+  subscribe?: (binding: DataBinding, onData: (rows: Record<string, unknown>[]) => void, ctx: DataResolveContext) => (() => void) | undefined
   coordinatorResolve?: CoordinatorResolveBridge
   scopePolicy?: QueryScopePolicy
 }
 
 export function createDataflowEngine(options: CreateDataflowEngineOptions): DataflowEngine {
-  const { store, scope, variables, resolve, coordinatorResolve, scopePolicy } = options
+  const { store, scope, variables, resolve, subscribe, coordinatorResolve, scopePolicy } = options
 
   const units = new Map<string, DataflowUnit>()
   const generations = new Map<string, number>()
   const lastFingerprint = new Map<string, string>()
+  const streamTeardowns = new Map<string, () => void>()
   let unsubscribers: Array<() => void> = []
 
   const keyFor = (name: string) => runtimeKeys.dataflow(name, scope)
@@ -67,7 +70,28 @@ export function createDataflowEngine(options: CreateDataflowEngineOptions): Data
     const generation = (generations.get(name) ?? 0) + 1
     generations.set(name, generation)
 
+    // Tear down any existing stream subscription before re-attempting
+    streamTeardowns.get(name)?.();
+    streamTeardowns.delete(name)
+
     store.publish(keyFor(name), { status: 'pending' })
+
+    // Try push/streaming path first — coordinator is skipped for streaming sources
+    if (subscribe) {
+      const teardown = subscribe(
+        interpolated.value as DataBinding,
+        (rows) => {
+          if (generations.get(name) !== generation) return
+          lastFingerprint.set(name, fingerprint)
+          store.publish(keyFor(name), { status: 'ready', value: rows })
+        },
+        { variables: variables.snapshot() },
+      )
+      if (teardown !== undefined) {
+        streamTeardowns.set(name, teardown)
+        return
+      }
+    }
 
     try {
       const value = coordinatorResolve
@@ -140,10 +164,12 @@ export function createDataflowEngine(options: CreateDataflowEngineOptions): Data
     },
     dispose() {
       for (const unsub of unsubscribers) unsub()
+      for (const teardown of streamTeardowns.values()) teardown()
       unsubscribers = []
       units.clear()
       generations.clear()
       lastFingerprint.clear()
+      streamTeardowns.clear()
       coordinatorResolve?.dispose()
     },
   }

@@ -20,6 +20,7 @@ const users: DemoUser[] = [
   { id: '3', name: 'Carla Chen', email: 'carla@example.com', role: 'Manager' },
   { id: '4', name: 'David Osei', email: 'david@example.com', role: 'Engineer' },
 ]
+let nextUserId = users.length + 1
 
 export function demoUsersMiddleware(req: IncomingMessage, res: ServerResponse, next: () => void): void {
   const url = new URL(req.url ?? '/', 'http://localhost')
@@ -29,6 +30,24 @@ export function demoUsersMiddleware(req: IncomingMessage, res: ServerResponse, n
 
   if (url.pathname === '/users' && req.method === 'GET') {
     res.end(JSON.stringify(users))
+    return
+  }
+
+  if (url.pathname === '/users' && req.method === 'POST') {
+    let body = ''
+    req.on('data', (chunk: Buffer) => { body += chunk.toString() })
+    req.on('end', () => {
+      try {
+        const input = body ? (JSON.parse(body) as Partial<DemoUser>) : {}
+        const user: DemoUser = { id: String(nextUserId++), name: input.name ?? '', email: input.email ?? '', role: input.role ?? 'Viewer' }
+        users.push(user)
+        res.statusCode = 201
+        res.end(JSON.stringify(user))
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: 'invalid JSON body' }))
+      }
+    })
     return
   }
 

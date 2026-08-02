@@ -4,17 +4,27 @@ import { FormProvider, useController, useForm, useFormContext } from 'react-hook
 import type { FieldErrors, UseFormReturn } from 'react-hook-form'
 import {
   Badge,
+  BrowseBodyTemplate,
   Button,
   Checkbox,
   DataBodyTemplate,
+  DetailBodyTemplate,
+  FormWizardBodyTemplate,
   Input,
   ListDetailBodyTemplate,
+  PageBreadcrumb,
   PageTopBar,
   PanelTemplate,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
+  Switch,
   WorkbenchBodyTemplate,
 } from '@loykin/designkit'
 import { getValueAtPath, setValueAtPath } from '../../core/path'
@@ -53,6 +63,64 @@ interface DataBodySpec {
   description?: string
   defaultTab?: string
   status?: string
+}
+
+interface DataBodyResourceSpec {
+  refreshing?: boolean
+  refreshingLabel?: string
+  className?: string
+  bodyClassName?: string
+}
+
+interface BrowseSpec {
+  title?: string
+  description?: string
+  status?: string
+  sidebarTitle?: string
+  sidebarWidth?: string
+}
+
+interface DetailSpec {
+  variant?: 'media' | 'record' | 'full'
+  eyebrow?: string
+  title?: string
+  description?: string
+  status?: string
+  stickyAside?: boolean
+}
+
+interface DetailTabSpec {
+  id: string
+  label: string
+  count?: number
+  disabled?: boolean
+}
+
+interface DetailSectionSpec {
+  title?: string
+  description?: string
+  surface?: 'plain' | 'card' | 'bordered'
+}
+
+interface BreadcrumbItemSpec {
+  label: string
+  href?: string
+}
+
+interface PageBreadcrumbSpec {
+  items: Array<string | BreadcrumbItemSpec>
+}
+
+interface FormWizardSpec {
+  title?: string
+  variant?: 'card' | 'plain'
+  activeStep?: number
+}
+
+interface FormWizardStepSpec {
+  key: string
+  title: string
+  description?: string
 }
 
 interface PageTopBarSpec {
@@ -140,6 +208,7 @@ interface InputSpec {
   /** Dot-path into the nearest record scope — prefills the input. */
   fieldRef?: string
   required?: boolean
+  requiredMessage?: string
   disabled?: boolean
 }
 
@@ -150,6 +219,7 @@ interface TextareaSpec {
   /** Dot-path into the nearest record scope — prefills the textarea. */
   fieldRef?: string
   required?: boolean
+  requiredMessage?: string
   disabled?: boolean
   rows?: number
 }
@@ -182,6 +252,15 @@ interface SelectSpec {
   options: SelectOption[]
 }
 
+interface SwitchSpec {
+  name?: string
+  label?: string
+  defaultChecked?: boolean
+  fieldRef?: string
+  required?: boolean
+  disabled?: boolean
+}
+
 interface FormSpec {
   submit: SubmitSpec
   submitLabel?: string
@@ -190,6 +269,8 @@ interface FormSpec {
   id?: string
   /** Suppresses the built-in submit button, e.g. when the host renders its own via `form={id}`. */
   hideSubmitButton?: boolean
+  /** Optional secondary action rendered before submit for route-owned cancellation. */
+  cancelLabel?: string
 }
 
 interface FormViewFieldSpec {
@@ -236,14 +317,21 @@ interface SheetSpec {
 type FormValues = Record<string, unknown>
 
 const KitBadge = Badge as ComponentType<Record<string, unknown>>
+const KitBrowse = BrowseBodyTemplate as unknown as ComponentType<Record<string, unknown>>
 const KitCheckbox = Checkbox as ComponentType<Record<string, unknown>>
 const KitButton = Button as ComponentType<Record<string, unknown>>
 const KitDataBody = DataBodyTemplate as ComponentType<Record<string, unknown>>
+const KitDataBodyResource = DataBodyTemplate.Resource as ComponentType<Record<string, unknown>>
 const KitDataBodyGroup = DataBodyTemplate.Group as ComponentType<Record<string, unknown>>
 const KitDataBodyRow = DataBodyTemplate.Row as unknown as ComponentType<Record<string, unknown>>
 const KitDataBodyField = DataBodyTemplate.Field as unknown as ComponentType<Record<string, unknown>>
 const KitInput = Input as ComponentType<Record<string, unknown>>
+const KitDetail = DetailBodyTemplate as ComponentType<Record<string, unknown>>
+const KitDetailTab = DetailBodyTemplate.Tab as unknown as ComponentType<Record<string, unknown>>
+const KitDetailSection = DetailBodyTemplate.Section as ComponentType<Record<string, unknown>>
+const KitFormWizard = FormWizardBodyTemplate as unknown as ComponentType<Record<string, unknown>>
 const KitListDetail = ListDetailBodyTemplate as unknown as ComponentType<Record<string, unknown>>
+const KitPageBreadcrumb = PageBreadcrumb as ComponentType<Record<string, unknown>>
 const KitPageTopBar = PageTopBar as ComponentType<Record<string, unknown>>
 const KitPanel = PanelTemplate as ComponentType<Record<string, unknown>>
 const KitPanelSection = PanelTemplate.Section as ComponentType<Record<string, unknown>>
@@ -252,6 +340,12 @@ const KitDataBodyBody = DataBodyTemplate.Body as ComponentType<Record<string, un
 const KitDataBodyTab = DataBodyTemplate.Tab as unknown as ComponentType<Record<string, unknown>>
 const KitDataBodySection = DataBodyTemplate.Section as unknown as ComponentType<Record<string, unknown>>
 const KitDataBodySummary = DataBodyTemplate.Summary as ComponentType<Record<string, unknown>>
+const KitSelect = Select as ComponentType<Record<string, unknown>>
+const KitSelectContent = SelectContent as ComponentType<Record<string, unknown>>
+const KitSelectItem = SelectItem as ComponentType<Record<string, unknown>>
+const KitSelectTrigger = SelectTrigger as ComponentType<Record<string, unknown>>
+const KitSelectValue = SelectValue as ComponentType<Record<string, unknown>>
+const KitSwitch = Switch as ComponentType<Record<string, unknown>>
 
 function dataBodyChildren(ctx: RenderContext): ReactNode {
   const entries = ctx.slots.entries()
@@ -300,6 +394,82 @@ function dataBodyChildren(ctx: RenderContext): ReactNode {
   })
 }
 
+function detailBodyChildren(ctx: RenderContext): ReactNode {
+  return ctx.slots.entries().map(({ resource, node }, index) => {
+    if (resource.kind === 'DetailBodyTab' || resource.kind === 'DesignKitDetailBodyTab') {
+      const spec = resource.spec as DetailTabSpec
+      return (
+        <KitDetailTab
+          key={`${resource.kind}-${index}`}
+          id={spec.id}
+          label={spec.label}
+          count={spec.count}
+          disabled={spec.disabled}
+        >
+          {node}
+        </KitDetailTab>
+      )
+    }
+    return node
+  })
+}
+
+function DataBodyResourceNode({ spec, ctx }: { spec: DataBodyResourceSpec; ctx: RenderContext }) {
+  const boundRefreshing = useBindingValue(ctx, 'refreshing', spec.refreshing)
+  return (
+    <KitDataBodyResource
+      toolbarLeft={ctx.slots.one('toolbarLeft')}
+      toolbarRight={ctx.slots.one('toolbarRight')}
+      refreshing={Boolean(boundRefreshing)}
+      refreshingLabel={spec.refreshingLabel}
+      notice={ctx.slots.one('notice')}
+      footer={ctx.slots.one('footer')}
+      className={spec.className}
+      bodyClassName={spec.bodyClassName}
+    >
+      {ctx.slots.children()}
+    </KitDataBodyResource>
+  )
+}
+
+function FormWizardNode({ spec, ctx }: { spec: FormWizardSpec; ctx: RenderContext }) {
+  const boundStep = useBindingValue(ctx, 'activeStep', spec.activeStep)
+  const [localStep, setLocalStep] = useState(spec.activeStep ?? 0)
+  const steps = ctx.slots.entries().flatMap(({ resource, node }) => {
+    if (resource.kind !== 'FormWizardStep' && resource.kind !== 'DesignKitFormWizardStep') return []
+    const step = resource.spec as FormWizardStepSpec
+    return [{ key: step.key, title: step.title, description: step.description, content: node }]
+  })
+  const requestedStep = Number(boundStep ?? localStep)
+  const activeStep = Number.isFinite(requestedStep)
+    ? Math.max(0, Math.min(requestedStep, Math.max(0, steps.length - 1)))
+    : 0
+  const setStep = (next: number) => {
+    const bounded = Math.max(0, Math.min(next, Math.max(0, steps.length - 1)))
+    if (ctx.bindings.has('activeStep')) void ctx.bindings.write('activeStep', bounded)
+    else setLocalStep(bounded)
+  }
+  return (
+    <KitFormWizard
+      title={spec.title}
+      variant={spec.variant}
+      status={ctx.slots.one('status')}
+      topBar={ctx.slots.one('topBar')}
+      steps={steps}
+      activeStep={activeStep}
+      onNext={() => {
+        ctx.events.emit('next', { activeStep })
+        setStep(activeStep + 1)
+      }}
+      onBack={() => {
+        ctx.events.emit('back', { activeStep })
+        setStep(activeStep - 1)
+      }}
+      onFinish={() => ctx.events.emit('finish', { activeStep })}
+    />
+  )
+}
+
 function ListDetailNode({ spec, ctx }: { spec: ListDetailSpec; ctx: RenderContext }) {
   const selection = useBindingValue(ctx, 'selection')
   const hasSelectionSource = ctx.bindings.has('selection')
@@ -339,26 +509,33 @@ function InputNode({ spec, ctx }: { spec: InputSpec; ctx: RenderContext }) {
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const raw = fieldValue ?? boundValue
   const value = raw == null ? undefined : String(raw)
-  const registration = form && spec.name ? form.register(spec.name, { required: spec.required }) : undefined
+  const registration = form && spec.name
+    ? form.register(spec.name, { required: spec.required ? (spec.requiredMessage ?? 'This field is required.') : false })
+    : undefined
+  const error = form && spec.name ? fieldFormError(form.formState.errors, spec.name) : undefined
   return (
-    <KitInput
-      key={`${spec.name ?? ''}:${value ?? ''}`}
-      aria-label={spec.name ?? spec.placeholder}
-      className="w-full min-w-[16rem]"
-      defaultValue={value}
-      name={registration?.name ?? spec.name}
-      ref={registration?.ref}
-      onBlur={registration?.onBlur}
-      placeholder={spec.placeholder}
-      required={spec.required}
-      disabled={spec.disabled}
-      style={{ minWidth: 256, width: '100%' }}
-      type={spec.type ?? 'text'}
-      onChange={(event: { target: { value: string }; currentTarget: { value: string } }) => {
-        void registration?.onChange(event)
-        ctx.events.emit('change', { value: event.currentTarget.value })
-      }}
-    />
+    <div className="w-full min-w-0 space-y-1.5">
+      <KitInput
+        key={`${spec.name ?? ''}:${value ?? ''}`}
+        aria-label={spec.name ?? spec.placeholder}
+        aria-invalid={Boolean(error) || undefined}
+        className="h-8 w-full min-w-[16rem] text-sm"
+        defaultValue={value}
+        name={registration?.name ?? spec.name}
+        ref={registration?.ref}
+        onBlur={registration?.onBlur}
+        placeholder={spec.placeholder}
+        required={spec.required}
+        disabled={spec.disabled}
+        style={{ minWidth: 256, width: '100%' }}
+        type={spec.type ?? 'text'}
+        onChange={(event: { target: { value: string }; currentTarget: { value: string } }) => {
+          void registration?.onChange(event)
+          ctx.events.emit('change', { value: event.currentTarget.value })
+        }}
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
   )
 }
 
@@ -368,26 +545,33 @@ function TextareaNode({ spec, ctx }: { spec: TextareaSpec; ctx: RenderContext })
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const raw = fieldValue ?? boundValue
   const value = raw == null ? undefined : String(raw)
-  const registration = form && spec.name ? form.register(spec.name, { required: spec.required }) : undefined
+  const registration = form && spec.name
+    ? form.register(spec.name, { required: spec.required ? (spec.requiredMessage ?? 'This field is required.') : false })
+    : undefined
+  const error = form && spec.name ? fieldFormError(form.formState.errors, spec.name) : undefined
   return (
-    <textarea
-      key={`${spec.name ?? ''}:${value ?? ''}`}
-      aria-label={spec.name ?? spec.placeholder}
-      className="w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-      defaultValue={value}
-      name={registration?.name ?? spec.name}
-      ref={registration?.ref}
-      onBlur={registration?.onBlur}
-      placeholder={spec.placeholder}
-      required={spec.required}
-      disabled={spec.disabled}
-      rows={spec.rows ?? 4}
-      style={{ minWidth: 256, width: '100%' }}
-      onChange={(event) => {
-        void registration?.onChange(event)
-        ctx.events.emit('change', { value: event.currentTarget.value })
-      }}
-    />
+    <div className="w-full min-w-0 space-y-1.5">
+      <textarea
+        key={`${spec.name ?? ''}:${value ?? ''}`}
+        aria-label={spec.name ?? spec.placeholder}
+        aria-invalid={Boolean(error) || undefined}
+        className="w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        defaultValue={value}
+        name={registration?.name ?? spec.name}
+        ref={registration?.ref}
+        onBlur={registration?.onBlur}
+        placeholder={spec.placeholder}
+        required={spec.required}
+        disabled={spec.disabled}
+        rows={spec.rows ?? 4}
+        style={{ minWidth: 256, width: '100%' }}
+        onChange={(event) => {
+          void registration?.onChange(event)
+          ctx.events.emit('change', { value: event.currentTarget.value })
+        }}
+      />
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
   )
 }
 
@@ -485,35 +669,117 @@ function SelectNode({ spec, ctx }: { spec: SelectSpec; ctx: RenderContext }) {
   const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
   const raw = fieldValue ?? boundValue
   const value = raw == null ? undefined : String(raw)
-  const registration = form && spec.name ? form.register(spec.name, { required: spec.required }) : undefined
+  if (form && spec.name) return <RegisteredSelect spec={spec} ctx={ctx} form={form} initialValue={value} />
   return (
-    <select
-      key={`${spec.name ?? ''}:${value ?? ''}`}
-      aria-label={spec.name ?? spec.placeholder}
-      className="h-8 w-full min-w-[16rem] rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-      defaultValue={value ?? ''}
-      name={registration?.name ?? spec.name}
-      ref={registration?.ref}
-      onBlur={registration?.onBlur}
-      required={spec.required}
+    <KitSelect
+      value={value}
       disabled={spec.disabled}
-      style={{ minWidth: 256, width: '100%' }}
-      onChange={(event) => {
-        void registration?.onChange(event)
-        ctx.events.emit('change', { value: event.currentTarget.value })
-      }}
+      onValueChange={(next: string) => ctx.events.emit('change', { value: next })}
     >
-      {spec.placeholder && (
-        <option value="" disabled>
-          {spec.placeholder}
-        </option>
-      )}
-      {spec.options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+      <KitSelectTrigger aria-label={spec.name ?? spec.placeholder} className="h-8 w-full min-w-[16rem] text-sm">
+        <KitSelectValue placeholder={spec.placeholder} />
+      </KitSelectTrigger>
+      <KitSelectContent>
+        {spec.options.map((option) => (
+          <KitSelectItem key={option.value} value={option.value}>{option.label}</KitSelectItem>
+        ))}
+      </KitSelectContent>
+    </KitSelect>
+  )
+}
+
+function RegisteredSelect({
+  spec,
+  ctx,
+  form,
+  initialValue,
+}: {
+  spec: SelectSpec
+  ctx: RenderContext
+  form: UseFormReturn<FormValues>
+  initialValue?: string
+}) {
+  const { field, fieldState } = useController({
+    name: spec.name!,
+    control: form.control,
+    defaultValue: initialValue,
+    rules: { required: spec.required },
+  })
+  return (
+    <div className="w-full min-w-0 space-y-1.5">
+      <KitSelect
+        value={field.value == null ? undefined : String(field.value)}
+        disabled={spec.disabled}
+        onValueChange={(next: string) => {
+          field.onChange(next)
+          ctx.events.emit('change', { value: next })
+        }}
+      >
+        <KitSelectTrigger
+          aria-label={spec.name ?? spec.placeholder}
+          aria-invalid={fieldState.invalid || undefined}
+          className="h-8 w-full min-w-[16rem] text-sm"
+          onBlur={field.onBlur}
+        >
+          <KitSelectValue placeholder={spec.placeholder} />
+        </KitSelectTrigger>
+        <KitSelectContent>
+          {spec.options.map((option) => (
+            <KitSelectItem key={option.value} value={option.value}>{option.label}</KitSelectItem>
+          ))}
+        </KitSelectContent>
+      </KitSelect>
+      {fieldState.error && <p className="text-xs text-destructive">{fieldState.error.message ?? 'This field is required.'}</p>}
+    </div>
+  )
+}
+
+function SwitchNode({ spec, ctx }: { spec: SwitchSpec; ctx: RenderContext }) {
+  const form = useFormContext<FormValues>() as UseFormReturn<FormValues> | null
+  const fieldValue = spec.fieldRef !== undefined ? getValueAtPath(ctx.record, spec.fieldRef) : undefined
+  const initialValue = fieldValue === undefined ? spec.defaultChecked ?? false : Boolean(fieldValue)
+  if (form && spec.name) return <RegisteredSwitch spec={spec} ctx={ctx} form={form} initialValue={initialValue} />
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <KitSwitch
+        defaultChecked={initialValue}
+        disabled={spec.disabled}
+        onCheckedChange={(next: boolean) => ctx.events.emit('change', { value: next })}
+      />
+      {spec.label}
+    </label>
+  )
+}
+
+function RegisteredSwitch({
+  spec,
+  ctx,
+  form,
+  initialValue,
+}: {
+  spec: SwitchSpec
+  ctx: RenderContext
+  form: UseFormReturn<FormValues>
+  initialValue: boolean
+}) {
+  const { field } = useController({
+    name: spec.name!,
+    control: form.control,
+    defaultValue: initialValue,
+    rules: { required: spec.required },
+  })
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <KitSwitch
+        checked={Boolean(field.value)}
+        disabled={spec.disabled}
+        onCheckedChange={(next: boolean) => {
+          field.onChange(next)
+          ctx.events.emit('change', { value: next })
+        }}
+      />
+      {spec.label}
+    </label>
   )
 }
 
@@ -579,27 +845,36 @@ function FormFooter({
   hideSubmitButton,
   busy,
   submitLabel,
+  cancelLabel,
+  onCancel,
   message,
   error,
 }: {
   hideSubmitButton?: boolean
   busy: boolean
   submitLabel?: string
+  cancelLabel?: string
+  onCancel?: () => void
   message?: string
   error?: string
 }) {
-  if (hideSubmitButton && !message && !error) return null
+  if (hideSubmitButton && !cancelLabel && !message && !error) return null
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      {!hideSubmitButton && (
-        <KitButton type="submit" size="sm" disabled={busy}>
-          {busy ? 'Saving…' : (submitLabel ?? 'Save')}
-        </KitButton>
-      )}
+    <div className="mt-3 flex items-center justify-end gap-2 border-t border-border pt-[var(--designkit-panel-gap)]">
       {(error ?? message) && (
-        <span className={error ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+        <span className={error ? 'mr-auto text-xs text-destructive' : 'mr-auto text-xs text-muted-foreground'}>
           {error ?? message}
         </span>
+      )}
+      {cancelLabel && (
+        <KitButton type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={busy} onClick={onCancel}>
+          {cancelLabel}
+        </KitButton>
+      )}
+      {!hideSubmitButton && (
+        <KitButton type="submit" size="sm" className="h-8 text-xs" disabled={busy}>
+          {busy ? 'Saving…' : (submitLabel ?? 'Save')}
+        </KitButton>
       )}
     </div>
   )
@@ -631,12 +906,14 @@ function ResourceForm({ spec, ctx }: { spec: FormSpec; ctx: RenderContext }) {
 
   return (
     <FormProvider {...form}>
-      <form id={spec.id} onSubmit={submit}>
+      <form id={spec.id} noValidate onSubmit={submit}>
         {ctx.slots.children()}
         <FormFooter
           hideSubmitButton={spec.hideSubmitButton}
           busy={busy}
           submitLabel={spec.submitLabel}
+          cancelLabel={spec.cancelLabel}
+          onCancel={() => ctx.events.emit('cancel')}
           message={message}
           error={error}
         />
@@ -783,7 +1060,7 @@ function FormView({ spec, ctx }: { spec: FormViewSpec; ctx: RenderContext }) {
 
   return (
     <FormProvider {...form}>
-      <form id={spec.id} onSubmit={submit}>
+      <form id={spec.id} noValidate onSubmit={submit}>
         {spec.sections.map((section) => (
           <div key={section.id} className="border-b border-border px-4 py-4 last:border-b-0">
             {section.label && <h3 className="mb-1 text-sm font-medium">{section.label}</h3>}
@@ -864,6 +1141,36 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     kinds: [
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitPageBreadcrumb',
+        level: ['organism'],
+        description:
+          'Route-aware breadcrumb content for PageTopBar. Use string items for plain hierarchy labels and {label, href} items for destinations that must navigate through real browser URLs.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['items'],
+          properties: {
+            items: {
+              type: 'array',
+              minItems: 1,
+              items: {
+                oneOf: [
+                  { type: 'string' },
+                  {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['label'],
+                    properties: { label: { type: 'string' }, href: { type: 'string' } },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        render: (resource) => <KitPageBreadcrumb items={(resource.spec as PageBreadcrumbSpec).items} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitPageTopBar',
         level: ['organism'],
         description:
@@ -880,6 +1187,12 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         },
         slotPolicy: {
           slots: {
+            left: {
+              min: 0,
+              max: 1,
+              accepts: ['PageBreadcrumb'],
+              description: 'Linked breadcrumb hierarchy. Prefer this over a plain left string for route destinations.',
+            },
             right: {
               min: 0,
               accepts: ['FilterControl', 'ActionButton'],
@@ -891,7 +1204,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           const spec = resource.spec as PageTopBarSpec
           return (
             <KitPageTopBar
-              left={spec.left}
+              left={ctx.slots.one('left') ?? spec.left}
               right={ctx.slots.one('right')}
               variant={spec.variant}
               height={spec.height}
@@ -899,6 +1212,220 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             />
           )
         },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitBrowse',
+        level: ['template'],
+        description:
+          'Consumer discovery page with filters in a sidebar and sort/result controls in a toolbar. Use for catalogs and faceted browsing; do not use for administrative CRUD tables.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
+            status: { type: 'string' },
+            sidebarTitle: { type: 'string' },
+            sidebarWidth: { type: 'string' },
+          },
+        },
+        slotPolicy: {
+          defaultSlot: {
+            min: 1,
+            acceptsLevels: ['organism', 'leaf'],
+            description: 'Catalog results, normally a card collection or other discovery-oriented collection view.',
+          },
+          slots: {
+            topBar: { min: 0, max: 1, accepts: ['PageTopBar'] },
+            status: { min: 0, max: 1, accepts: ['Badge'] },
+            actions: { min: 0, accepts: ['ActionButton'] },
+            sidebar: {
+              min: 1,
+              acceptsLevels: ['organism', 'leaf'],
+              description: 'Search and faceted filter controls owned by the catalog route.',
+            },
+            toolbar: {
+              min: 0,
+              acceptsLevels: ['organism', 'leaf'],
+              description: 'Sort, result count, and view controls; product-specific actions do not belong here.',
+            },
+            footer: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as BrowseSpec
+          return (
+            <KitBrowse
+              title={spec.title}
+              description={spec.description}
+              status={spec.status ?? ctx.slots.one('status')}
+              sidebarTitle={spec.sidebarTitle}
+              sidebarWidth={spec.sidebarWidth}
+              topBar={ctx.slots.one('topBar')}
+              actions={ctx.slots.one('actions')}
+              sidebar={ctx.slots.one('sidebar')}
+              toolbar={ctx.slots.one('toolbar')}
+              footer={ctx.slots.one('footer')}
+            >
+              {ctx.slots.children()}
+            </KitBrowse>
+          )
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitDetailBody',
+        level: ['template'],
+        description:
+          'Linkable full-page entity destination. Use for articles, products, or complex records that need their own route; never nest it inside another page template or substitute a Sheet for long content.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            variant: { enum: ['media', 'record', 'full'] },
+            eyebrow: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            status: { type: 'string' },
+            stickyAside: { type: 'boolean' },
+          },
+        },
+        slotPolicy: {
+          defaultSlot: {
+            min: 0,
+            accepts: ['DetailBodyTab', 'DetailBodySection', 'DataBodyGroup', 'DetailView', 'Text', 'Panel'],
+            description: 'Detail route content. Use DetailBodyTab siblings for tabs or DetailBodySection children for visible sections.',
+          },
+          slots: {
+            topBar: { min: 0, max: 1, accepts: ['PageTopBar'] },
+            status: { min: 0, max: 1, accepts: ['Badge'] },
+            actions: { min: 0, accepts: ['ActionButton'] },
+            lead: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+            media: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+            aside: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+            summary: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+          },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as DetailSpec
+          return (
+            <KitDetail
+              variant={spec.variant}
+              eyebrow={spec.eyebrow}
+              title={spec.title}
+              description={spec.description}
+              status={spec.status ?? ctx.slots.one('status')}
+              stickyAside={spec.stickyAside}
+              topBar={ctx.slots.one('topBar')}
+              actions={ctx.slots.one('actions')}
+              lead={ctx.slots.one('lead')}
+              media={ctx.slots.one('media')}
+              aside={ctx.slots.one('aside')}
+              summary={ctx.slots.one('summary')}
+            >
+              {detailBodyChildren(ctx)}
+            </KitDetail>
+          )
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitDetailBodyTab',
+        level: ['organism'],
+        description: 'One switchable tab directly beneath a DetailBody route template.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'label'],
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            count: { type: 'number' },
+            disabled: { type: 'boolean' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0, accepts: ['DetailBodySection', 'DetailView', 'Text', 'Panel'] } },
+        render: (_resource, ctx) => <>{ctx.slots.children()}</>,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitDetailBodySection',
+        level: ['organism'],
+        description: 'A visible semantic section inside DetailBody content or a DetailBodyTab.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
+            surface: { enum: ['plain', 'card', 'bordered'] },
+          },
+        },
+        slotPolicy: {
+          defaultSlot: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+          slots: { actions: { min: 0, accepts: ['ActionButton'] } },
+        },
+        render: (resource, ctx) => {
+          const spec = resource.spec as DetailSectionSpec
+          return (
+            <KitDetailSection
+              title={spec.title}
+              description={spec.description}
+              surface={spec.surface}
+              actions={ctx.slots.one('actions')}
+            >
+              {ctx.slots.children()}
+            </KitDetailSection>
+          )
+        },
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitFormWizard',
+        level: ['template'],
+        description:
+          'Multi-step route template for ordered provisioning or create/edit work that cannot fit the canonical stacked form. Step movement is local or connected through bindings.activeStep; finish is dispatched through the finish event policy.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string' },
+            variant: { enum: ['card', 'plain'] },
+            activeStep: { type: 'integer', minimum: 0 },
+          },
+        },
+        slotPolicy: {
+          defaultSlot: { min: 1, accepts: ['FormWizardStep'] },
+          slots: {
+            topBar: { min: 0, max: 1, accepts: ['PageTopBar'] },
+            status: { min: 0, max: 1, accepts: ['Badge'] },
+          },
+        },
+        bindingPolicy: {
+          inputs: {
+            activeStep: { description: 'Zero-based active step.', schema: { type: 'integer' }, writable: true },
+          },
+        },
+        render: (resource, ctx) => <FormWizardNode spec={resource.spec as FormWizardSpec} ctx={ctx} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitFormWizardStep',
+        level: ['organism'],
+        description: 'One named step inside FormWizard. It is not a standalone page or form boundary.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['key', 'title'],
+          properties: {
+            key: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+          },
+        },
+        slotPolicy: { defaultSlot: { min: 0, acceptsLevels: ['organism', 'leaf'] } },
+        render: (_resource, ctx) => <>{ctx.slots.children()}</>,
       },
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
@@ -1091,6 +1618,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
               'DataBodyTab',
               'DataBodySection',
               'DataBodyBody',
+              'DataBodyResource',
               'ChartView',
               'ResourceForm',
               'FormView',
@@ -1152,6 +1680,49 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
       },
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitDataBodyResource',
+        level: ['organism'],
+        description:
+          'A resource-scoped boundary inside DataBody or one DataBodyTab. Keeps search/filters on the left, resource actions on the right, async notice/refresh state, content, and footer together without moving tab-specific controls into the page header.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            refreshing: { type: 'boolean' },
+            refreshingLabel: { type: 'string' },
+            className: { type: 'string' },
+            bodyClassName: { type: 'string' },
+          },
+        },
+        slotPolicy: {
+          defaultSlot: { min: 0, acceptsLevels: ['organism', 'leaf'], description: 'Resource data content.' },
+          slots: {
+            toolbarLeft: {
+              min: 0,
+              acceptsLevels: ['organism', 'leaf'],
+              description: 'Search first, followed by filters owned by this resource.',
+            },
+            toolbarRight: {
+              min: 0,
+              accepts: ['ActionButton'],
+              description: 'Create, export, and other actions owned by this resource.',
+            },
+            notice: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+            footer: { min: 0, acceptsLevels: ['organism', 'leaf'] },
+          },
+        },
+        bindingPolicy: {
+          inputs: {
+            refreshing: {
+              description: 'Whether an explicit refresh is in progress while existing content remains mounted.',
+              schema: { type: 'boolean' },
+            },
+          },
+        },
+        render: (resource, ctx) => <DataBodyResourceNode spec={resource.spec as DataBodyResourceSpec} ctx={ctx} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitDataBodyBody',
         level: ['organism'],
         description:
@@ -1190,7 +1761,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['TableView', 'ChartView', 'DataBodyGroup'],
+            accepts: ['DataBodyResource', 'TableView', 'ChartView', 'DataBodyGroup', 'ResourceForm', 'FormView', 'Sheet'],
             description: 'Content shown when this tab is active.',
           },
         },
@@ -1316,7 +1887,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['InputControl', 'Textarea', 'Checkbox', 'Select'],
+            accepts: ['InputControl', 'Textarea', 'Checkbox', 'Select', 'Switch'],
             description: 'The control for this row, typically InputControl (also Textarea/Checkbox/Select for those field types).',
           },
         },
@@ -1520,6 +2091,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             value: { type: 'string', description: 'A literal prefill value.' },
             fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
             required: { type: 'boolean' },
+            requiredMessage: { type: 'string' },
             disabled: { type: 'boolean' },
           },
         },
@@ -1548,6 +2120,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             value: { type: 'string', description: 'A literal prefill value.' },
             fieldRef: { type: 'string', description: 'Prefill from this dot-path into the nearest record scope.' },
             required: { type: 'boolean' },
+            requiredMessage: { type: 'string' },
             disabled: { type: 'boolean' },
             rows: { type: 'number' },
           },
@@ -1629,6 +2202,25 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
       },
       {
         apiVersion: 'resourcekit.dev/v1alpha1',
+        kind: 'DesignKitSwitch',
+        level: ['leaf'],
+        description: 'A controlled boolean setting. Inside ResourceForm it shares React Hook Form state; outside a form it emits a change event.',
+        specSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            label: { type: 'string' },
+            defaultChecked: { type: 'boolean' },
+            fieldRef: { type: 'string' },
+            required: { type: 'boolean' },
+            disabled: { type: 'boolean' },
+          },
+        },
+        render: (resource, ctx) => <SwitchNode spec={resource.spec as SwitchSpec} ctx={ctx} />,
+      },
+      {
+        apiVersion: 'resourcekit.dev/v1alpha1',
         kind: 'DesignKitSheet',
         level: ['organism'],
         description:
@@ -1643,7 +2235,11 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
           },
         },
         slotPolicy: {
-          defaultSlot: { min: 0, accepts: ['ResourceForm'], description: "The sheet's content." },
+          defaultSlot: {
+            min: 0,
+            accepts: ['ResourceForm', 'RecordScope', 'DetailView', 'Text'],
+            description: 'Concise secondary content. Ordinary create/edit forms should use a full DataBody route instead.',
+          },
         },
         bindingPolicy: {
           inputs: {
@@ -1670,7 +2266,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['DataBody', 'ResourceForm'],
+            accepts: ['DataBody', 'DetailBody', 'ResourceForm'],
             description: 'Content that reads from the fetched record via fieldRef.',
           },
         },
@@ -1692,12 +2288,13 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
             successMessage: { type: 'string' },
             id: { type: 'string', description: 'Rendered as the <form> id, so a host can place a submit button elsewhere via `form={id}`.' },
             hideSubmitButton: { type: 'boolean', description: 'Suppress the built-in submit button.' },
+            cancelLabel: { type: 'string', description: 'Optional secondary action rendered before submit; emits the cancel event.' },
           },
         },
         slotPolicy: {
           defaultSlot: {
             min: 0,
-            accepts: ['DataBodySection', 'DataBodyGroup', 'DataBodyRow', 'InputControl', 'Textarea', 'Checkbox', 'Select'],
+            accepts: ['DataBodySection', 'DataBodyGroup', 'DataBodyRow', 'InputControl', 'Textarea', 'Checkbox', 'Select', 'Switch'],
             description: "The form's fields, typically DataBodySection/DataBodyRow/InputControl.",
           },
         },
@@ -1754,10 +2351,18 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     ],
   },
   [
+    ['DesignKitPageBreadcrumb', 'PageBreadcrumb'],
     ['DesignKitPageTopBar', 'PageTopBar'],
+    ['DesignKitBrowse', 'Browse'],
+    ['DesignKitDetailBody', 'DetailBody'],
+    ['DesignKitDetailBodyTab', 'DetailBodyTab'],
+    ['DesignKitDetailBodySection', 'DetailBodySection'],
+    ['DesignKitFormWizard', 'FormWizard'],
+    ['DesignKitFormWizardStep', 'FormWizardStep'],
     ['DesignKitListDetail', 'ListDetail'],
     ['DesignKitWorkbench', 'Workbench'],
     ['DesignKitDataBody', 'DataBody'],
+    ['DesignKitDataBodyResource', 'DataBodyResource'],
     ['DesignKitDataBodyBody', 'DataBodyBody'],
     ['DesignKitDataBodyTab', 'DataBodyTab'],
     ['DesignKitDataBodySection', 'DataBodySection'],
@@ -1774,6 +2379,7 @@ export function createDesignKitPlugin(): ResourceKitPlugin<KindRenderFn> {
     ['DesignKitTextarea', 'Textarea'],
     ['DesignKitCheckbox', 'Checkbox'],
     ['DesignKitSelect', 'Select'],
+    ['DesignKitSwitch', 'Switch'],
     ['DesignKitSheet', 'Sheet'],
     ['DesignKitRecord', 'RecordScope'],
     ['DesignKitForm', 'ResourceForm'],
